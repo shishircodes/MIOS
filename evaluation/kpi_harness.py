@@ -225,7 +225,7 @@ def _print_kpi_table(agg: dict[str, float], runs: int) -> None:
         ("End-to-end batch latency (mean)",
          f"<= {KPI_TARGETS['end_to_end_latency_seconds']:.0f}s",
          f"{agg['mean_latency_seconds']:.2f}s "
-         f"(σ {agg['stdev_latency_seconds']:.2f}s)",
+         f"(stdev {agg['stdev_latency_seconds']:.2f}s)",
          "PASS" if agg["mean_latency_seconds"] <= KPI_TARGETS["end_to_end_latency_seconds"] else "FAIL"),
         ("API cost per run (Gemini)",
          "A$0.00 (free tier)",
@@ -236,7 +236,7 @@ def _print_kpi_table(agg: dict[str, float], runs: int) -> None:
          "[manual review pending]",
          "TBC"),
     ]
-    print("\n## §5.2 KPI Results\n")
+    print("\n## Section 5.2 KPI Results\n")
     print("| KPI | Target | Achieved | Status |")
     print("| --- | --- | --- | --- |")
     for kpi, target, achieved, status in rows:

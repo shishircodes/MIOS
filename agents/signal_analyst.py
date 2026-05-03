@@ -30,6 +30,10 @@ ALLOWED_CYCLES = {"weekly", "monthly", "quarterly"}
 
 FUZZY_THRESHOLD = 85
 
+# Inter-call sleep to stay under Gemini free-tier per-minute rate limit
+# (10 RPM on gemini-2.5-flash). 7s -> ~8.5 RPM steady-state.
+INTER_CALL_DELAY_SECONDS = 7.0
+
 
 # --------------------------------------------------------------------------
 # Pre-filtering (no LLM call)
@@ -165,9 +169,9 @@ def _call_with_retry(
     fn: Callable[[str, str], dict[str, Any]],
     system_prompt: str,
     user_prompt: str,
-    max_retries: int = 3,
+    max_retries: int = 5,
 ) -> dict[str, Any]:
-    delay = 2.0
+    delay = 8.0
     for attempt in range(max_retries + 1):
         try:
             return fn(system_prompt, user_prompt)
@@ -266,6 +270,8 @@ def classify_pending(
                 watchlist_companies=watchlist_canonicals,
                 raw_content=raw,
             )
+            if counts.get("classified", 0) > 0:
+                time.sleep(INTER_CALL_DELAY_SECONDS)
             try:
                 payload = _call_with_retry(gemini_caller, SYSTEM_PROMPT, user_prompt)
             except Exception as exc:  # noqa: BLE001
