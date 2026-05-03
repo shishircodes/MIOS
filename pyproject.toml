@@ -1,0 +1,32 @@
+[project]
+name = "mios-poc"
+version = "0.1.0"
+description = "MIOS Mode Monitor - Proof of Concept (Easy Skill Australia)"
+requires-python = ">=3.11"
+dependencies = [
+    "python-dotenv>=1.0.1",
+    "google-genai>=0.3.0",
+    "apify-client>=1.7.1",
+    "httpx>=0.27.0",
+    "rapidfuzz>=3.9.0",
+    "requests>=2.32.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.2.0",
+    "pytest-mock>=3.14.0",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["config*", "scraper*", "loader*", "agents*", "delivery*", "evaluation*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-q"
