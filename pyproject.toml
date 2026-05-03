@@ -6,8 +6,8 @@ requires-python = ">=3.11"
 dependencies = [
     "python-dotenv>=1.0.1",
     "google-genai>=0.3.0",
-    "apify-client>=1.7.1",
-    "httpx>=0.27.0",
+    "crawlee[beautifulsoup]>=0.4.0",
+    "beautifulsoup4>=4.12.0",
     "rapidfuzz>=3.9.0",
     "requests>=2.32.0",
 ]
