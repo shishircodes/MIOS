@@ -9,6 +9,7 @@ import pytest
 from scraper.pngworkforce import parse_listing, scrape
 
 FIXTURE = Path(__file__).parent / "fixtures" / "pngworkforce_listing.html"
+REAL_FIXTURE = Path(__file__).parent / "fixtures" / "pngworkforce_real_listing.html"
 
 
 @pytest.fixture
@@ -67,6 +68,20 @@ def test_parse_listing_captured_at_is_iso_utc(html):
 def test_scrape_returns_empty_on_invalid_url():
     assert scrape(limit=10, base_url="not-a-url") == []
     assert scrape(limit=10, base_url="") == []
+
+
+def test_parse_listing_real_pngworkforce_html():
+    html = REAL_FIXTURE.read_text(encoding="utf-8")
+    records = parse_listing(html,
+                            source_url="https://www.pngworkforce.com/jobs/view-latest-jobs",
+                            base_url="https://www.pngworkforce.com")
+    assert len(records) == 3
+    # Each card should produce title + company + absolute URL + raw_content
+    for r in records:
+        assert r["title"]
+        assert r["company"]
+        assert r["source_url"].startswith("https://www.pngworkforce.com/jobs/view/")
+        assert "|" in r["raw_content"]
 
 
 def test_scrape_returns_empty_when_crawler_raises():

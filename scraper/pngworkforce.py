@@ -38,18 +38,26 @@ def _now_iso() -> str:
 def parse_listing(html: str, source_url: str, base_url: str | None = None) -> list[dict[str, Any]]:
     """Parse a PNGworkforce-style listing page into raw signal dicts.
 
-    Heuristic — looks for common job-card patterns. If structure changes,
-    returns the items it can find (possibly empty) and logs a debug note.
+    Targets the live PNGworkforce HTML structure (`div.job-result`) plus a few
+    common fallback patterns. If structure changes, returns whatever it can
+    find (possibly empty) and the calling pipeline continues on synthetic data.
     """
     soup = BeautifulSoup(html, "html.parser")
     base_url = base_url or source_url
 
+    # Live PNGworkforce listing structure: div.job-result, with title + link
+    # in .col2 h4.t2 a, and the first <p> containing "<date> ... <Company - Location>".
+    cards = soup.select("div.job-result")
+    if cards:
+        return _parse_pngworkforce_cards(cards, base_url, source_url)
+
+    # Fallback: generic patterns for unrelated job-board HTML (kept so the
+    # synthetic test fixture and other sites still parse).
     cards = soup.select(
         "article.job, article.job-listing, div.job-card, div.job-listing, "
         "li.job-result, .job-item, .vacancy-item"
     )
     if not cards:
-        # Fall back to any <article> with a heading + link
         cards = [a for a in soup.find_all("article") if a.find(["h2", "h3"]) and a.find("a")]
 
     out: list[dict[str, Any]] = []
@@ -84,6 +92,55 @@ def parse_listing(html: str, source_url: str, base_url: str | None = None) -> li
     return out
 
 
+def _parse_pngworkforce_cards(cards, base_url: str, source_url: str) -> list[dict[str, Any]]:
+    """Parser specialised for div.job-result on pngworkforce.com."""
+    out: list[dict[str, Any]] = []
+    for card in cards:
+        title_link = card.select_one("h4.t2 a") or card.select_one("h4 a") or card.find("a", href=True)
+        title = title_link.get_text(strip=True) if title_link else None
+        href = title_link["href"] if (title_link and title_link.has_attr("href")) else None
+        full_url = urljoin(base_url, href) if href else None
+
+        # First <p> in .col2 carries date + company + location across <strong>s
+        meta_p = card.select_one(".col2 p") or card.find("p")
+        company = location = posted = None
+        if meta_p:
+            strongs = [s.get_text(" ", strip=True) for s in meta_p.find_all("strong")]
+            # strongs typically: ["03 May 2026", "K92 Mining Inc. - Eastern Highlands, Eastern Highlands"]
+            for s in strongs:
+                if not posted and any(ch.isdigit() for ch in s) and len(s) <= 30 and "*" not in s:
+                    posted = s
+                elif " - " in s and not company:
+                    parts = s.split(" - ", 1)
+                    company = parts[0].strip()
+                    location = parts[1].strip() if len(parts) == 2 else None
+
+        # Description preview is the second <p>
+        body_paras = card.select(".col2 p")
+        body = body_paras[1].get_text(" ", strip=True) if len(body_paras) > 1 else None
+        if not body:
+            body = card.get_text(" ", strip=True)
+
+        raw_parts = [p for p in (title, company, location, body) if p]
+        raw_content = " | ".join(raw_parts)
+        if not raw_content or not title:
+            continue
+
+        out.append({
+            "source_url": full_url or source_url,
+            "raw_content": raw_content,
+            "captured_at": _now_iso(),
+            "title": title,
+            "location": location,
+            "company": company,
+            "posted": posted,
+        })
+
+    log.info("parse_listing: parsed %d job cards from %s (pngworkforce mode)",
+             len(out), source_url)
+    return out
+
+
 # --------------------------------------------------------------------------
 # Live fetch (Apify / crawlee). Best-effort, returns [] on any failure.
 # --------------------------------------------------------------------------
@@ -114,6 +171,10 @@ async def _crawl_async(base_url: str, limit: int) -> list[dict[str, Any]]:
 
 def scrape(limit: int = 200, base_url: str | None = None) -> list[dict[str, Any]]:
     """Scrape up to `limit` job postings from PNGworkforce. Returns [] on any error."""
+    # Explicit empty string means "no URL" — don't fall back to settings.
+    if base_url == "":
+        log.warning("scrape: base URL is empty")
+        return []
     target = base_url or settings.pngworkforce_base_url
     if not target:
         log.warning("scrape: no base URL configured")
