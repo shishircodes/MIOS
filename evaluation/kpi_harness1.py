@@ -31,12 +31,10 @@ log = logging.getLogger(__name__)
 RESULTS_CSV = REPO_ROOT / "results.csv"
 
 # KPI targets (from §5.2 of the report).
-# NOTE: With batching + 6.5s throttling, latency scales with API calls.
-# 20 API calls (100 signals) ≈ 130s minimum. Adjust target for your batch size.
 KPI_TARGETS = {
     "signal_classification_accuracy_pct": 80.0,
     "watchlist_match_precision_pct": 90.0,
-    "end_to_end_latency_seconds": 180.0,   # raised for batching + free-tier throttling
+    "end_to_end_latency_seconds": 60.0,
     "api_cost_aud": 0.0,
 }
 
@@ -123,19 +121,6 @@ def _name_matches(predicted: str | None, expected: str | None) -> bool:
 
 
 # --------------------------------------------------------------------------
-# Quota reset (evaluation fairness)
-# --------------------------------------------------------------------------
-
-
-def _reset_daily_quota(db_path: Path) -> None:
-    """Clear the daily API call counter so each evaluation run gets a fresh quota."""
-    with sqlite3.connect(db_path) as conn:
-        conn.execute("DELETE FROM kv_store WHERE key LIKE 'gemini_api_calls_%'")
-        conn.commit()
-        log.debug("Reset daily Gemini quota counter")
-
-
-# --------------------------------------------------------------------------
 # Run orchestration
 # --------------------------------------------------------------------------
 
@@ -148,8 +133,8 @@ def run_evaluation(
     db_path = Path(db_path or settings.db_path)
     gt_path = Path(ground_truth_path or settings.synthetic_postings_path)
     ground_truth = load_ground_truth(gt_path)
-    n_gt = len(ground_truth)
-    log.info("KPI harness: %d runs against %d ground-truth records", runs, n_gt)
+    log.info("KPI harness: %d runs against %d ground-truth records",
+             runs, len(ground_truth))
 
     init_db(db_path)
     per_run: list[dict[str, Any]] = []
@@ -157,17 +142,14 @@ def run_evaluation(
     for i in range(1, runs + 1):
         log.info("---- Run %d/%d ----", i, runs)
         wipe_signals(db_path)
-        _reset_daily_quota(db_path)  # <-- each run gets full 20 API calls
         ingest([_to_signal_record(g) for g in ground_truth], db_path)
 
         t0 = time.perf_counter()
-        counts = classify_pending(db_path, batch_size=n_gt)
+        counts = classify_pending(db_path, batch_size=len(ground_truth))
         latency = time.perf_counter() - t0
 
         scored = score_run(db_path, ground_truth)
-        api_calls = int(counts.get("api_calls_made", 0))
-        quota_exhausted = int(counts.get("quota_exhausted", 0))
-
+        api_calls = int(counts.get("classified", 0)) + int(counts.get("errors", 0))
         per_run.append({
             "run": i,
             "classification_accuracy_pct": round(scored["classification_accuracy_pct"], 2),
@@ -175,7 +157,6 @@ def run_evaluation(
             "latency_seconds": round(latency, 2),
             "api_calls": api_calls,
             "api_cost_aud": 0.0,  # gemini-2.5-flash free tier
-            "quota_exhausted": quota_exhausted,
             "filtered_too_short": int(counts.get("filtered_too_short", 0)),
             "filtered_blocklist": int(counts.get("filtered_blocklist", 0)),
             "errors": int(counts.get("errors", 0)),
@@ -207,7 +188,6 @@ def _aggregate(per_run: list[dict[str, Any]]) -> dict[str, float]:
                   max(r["filtered_too_short"] + r["filtered_blocklist"]
                       + r["n_scored"] + r["errors"], 1)) * 100.0
                  for r in per_run), 2),
-        "total_quota_exhausted": sum(r["quota_exhausted"] for r in per_run),
     }
 
 
@@ -228,7 +208,6 @@ def _write_csv(per_run: list[dict[str, Any]], aggregates: dict[str, float]) -> N
         agg_row["latency_seconds"] = aggregates["mean_latency_seconds"]
         agg_row["api_calls"] = aggregates["total_api_calls"]
         agg_row["api_cost_aud"] = aggregates["total_api_cost_aud"]
-        agg_row["quota_exhausted"] = aggregates["total_quota_exhausted"]
         w.writerow(agg_row)
     log.info("results written: %s", RESULTS_CSV)
 
@@ -252,10 +231,6 @@ def _print_kpi_table(agg: dict[str, float], runs: int) -> None:
          "A$0.00 (free tier)",
          f"A$0.00 ({agg['total_api_calls']} calls / {runs} runs)",
          "PASS"),
-        ("Quota exhaustion events",
-         "0",
-         str(agg.get("total_quota_exhausted", 0)),
-         "PASS" if agg.get("total_quota_exhausted", 0) == 0 else "WARN"),
         ("Slack digest quality",
          "Reviewer rating >= 4/5",
          "[manual review pending]",

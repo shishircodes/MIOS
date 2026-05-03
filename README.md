@@ -94,8 +94,26 @@ Then edit `.env`:
 
 ## Run the pipeline
 
-The KPI harness orchestrates the full pipeline against the labelled
-synthetic dataset (`data/synthetic_postings.jsonl`).
+There are **two** entry points, for different purposes:
+
+### Live production-style cycle: `pipeline.live`
+
+Scrapes PNGworkforce live, classifies new postings via Gemini, builds + posts
+the weekly digest. **No scoring** — use this for real demos.
+
+```bash
+python -m pipeline.live                           # full cycle (scrape limit 50)
+python -m pipeline.live --limit 20                # cap scrape to 20 postings
+python -m pipeline.live --no-scrape               # classify pending only + post
+python -m pipeline.live --no-slack                # build digest without Slack
+python -m pipeline.live --days 14                 # widen digest window
+```
+
+### KPI evaluation harness: `evaluation.kpi_harness`
+
+Loads the labelled synthetic dataset (`data/synthetic_postings.jsonl`),
+classifies, scores against ground truth, writes `results.csv`, posts digest.
+**Use this for §5.2 numbers in the report.**
 
 ```bash
 python -m evaluation.kpi_harness                  # 5 evaluation runs + Slack digest
