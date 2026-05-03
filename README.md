@@ -7,11 +7,6 @@ designed for industrial recruitment company **Easy Skill Australia**.
 This PoC implements the four-stage Monitor pipeline end-to-end on a single
 data source (PNGworkforce) and demonstrates the contract for the rest of MIOS.
 
-> **AI assistance disclosure.** The PoC scaffolding was built with assistance
-> from **Claude Code** (Anthropic). All architectural decisions, prompt design,
-> dataset curation, KPI definitions, and final review were authored by the
-> project team. See the wider project report for the Assessment 2 brief.
-
 ---
 
 ## What this PoC does
