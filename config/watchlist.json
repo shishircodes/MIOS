@@ -1,0 +1,142 @@
+[
+  {
+    "company_name": "BHP",
+    "tier": "A",
+    "sector": "mining",
+    "notes": "Major iron ore + copper operator; Pilbara, Olympic Dam, Escondida.",
+    "aliases": ["BHP Group", "BHP Billiton", "Broken Hill Proprietary"]
+  },
+  {
+    "company_name": "Rio Tinto",
+    "tier": "A",
+    "sector": "mining",
+    "notes": "Iron ore, aluminium, copper; Pilbara hub.",
+    "aliases": ["Rio Tinto Group", "Rio Tinto Iron Ore", "RTIO"]
+  },
+  {
+    "company_name": "Newmont",
+    "tier": "A",
+    "sector": "mining",
+    "notes": "Gold; operates Lihir mine in PNG post-Newcrest acquisition.",
+    "aliases": ["Newmont Mining", "Newmont Lihir", "Newmont Corporation", "Newcrest Lihir"]
+  },
+  {
+    "company_name": "Barrick",
+    "tier": "A",
+    "sector": "mining",
+    "notes": "Gold/copper; Porgera mine PNG operator.",
+    "aliases": ["Barrick Gold", "Barrick Niugini", "Porgera Joint Venture", "BNL"]
+  },
+  {
+    "company_name": "TotalEnergies",
+    "tier": "A",
+    "sector": "oil_gas",
+    "notes": "Operator of the Papua LNG project (PNG).",
+    "aliases": ["Total", "TotalEnergies EP PNG", "Papua LNG"]
+  },
+  {
+    "company_name": "ExxonMobil",
+    "tier": "A",
+    "sector": "oil_gas",
+    "notes": "PNG LNG project operator.",
+    "aliases": ["Exxon", "Esso", "ExxonMobil PNG", "EMPNG", "PNG LNG"]
+  },
+  {
+    "company_name": "Glencore",
+    "tier": "A",
+    "sector": "mining",
+    "notes": "Diversified mining + trading; copper, zinc, coal.",
+    "aliases": ["Glencore Plc", "Glencore Australia", "Glencore Coal"]
+  },
+  {
+    "company_name": "Downer",
+    "tier": "A",
+    "sector": "construction",
+    "notes": "Integrated services contractor across mining, energy, infrastructure.",
+    "aliases": ["Downer EDI", "Downer Group", "Downer Mining"]
+  },
+  {
+    "company_name": "Monadelphous",
+    "tier": "A",
+    "sector": "construction",
+    "notes": "Engineering construction + maintenance, resources sector focus.",
+    "aliases": ["Monadelphous Group", "Mondelphous"]
+  },
+  {
+    "company_name": "Ok Tedi",
+    "tier": "A",
+    "sector": "mining",
+    "notes": "PNG copper/gold mine operator (Ok Tedi Mining Ltd).",
+    "aliases": ["Ok Tedi Mining", "OTML", "Ok Tedi Mining Limited"]
+  },
+  {
+    "company_name": "Vale",
+    "tier": "B",
+    "sector": "mining",
+    "notes": "Brazilian iron ore + nickel major; selective AU/PNG presence.",
+    "aliases": ["Vale S.A.", "Vale Australia", "Vale Brasil"]
+  },
+  {
+    "company_name": "Eramet",
+    "tier": "B",
+    "sector": "mining",
+    "notes": "Nickel + manganese; Weda Bay, New Caledonia.",
+    "aliases": ["Eramet Group", "Eramet SA"]
+  },
+  {
+    "company_name": "Saipem",
+    "tier": "B",
+    "sector": "oil_gas",
+    "notes": "Italian EPC contractor for offshore + LNG.",
+    "aliases": ["Saipem S.p.A.", "Saipem Australia"]
+  },
+  {
+    "company_name": "Technip",
+    "tier": "B",
+    "sector": "oil_gas",
+    "notes": "Subsea/LNG EPC; now TechnipFMC and TechnipEnergies.",
+    "aliases": ["TechnipFMC", "Technip Energies", "TechnipEnergies"]
+  },
+  {
+    "company_name": "Subsea7",
+    "tier": "B",
+    "sector": "oil_gas",
+    "notes": "Subsea engineering and installation contractor.",
+    "aliases": ["Subsea 7", "Subsea7 S.A.", "Subsea7 Australia"]
+  },
+  {
+    "company_name": "Aurecon",
+    "tier": "B",
+    "sector": "construction",
+    "notes": "Engineering + advisory; resources, energy, infrastructure.",
+    "aliases": ["Aurecon Group", "Aurecon Australia"]
+  },
+  {
+    "company_name": "Vinci",
+    "tier": "B",
+    "sector": "construction",
+    "notes": "French construction + concessions multinational.",
+    "aliases": ["Vinci Construction", "Vinci SA", "Vinci Group"]
+  },
+  {
+    "company_name": "Thales",
+    "tier": "C",
+    "sector": "defence",
+    "notes": "Defence electronics; AU presence via Thales Australia.",
+    "aliases": ["Thales Group", "Thales Australia"]
+  },
+  {
+    "company_name": "Safran",
+    "tier": "C",
+    "sector": "defence",
+    "notes": "Aerospace + defence systems.",
+    "aliases": ["Safran Group", "Safran SA"]
+  },
+  {
+    "company_name": "Eiffage",
+    "tier": "C",
+    "sector": "construction",
+    "notes": "French construction + concessions; civil works indicator.",
+    "aliases": ["Eiffage Construction", "Eiffage SA", "Eiffage Group"]
+  }
+]
