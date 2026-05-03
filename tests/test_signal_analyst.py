@@ -120,8 +120,12 @@ def test_coerce_invalid_enums_falls_back():
 # ---------- classify_pending end-to-end (Gemini mocked) ----------
 
 def _fake_caller_factory(payload: dict):
-    def _call(_sys, _user):
-        return payload
+    """The signal_analyst now batches calls and expects a list response per call.
+    The fake returns one copy of `payload` for every signal in the prompt."""
+    def _call(_sys, user_prompt, schema=None, **_kwargs):
+        # Count how many signals were sent in this batch by counting "Signal" markers
+        n = max(1, user_prompt.upper().count("SIGNAL "))
+        return [dict(payload) for _ in range(n)]
     return _call
 
 

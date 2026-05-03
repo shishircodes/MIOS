@@ -37,7 +37,7 @@ MAX_SIGNAL_CHARS = 3000           # truncate long raw_content to save tokens
 
 # Throttle: 6.5s between calls is plenty when you only get 20/day,
 # but keeps you under the per-minute burst limit too.
-MIN_SECONDS_BETWEEN_CALLS = 6.5
+MIN_SECONDS_BETWEEN_CALLS = 13
 
 # --------------------------------------------------------------------------
 # Throttling

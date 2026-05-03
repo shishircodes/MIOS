@@ -33,8 +33,11 @@ def db(tmp_path: Path, watchlist_file: Path) -> Path:
 
 
 def _fake_gemini(payload: dict):
-    def _call(_sys, _user):
-        return dict(payload)
+    """signal_analyst batches multiple signals into a single Gemini call and
+    expects a list response, one item per signal in the prompt."""
+    def _call(_sys, user_prompt, schema=None, **_kwargs):
+        n = max(1, user_prompt.upper().count("SIGNAL "))
+        return [dict(payload) for _ in range(n)]
     return _call
 
 
