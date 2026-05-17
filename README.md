@@ -1,4 +1,4 @@
-# MIOS Mode Monitor — Proof of Concept
+# MIOS Mode Monitor — Proof of Concept & Documents 
 
 A working proof of concept for **Mode Monitor**, the first of three modes in the
 **Market Intelligence Operating System (MIOS)** — a multi-agent AI pipeline
