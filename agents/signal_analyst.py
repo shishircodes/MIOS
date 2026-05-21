@@ -32,8 +32,12 @@ FUZZY_THRESHOLD = 85
 
 # Free-tier hard limits (as of 2026-05 for gemini-2.5-flash / flash-lite)
 DAILY_API_CALL_LIMIT = 20
-SIGNALS_PER_API_CALL = 5          # batch size per single Gemini call
+# One batch = whole working set. Set high so a full 80-record run uses 1 quota slot.
+# Gemini 2.5 Flash handles ~1M input tokens; the output cap is what limits us, so we
+# also raise max_output_tokens on the GenerateContentConfig below.
+SIGNALS_PER_API_CALL = 100
 MAX_SIGNAL_CHARS = 3000           # truncate long raw_content to save tokens
+MAX_OUTPUT_TOKENS = 32000         # ~150 tok/record × 100 records, with headroom
 
 # Throttle: 6.5s between calls is plenty when you only get 20/day,
 # but keeps you under the per-minute burst limit too.
@@ -220,6 +224,7 @@ def _build_gemini_caller() -> Callable[..., dict[str, Any]]:
                 response_mime_type="application/json",
                 response_schema=schema or SINGLE_RESPONSE_SCHEMA,
                 temperature=0.1,
+                max_output_tokens=MAX_OUTPUT_TOKENS,
             ),
         )
         return json.loads(response.text)
