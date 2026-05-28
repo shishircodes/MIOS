@@ -30,3 +30,17 @@ results.csv
 Thumbs.db
 .claude/
 storage/
+
+# Web app
+web/node_modules/
+web/.output/
+web/.nitro/
+web/.tanstack/
+web/dist/
+web/.vite/
+web/src/routeTree.gen.ts
+
+# Local run logs
+api_server.log
+web/dev.log
+smoke.log
