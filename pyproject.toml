@@ -20,6 +20,11 @@ dev = [
 api = [
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.30.0",
+    # Google Sign-In. Authlib handles the OIDC discovery, PKCE, state/nonce and
+    # ID-token (JWKS) verification - none of which should be hand-rolled.
+    "authlib>=1.3.0",
+    "httpx>=0.27.0",
+    "itsdangerous>=2.2.0",  # signs the session cookie (Starlette SessionMiddleware)
 ]
 
 [build-system]
@@ -28,7 +33,10 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["config*", "scraper*", "loader*", "agents*", "delivery*", "evaluation*"]
+include = [
+    "config*", "scraper*", "loader*", "agents*", "delivery*", "evaluation*",
+    "api*", "pipeline*",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -169,8 +169,13 @@ async def _crawl_async(base_url: str, limit: int) -> list[dict[str, Any]]:
     return collected
 
 
-def scrape(limit: int = 200, base_url: str | None = None) -> list[dict[str, Any]]:
-    """Scrape up to `limit` job postings from PNGworkforce. Returns [] on any error."""
+async def scrape_async(limit: int = 200, base_url: str | None = None) -> list[dict[str, Any]]:
+    """Async core of `scrape`. Returns [] on any error.
+
+    `scraper.scrape_all` awaits this directly so every source shares one event
+    loop — crawlee binds global state (storage client locks) to the loop that
+    first touches it, so a second `asyncio.run` in the same process fails.
+    """
     # Explicit empty string means "no URL" — don't fall back to settings.
     if base_url == "":
         log.warning("scrape: base URL is empty")
@@ -186,7 +191,15 @@ def scrape(limit: int = 200, base_url: str | None = None) -> list[dict[str, Any]
         return []
 
     try:
-        return asyncio.run(_crawl_async(target, limit))
+        return await _crawl_async(target, limit)
     except Exception as exc:  # noqa: BLE001 - brief mandates graceful failure
         log.warning("scrape: crawl failed (%s) — returning empty list", exc)
         return []
+
+
+def scrape(limit: int = 200, base_url: str | None = None) -> list[dict[str, Any]]:
+    """Scrape up to `limit` job postings from PNGworkforce. Returns [] on any error.
+
+    Sync entry point for single-source use (tests, `python -m scraper.pngworkforce`).
+    """
+    return asyncio.run(scrape_async(limit=limit, base_url=base_url))

@@ -48,7 +48,7 @@ def test_live_cycle_scrape_classify_post(db, monkeypatch):
         {"source_url": "https://x/job/2",
          "raw_content": "Heavy Diesel Fitter at Ok Tedi Mining Limited (OTML), Tabubil PNG."},
     ]
-    monkeypatch.setattr("pipeline.live.scrape", lambda **_kw: fake_records)
+    monkeypatch.setattr("pipeline.live.scrape_all", lambda **_kw:fake_records)
     # Force settings to point at the test DB and a non-placeholder webhook
     monkeypatch.setattr("pipeline.live.settings",
                         type("S", (), {"db_path": db,
@@ -93,7 +93,7 @@ def test_live_cycle_scrape_classify_post(db, monkeypatch):
 
 def test_live_cycle_scrape_failure_still_posts_digest(db, monkeypatch):
     # Scraper returns nothing — but a previously-classified row exists
-    monkeypatch.setattr("pipeline.live.scrape", lambda **_kw: [])
+    monkeypatch.setattr("pipeline.live.scrape_all", lambda **_kw:[])
     monkeypatch.setattr("pipeline.live.settings",
                         type("S", (), {"db_path": db,
                                        "slack_webhook_url": "https://hooks.slack.com/services/T/X/Y"})())

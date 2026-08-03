@@ -34,7 +34,7 @@ export const matches = [
 
 export const sources = [
   { name: 'pngworkforce', type: 'Apify', region: 'PNG', last: '07:02 AEST', records: 150, sla: 'OK', uptime: '100%' },
-  { name: 'seek.com.au', type: 'Apify', region: 'AU', last: '07:08 AEST', records: 581, sla: 'OK', uptime: '98%' },
+  { name: 'au.seek.com', type: 'Apify', region: 'AU', last: '07:08 AEST', records: 581, sla: 'OK', uptime: '98%' },
   { name: 'au.indeed.com', type: 'Apify', region: 'AU', last: '07:11 AEST', records: 248, sla: 'OK', uptime: '96%' },
   { name: 'LinkedIn Jobs', type: 'Phantom', region: 'AU', last: '06:54 AEST', records: 142, sla: 'WARN', uptime: '82%' },
   { name: 'ASX Announcements', type: 'API', region: 'AU', last: '07:01 AEST', records: 18, sla: 'OK', uptime: '100%' },

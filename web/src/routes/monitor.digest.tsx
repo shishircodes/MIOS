@@ -3,6 +3,8 @@ import { createFileRoute } from '@tanstack/react-router'
 import { useState } from 'react'
 import { Drawer, Icons, Section, SparkBar, TierChip, Trend } from '~/components/ui'
 import { digestQueryOptions } from '~/lib/api'
+import { UnauthenticatedError } from '~/lib/auth'
+import { useAuth } from '~/lib/auth-context'
 import type { Signal } from '~/lib/types'
 
 export const Route = createFileRoute('/monitor/digest')({
@@ -11,6 +13,7 @@ export const Route = createFileRoute('/monitor/digest')({
 
 function WeeklyDigest() {
   const { data, isLoading, isError, error } = useQuery(digestQueryOptions)
+  const { refresh } = useAuth()
   const [drawer, setDrawer] = useState<Signal | null>(null)
 
   if (isLoading) {
@@ -22,12 +25,26 @@ function WeeklyDigest() {
   }
 
   if (isError || !data) {
+    // A 401 here means the session expired while the tab was open. Re-checking
+    // the session flips AuthGate back to the sign-in screen.
+    if (error instanceof UnauthenticatedError) {
+      return (
+        <div className="page">
+          <div className="center-empty">
+            Your session has expired.
+            <div style={{ marginTop: 12 }}>
+              <button className="btn" onClick={() => void refresh()}>Sign in again</button>
+            </div>
+          </div>
+        </div>
+      )
+    }
     return (
       <div className="page">
         <div className="center-empty">
           Could not reach the backend.<br />
           <span style={{ color: 'var(--ink-3)' }}>
-            Start it with <code>uvicorn api.server:app --port 8787</code>
+            Start it with <code>python -m uvicorn api.server:app --port 8787</code>
           </span>
           <div style={{ marginTop: 10, color: 'var(--crimson)' }}>{String(error)}</div>
         </div>

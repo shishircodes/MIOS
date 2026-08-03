@@ -6,8 +6,9 @@ posts the resulting digest, with no scoring (no labels available for scraped
 postings).
 
 Usage:
-    python -m pipeline.live                       # full cycle: scrape + classify + Slack
-    python -m pipeline.live --limit 20            # scrape up to 20 postings
+    python -m pipeline.live                       # full cycle: all sources + classify + Slack
+    python -m pipeline.live --limit 20            # scrape up to 20 postings per source
+    python -m pipeline.live --source seek         # one source only
     python -m pipeline.live --no-scrape           # only classify pending + post
     python -m pipeline.live --no-slack            # skip Slack delivery
     python -m pipeline.live --days 14             # widen digest window
@@ -17,6 +18,7 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+from collections import Counter
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -26,7 +28,7 @@ from config.settings import configure_logging, settings
 from delivery.digest import build_digest
 from delivery.slack import post_digest
 from loader.ingest import ingest, init_db
-from scraper.pngworkforce import scrape
+from scraper import SOURCE_NAMES, scrape_all
 
 log = logging.getLogger(__name__)
 
@@ -36,6 +38,7 @@ def run_live_cycle(
     scrape_limit: int = 50,
     digest_window_days: int = 7,
     base_url: str | None = None,
+    sources: list[str] | None = None,
     db_path: str | Path | None = None,
     do_scrape: bool = True,
     do_slack: bool = True,
@@ -52,10 +55,12 @@ def run_live_cycle(
 
     scraped = 0
     inserted = 0
+    scraped_by_source: dict[str, int] = {}
     if do_scrape:
-        records = scrape(limit=scrape_limit, base_url=base_url)
+        records = scrape_all(limit=scrape_limit, sources=sources, base_url=base_url)
         scraped = len(records)
-        log.info("live: scraped %d postings", scraped)
+        scraped_by_source = dict(Counter(r.get("source_name", "unknown") for r in records))
+        log.info("live: scraped %d postings %s", scraped, scraped_by_source)
         if records:
             inserted = ingest(records, db_path)
         else:
@@ -85,6 +90,7 @@ def run_live_cycle(
 
     summary = {
         "scraped": scraped,
+        "scraped_by_source": scraped_by_source,
         "ingested": inserted,
         "classified": classified,
         "filtered_blocklist": int(classify_counts.get("filtered_blocklist", 0)),
@@ -104,7 +110,11 @@ def run_live_cycle(
 
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description="MIOS live production cycle")
-    p.add_argument("--limit", type=int, default=50, help="scrape limit (default 50)")
+    p.add_argument("--limit", type=int, default=50, help="per-source scrape limit (default 50)")
+    p.add_argument(
+        "--source", action="append", choices=list(SOURCE_NAMES), default=None,
+        help="scrape only this source (repeatable; default: all)",
+    )
     p.add_argument("--days", type=int, default=7, help="digest window in days (default 7)")
     p.add_argument("--no-scrape", action="store_true", help="skip scraping; classify pending only")
     p.add_argument("--no-slack", action="store_true", help="skip Slack delivery")
@@ -117,13 +127,16 @@ def main(argv: list[str] | None = None) -> int:
         scrape_limit=args.limit,
         digest_window_days=args.days,
         base_url=args.base_url,
+        sources=args.source,
         db_path=args.db,
         do_scrape=not args.no_scrape,
         do_slack=not args.no_slack,
     )
 
+    by_source = ",".join(f"{k}={v}" for k, v in sorted(summary["scraped_by_source"].items()))
     print(
-        f"\nscraped={summary['scraped']} "
+        f"\nscraped={summary['scraped']}"
+        f"{' (' + by_source + ')' if by_source else ''} "
         f"ingested={summary['ingested']} "
         f"classified={summary['classified']} "
         f"filtered={summary['filtered_blocklist'] + summary['filtered_too_short']} "

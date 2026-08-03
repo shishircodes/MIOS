@@ -6,10 +6,13 @@ import {
   Outlet,
   Scripts,
   createRootRouteWithContext,
+  useNavigate,
   useRouterState,
 } from '@tanstack/react-router'
 import type { ReactNode } from 'react'
+import { useEffect } from 'react'
 import { Icons } from '~/components/ui'
+import { AuthProvider, useAuth } from '~/lib/auth-context'
 import appCss from '~/styles/app.css?url'
 
 interface RouterContext {
@@ -65,12 +68,103 @@ const CRUMBS: Record<string, string[]> = {
   '/tokens': ['Admin', 'Tokens & cost'],
 }
 
+const SIGNIN_PATH = '/signin'
+const DEFAULT_LANDING = '/monitor/digest'
+
+/**
+ * Routes between the sign-in screen and the dashboard, and supplies the shell.
+ *
+ * Signed out, the browser is *redirected* to /signin rather than having the
+ * screen swapped in place — so the URL always reflects what's on screen, and
+ * the sign-in page is linkable and reloadable. The attempted path rides along
+ * in `?next=` so we can return there afterwards.
+ *
+ * This is the UX half of the gate: the enforcing half is `require_user` on the
+ * API, which 401s every data endpoint regardless of what the browser does. If
+ * this component were bypassed the shell would render empty, not leak anything.
+ */
+function AuthGate({ children }: { children: ReactNode }) {
+  const { status, session } = useAuth()
+  const navigate = useNavigate()
+  const { pathname, search } = useRouterState({
+    select: (s) => ({ pathname: s.location.pathname, search: s.location.search }),
+  })
+
+  const onSignIn = pathname === SIGNIN_PATH
+  // `unreachable` means the API is down; the sign-in screen explains that, so
+  // treat it like signed-out rather than showing a bare error over the shell.
+  const signedIn = status === 'ready' && !!session?.authenticated
+  const resolved = status !== 'loading'
+
+  useEffect(() => {
+    if (!resolved) return
+    if (!signedIn && !onSignIn) {
+      navigate({
+        to: SIGNIN_PATH,
+        search: { next: pathname, error: undefined, detail: undefined },
+        replace: true,
+      })
+    } else if (signedIn && onSignIn) {
+      const next = (search as { next?: string })?.next
+      navigate({ to: next ?? DEFAULT_LANDING, replace: true })
+    }
+  }, [resolved, signedIn, onSignIn, pathname, search, navigate])
+
+  if (!resolved) {
+    return <div className="signin-checking">Checking session…</div>
+  }
+  // /signin renders bare — no sidebar, no topbar.
+  if (onSignIn) {
+    return <>{children}</>
+  }
+  if (!signedIn) {
+    // Redirecting; render nothing rather than a flash of dashboard chrome.
+    return <div className="signin-checking">Redirecting to sign in…</div>
+  }
+  return <Shell>{children}</Shell>
+}
+
+function UserMenu() {
+  const { session, signOut } = useAuth()
+  const user = session?.user
+  if (!user) return null
+
+  // Letters only — a name like "Dev (auth disabled)" would otherwise render "D(".
+  const initials =
+    user.name
+      .split(/\s+/)
+      .map((p) => p.replace(/[^\p{L}]/gu, ''))
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((p) => p.charAt(0).toUpperCase())
+      .join('') || user.email.charAt(0).toUpperCase()
+
+  return (
+    <div className="who who-menu">
+      {user.picture ? (
+        <img className="avatar" src={user.picture} alt="" width={22} height={22} referrerPolicy="no-referrer" />
+      ) : (
+        <div className="avatar">{initials || '?'}</div>
+      )}
+      <span title={user.email}>{user.name.split(' ')[0]}</span>
+      <button className="signout" onClick={() => void signOut()}>Sign out</button>
+    </div>
+  )
+}
+
 function Shell({ children }: { children: ReactNode }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname })
   const crumbs = CRUMBS[pathname] ?? ['Mode Monitor', 'Weekly Digest']
+  const { session } = useAuth()
 
   return (
-    <div className="app">
+    <>
+      {session?.authDisabled && (
+        <div className="auth-off-bar">
+          AUTH_DISABLED — sign-in is bypassed. Development only.
+        </div>
+      )}
+      <div className={session?.authDisabled ? 'app has-auth-bar' : 'app'}>
       <div className="topbar">
         <div className="brand">
           <div className="brand-mark" />
@@ -90,10 +184,7 @@ function Shell({ children }: { children: ReactNode }) {
           <span className="kbd">⌘K</span>
         </div>
         <div className="week-badge">EASY SKILL · AU · PNG</div>
-        <div className="who">
-          <div className="avatar">JM</div>
-          <span>Jonathan</span>
-        </div>
+        <UserMenu />
       </div>
 
       <div className="sidebar">
@@ -125,7 +216,8 @@ function Shell({ children }: { children: ReactNode }) {
       </div>
 
       <div className="main">{children}</div>
-    </div>
+      </div>
+    </>
   )
 }
 
@@ -138,9 +230,13 @@ function RootComponent() {
   return (
     <RootDocument>
       <QueryClientProvider client={browserQueryClient}>
-        <Shell>
-          <Outlet />
-        </Shell>
+        <AuthProvider>
+          {/* AuthGate decides whether to wrap the route in the dashboard shell;
+              /signin renders bare. */}
+          <AuthGate>
+            <Outlet />
+          </AuthGate>
+        </AuthProvider>
       </QueryClientProvider>
     </RootDocument>
   )

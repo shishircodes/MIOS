@@ -31,7 +31,7 @@ Both need to be running. From the **repo root**:
 ### 1. Start the Python backend (FastAPI bridge)
 
 ```bash
-python -m pip install -e .[api]
+python -m pip install -e ".[api]"
 python -m uvicorn api.server:app --port 8787 --reload
 ```
 

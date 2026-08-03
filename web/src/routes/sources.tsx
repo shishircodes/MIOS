@@ -24,7 +24,7 @@ function SourcesScreen() {
         </div>
         <div className="meta">
           <div>{ok}/{sources.length} healthy</div>
-          <div style={{ marginTop: 4 }}>pngworkforce = live scraper</div>
+          <div style={{ marginTop: 4 }}>pngworkforce + au.seek.com = live scrapers</div>
         </div>
       </div>
 

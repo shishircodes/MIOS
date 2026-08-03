@@ -1,52 +1,112 @@
 """FastAPI bridge between the MIOS Python pipeline and the TanStack web app.
 
 Run:
-    uvicorn api.server:app --reload --port 8787
+    python -m uvicorn api.server:app --reload --port 8787
+
+Every endpoint that returns intelligence data requires a signed-in Easy Skill
+Google account (see api/auth.py). `/api/health` stays open so a load balancer or
+uptime check can hit it, but it deliberately reports nothing about the data.
 
 Endpoints:
-    GET /api/health   -> liveness + which data mode is active
-    GET /api/digest   -> structured weekly digest (live SQLite, or synthetic fallback)
+    GET  /api/health   -> liveness only (public)
+    GET  /api/me       -> current session (public; reports authenticated: false)
+    GET  /auth/login   -> start Google Sign-In
+    GET  /auth/callback-> OAuth redirect target
+    POST /auth/logout  -> clear the session
+    GET  /api/digest   -> structured weekly digest  [AUTH REQUIRED]
 """
 from __future__ import annotations
 
 import logging
+from contextlib import asynccontextmanager
+from typing import Any
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.sessions import SessionMiddleware
 
+from api.auth import check_google_client_id, require_user, router as auth_router
 from api.digest_service import build_digest_payload
 from config.settings import configure_logging, settings
 
 configure_logging()
 log = logging.getLogger("api.server")
 
-app = FastAPI(title="MIOS API", version="0.1.0")
 
-# Allow the Vite dev server (and a couple of common ports) to call us in dev.
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    # Defined below; resolved at call time, not at definition time.
+    _warn_on_insecure_config()
+    yield
+
+
+app = FastAPI(title="MIOS API", version="0.2.0", lifespan=lifespan)
+
+# Signed-cookie session. https_only is off for local dev over http; set
+# SESSION_HTTPS_ONLY once the app is served over TLS.
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=settings.session_secret,
+    max_age=settings.session_max_age,
+    same_site="lax",  # survives the top-level redirect back from Google
+    https_only=settings.web_app_url.startswith("https://"),
+)
+
+# The browser sends the session cookie cross-origin (web app :3000 -> api :8787),
+# so credentials must be allowed. That rules out the "*" wildcard: origins have
+# to be listed explicitly.
+ALLOWED_ORIGINS = sorted({
+    settings.web_app_url,
+    "http://localhost:3000",
+    "http://localhost:5173",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:5173",
+})
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://localhost:5173",
-        "http://127.0.0.1:3000",
-        "http://127.0.0.1:5173",
-    ],
-    allow_methods=["GET"],
+    allow_origins=ALLOWED_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
+
+app.include_router(auth_router)
+
+
+def _warn_on_insecure_config() -> None:
+    if settings.auth_disabled:
+        log.warning(
+            "=" * 72 + "\n"
+            "AUTH_DISABLED=true — the MIOS API is serving data with NO sign-in.\n"
+            "This is a local development convenience. Never run this way.\n"
+            + "=" * 72
+        )
+    elif not settings.oauth_configured:
+        log.warning(
+            "GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET are not set — sign-in cannot "
+            "complete, so all data endpoints will return 401. See .env.example."
+        )
+    else:
+        for problem in check_google_client_id(settings.google_client_id):
+            log.error("GOOGLE_CLIENT_ID looks wrong: %s", problem)
+        if not settings.allowed_google_domain and not settings.allowed_emails:
+            log.warning(
+                "Neither ALLOWED_GOOGLE_DOMAIN nor ALLOWED_EMAILS is set — any Google "
+                "account will be able to sign in."
+            )
 
 
 @app.get("/api/health")
 def health() -> dict:
-    payload = build_digest_payload()
-    return {
-        "status": "ok",
-        "dataMode": payload["sourceMode"],
-        "db": str(settings.db_path),
-        "signals": len(payload["signals"]),
-    }
+    """Public liveness probe. Intentionally free of any pipeline data."""
+    return {"status": "ok", "authRequired": not settings.auth_disabled}
 
 
 @app.get("/api/digest")
-def digest() -> dict:
-    return build_digest_payload()
+def digest(user: dict[str, Any] = Depends(require_user)) -> dict:
+    log.info("api: /api/digest served to %s", user["email"])
+    payload = build_digest_payload()
+    # Handy for the dashboard footer, and previously exposed via /api/health.
+    payload["db"] = str(settings.db_path)
+    return payload
