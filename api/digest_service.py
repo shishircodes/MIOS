@@ -1,6 +1,7 @@
 """Shapes the Python pipeline's data into the structured digest the web UI expects.
 
-Reads classified signals from the pipeline's SQLite database. If the database has
+Reads classified signals from the pipeline's database (Neon PostgreSQL when
+DATABASE_URL is set, SQLite otherwise). If the database has
 no classified rows yet (e.g. a fresh checkout that hasn't run Gemini), it falls
 back to the labelled synthetic dataset so the UI always has rich data to render
 without spending Gemini quota.
@@ -10,14 +11,17 @@ This module is the contract between the LLM/Python backend and the TanStack web 
 from __future__ import annotations
 
 import json
-import sqlite3
-from collections import Counter, defaultdict
-from datetime import datetime, timezone
+import logging
+from collections import Counter
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
 from config.settings import settings
 from delivery.digest import infer_geography
+from loader.db import connect, is_postgres, resolve_target
+
+log = logging.getLogger(__name__)
 
 SECTOR_PRETTY = {
     "mining": "Mining",
@@ -47,24 +51,46 @@ def _confidence(row_index: int, tier: str | None, is_new: bool) -> int:
 
 
 # --------------------------------------------------------------------------
-# Source 1: classified rows in the live SQLite DB
+# Source 1: classified rows in the live database
 # --------------------------------------------------------------------------
 
 
-def _rows_from_db(db_path: Path) -> list[dict[str, Any]]:
-    if not db_path.exists():
+SELECT_SIGNALS = (
+    "SELECT signal_id, company_name, sector, signal_category, review_cycle, "
+    "watchlist_tier, is_new_prospect, raw_content, analysis_notes, source_name, "
+    "captured_at "
+    "FROM signals WHERE classified_at IS NOT NULL "
+)
+
+
+def _rows_from_db(
+    target: str | Path | None = None,
+    since: datetime | None = None,
+) -> list[dict[str, Any]]:
+    """Classified rows, newest first. `since` restricts to a capture window.
+
+    Returns [] rather than raising when the database isn't usable yet: the caller
+    falls back to the synthetic dataset, so a fresh checkout with no database
+    still renders a populated dashboard.
+
+    The window compares ISO-8601 UTC strings, which sort chronologically — the
+    same trick `delivery.digest` uses, and why `captured_at` stays TEXT.
+    """
+    resolved = resolve_target(target)
+    if not is_postgres(resolved) and not Path(resolved).exists():
         return []
-    with sqlite3.connect(db_path) as conn:
-        conn.row_factory = sqlite3.Row
-        try:
-            rows = conn.execute(
-                "SELECT signal_id, company_name, sector, signal_category, review_cycle, "
-                "watchlist_tier, is_new_prospect, raw_content, analysis_notes, source_name "
-                "FROM signals WHERE classified_at IS NOT NULL "
-                "ORDER BY captured_at DESC"
-            ).fetchall()
-        except sqlite3.OperationalError:
-            return []
+    try:
+        with connect(resolved) as conn:
+            if since is not None:
+                rows = conn.execute(
+                    SELECT_SIGNALS + "AND captured_at >= ? ORDER BY captured_at DESC",
+                    (since.isoformat(timespec="seconds"),),
+                ).fetchall()
+            else:
+                rows = conn.execute(SELECT_SIGNALS + "ORDER BY captured_at DESC").fetchall()
+    except Exception as exc:  # noqa: BLE001 - missing table, unreachable Neon, bad DSN
+        log.warning("digest: could not read signals (%s) — falling back to synthetic data", exc)
+        return []
     return [dict(r) for r in rows]
 
 
@@ -109,15 +135,42 @@ def _watchlist_tiers(path: Path) -> dict[str, str]:
 # --------------------------------------------------------------------------
 
 
-def build_digest_payload(db_path: Path | None = None) -> dict[str, Any]:
-    db_path = Path(db_path or settings.db_path)
-    tiers = _watchlist_tiers(settings.watchlist_path)
+DEFAULT_WINDOW_DAYS = 7
 
-    rows = _rows_from_db(db_path)
+
+def build_digest_payload(
+    db_path: str | Path | None = None,
+    days: int = DEFAULT_WINDOW_DAYS,
+) -> dict[str, Any]:
+    """Build the dashboard payload for the last `days` of captured signals.
+
+    Three outcomes, reported so the UI can be honest about which it got:
+
+    * signals in the window          -> sourceMode="live",      windowEmpty=False
+    * none in the window, some older -> sourceMode="live",      windowEmpty=True
+    * nothing classified at all      -> sourceMode="synthetic", windowEmpty=False
+
+    The middle case is why this isn't a plain time filter. A strict window would
+    blank the dashboard in any week the pipeline hasn't run; falling back to the
+    most recent signals keeps it useful, and `windowEmpty` tells the UI to say so
+    rather than passing stale rows off as this week's.
+    """
+    tiers = _watchlist_tiers(settings.watchlist_path)
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+
+    rows = _rows_from_db(db_path, since=since)
     source_mode = "live"
+    window_empty = False
+
+    if not rows:
+        # Nothing captured in the window — show the latest we do have, flagged.
+        rows = _rows_from_db(db_path)
+        window_empty = bool(rows)
+
     if not rows:
         rows = _rows_from_synthetic(settings.synthetic_postings_path)
         source_mode = "synthetic"
+        window_empty = False
         # Resolve tier from watchlist match for synthetic rows
         for r in rows:
             match = r.pop("_watchlist_match", None)
@@ -187,6 +240,11 @@ def build_digest_payload(db_path: Path | None = None) -> dict[str, Any]:
 
     return {
         "sourceMode": source_mode,
+        #: Length of the capture window these figures cover.
+        "windowDays": days,
+        #: True when the window held nothing and these are older signals instead.
+        #: The UI must say so rather than presenting them as this week's.
+        "windowEmpty": window_empty,
         "week": datetime.now(timezone.utc).strftime("WEEK %d %b %Y").upper(),
         "weekLabel": week_label,
         "generatedAt": datetime.now(timezone.utc).strftime("%a %d %b %Y · %H:%M UTC"),

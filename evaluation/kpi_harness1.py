@@ -12,7 +12,6 @@ import argparse
 import csv
 import json
 import logging
-import sqlite3
 import sys
 import time
 from datetime import datetime, timedelta, timezone
@@ -24,6 +23,7 @@ from agents.signal_analyst import classify_pending
 from config.settings import REPO_ROOT, configure_logging, settings
 from delivery.digest import build_digest
 from delivery.slack import post_digest
+from loader.db import connect, resolve_target
 from loader.ingest import init_db, ingest, wipe_signals
 
 log = logging.getLogger(__name__)
@@ -70,9 +70,8 @@ def _to_signal_record(gt: dict[str, Any]) -> dict[str, Any]:
 # --------------------------------------------------------------------------
 
 
-def _classified_rows(db_path: Path) -> list[sqlite3.Row]:
-    with sqlite3.connect(db_path) as conn:
-        conn.row_factory = sqlite3.Row
+def _classified_rows(db_path: Path | str | None) -> list:
+    with connect(db_path) as conn:
         return conn.execute(
             "SELECT signal_id, company_name, sector, signal_category, review_cycle, "
             "watchlist_tier, is_new_prospect FROM signals "
@@ -130,7 +129,7 @@ def run_evaluation(
     ground_truth_path: str | Path | None = None,
     runs: int = 5,
 ) -> dict[str, Any]:
-    db_path = Path(db_path or settings.db_path)
+    db_path = resolve_target(db_path)
     gt_path = Path(ground_truth_path or settings.synthetic_postings_path)
     ground_truth = load_ground_truth(gt_path)
     log.info("KPI harness: %d runs against %d ground-truth records",
@@ -265,7 +264,7 @@ def main(argv: list[str] | None = None) -> int:
             log.warning("SLACK_WEBHOOK_URL not configured — skipping Slack delivery")
         else:
             digest = build_digest(
-                db_path=settings.db_path,
+                db_path=resolve_target(),
                 since=datetime.now(timezone.utc) - timedelta(days=7),
             )
             ok = post_digest(settings.slack_webhook_url, digest)

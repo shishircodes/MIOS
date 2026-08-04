@@ -1,4 +1,13 @@
--- MIOS PoC schema. SQLite stand-in for production BigQuery.
+-- MIOS schema. One file serves both engines: Neon PostgreSQL in deployment and
+-- SQLite locally, written in the dialect subset they share.
+--
+-- Portability constraints to preserve when editing:
+--   * CREATE TABLE / INDEX IF NOT EXISTS  - both (Postgres 9.5+)
+--   * partial unique index (WHERE ...)    - both
+--   * TEXT timestamps in ISO-8601 UTC     - sorts correctly as a string, so no
+--                                           timestamptz/TEXT divergence
+--   * INTEGER for booleans (0/1)          - avoids BOOLEAN vs INTEGER mismatch
+-- Anything outside that subset needs two schemas; don't add it casually.
 
 CREATE TABLE IF NOT EXISTS signals (
     signal_id          TEXT PRIMARY KEY,

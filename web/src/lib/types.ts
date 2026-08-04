@@ -44,6 +44,12 @@ export interface NewName {
 
 export interface DigestPayload {
   sourceMode: 'live' | 'synthetic'
+  /** Which engine served this — e.g. "Neon PostgreSQL". Absent on older payloads. */
+  backend?: string
+  /** Length in days of the capture window these figures cover. */
+  windowDays: number
+  /** True when nothing was captured in the window and these are older signals. */
+  windowEmpty: boolean
   week: string
   weekLabel: string
   generatedAt: string

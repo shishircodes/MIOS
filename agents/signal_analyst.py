@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import json
 import logging
-import sqlite3
 import time
 from collections import Counter
 from datetime import datetime, timezone
@@ -19,6 +18,7 @@ from agents.prompts import (
     SYSTEM_PROMPT,
 )
 from config.settings import settings
+from loader.db import connect
 
 log = logging.getLogger(__name__)
 
@@ -66,7 +66,7 @@ def _throttle() -> None:
 # --------------------------------------------------------------------------
 
 
-def _ensure_kv_store(conn: sqlite3.Connection) -> None:
+def _ensure_kv_store(conn) -> None:
     conn.execute("CREATE TABLE IF NOT EXISTS kv_store (key TEXT PRIMARY KEY, value TEXT)")
 
 
@@ -74,19 +74,24 @@ def _daily_api_call_key() -> str:
     return f"gemini_api_calls_{datetime.now(timezone.utc).date().isoformat()}"
 
 
-def _get_daily_api_calls(conn: sqlite3.Connection) -> int:
+def _get_daily_api_calls(conn) -> int:
     row = conn.execute(
         "SELECT value FROM kv_store WHERE key = ?", (_daily_api_call_key(),)
     ).fetchone()
     return int(row[0]) if row and row[0] else 0
 
 
-def _increment_daily_api_calls(conn: sqlite3.Connection) -> None:
+def _increment_daily_api_calls(conn) -> None:
     key = _daily_api_call_key()
+    # The counter lives in a TEXT column, so the incremented integer has to be
+    # cast back to TEXT. SQLite's loose typing forgives the mismatch; Postgres
+    # rejects it outright ("column is of type text but expression is integer").
+    # `kv_store.value` refers to the pre-existing row on both engines.
     conn.execute(
         """
         INSERT INTO kv_store(key, value) VALUES(?, '1')
-        ON CONFLICT(key) DO UPDATE SET value = CAST(COALESCE(value, '0') AS INTEGER) + 1
+        ON CONFLICT(key) DO UPDATE
+        SET value = CAST(CAST(COALESCE(kv_store.value, '0') AS INTEGER) + 1 AS TEXT)
         """,
         (key,),
     )
@@ -116,7 +121,7 @@ def prefilter(raw_content: str) -> tuple[bool, str | None]:
 # --------------------------------------------------------------------------
 
 
-def _load_watchlist(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+def _load_watchlist(conn) -> list[dict[str, Any]]:
     rows = conn.execute(
         "SELECT company_name, tier, sector, aliases FROM watchlist"
     ).fetchall()
@@ -353,7 +358,7 @@ def classify_pending(
     if gemini_caller is None:
         gemini_caller = _build_gemini_caller()
 
-    with sqlite3.connect(db_path) as conn:
+    with connect(db_path) as conn:
         _ensure_kv_store(conn)
 
         # --- DAILY QUOTA CIRCUIT BREAKER ---

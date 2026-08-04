@@ -21,13 +21,14 @@ import logging
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
 from api.auth import check_google_client_id, require_user, router as auth_router
-from api.digest_service import build_digest_payload
+from api.digest_service import DEFAULT_WINDOW_DAYS, build_digest_payload
 from config.settings import configure_logging, settings
+from loader.db import backend_label
 
 configure_logging()
 log = logging.getLogger("api.server")
@@ -104,9 +105,13 @@ def health() -> dict:
 
 
 @app.get("/api/digest")
-def digest(user: dict[str, Any] = Depends(require_user)) -> dict:
-    log.info("api: /api/digest served to %s", user["email"])
-    payload = build_digest_payload()
-    # Handy for the dashboard footer, and previously exposed via /api/health.
-    payload["db"] = str(settings.db_path)
+def digest(
+    days: int = Query(DEFAULT_WINDOW_DAYS, ge=1, le=365, description="capture window in days"),
+    user: dict[str, Any] = Depends(require_user),
+) -> dict:
+    log.info("api: /api/digest served to %s (window=%dd)", user["email"], days)
+    payload = build_digest_payload(days=days)
+    # Name the engine, never the DSN — a Neon connection string embeds the
+    # password, so it must not reach the browser or a log line.
+    payload["backend"] = backend_label()
     return payload

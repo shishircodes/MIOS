@@ -10,6 +10,8 @@ dependencies = [
     "beautifulsoup4>=4.12.0",
     "rapidfuzz>=3.9.0",
     "requests>=2.32.0",
+    # Neon / PostgreSQL. Binary wheel avoids needing libpq + a compiler locally.
+    "psycopg[binary]>=3.2.0",
 ]
 
 [project.optional-dependencies]

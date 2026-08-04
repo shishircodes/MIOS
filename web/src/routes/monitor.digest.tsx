@@ -67,15 +67,30 @@ function WeeklyDigest() {
           <div style={{ marginTop: 6, display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
             <span className={`mode-banner ${data.sourceMode}`}>
               <span className={data.sourceMode === 'live' ? 'dot-ok' : 'dot-warn'} />
-              {data.sourceMode === 'live' ? 'Live · SQLite pipeline' : 'Synthetic dataset'}
+              {data.sourceMode === 'live'
+                ? `Live · ${data.backend ?? 'pipeline'}`
+                : 'Synthetic dataset'}
             </span>
           </div>
         </div>
       </div>
 
+      {/* Nothing captured in the window — say so rather than passing older
+          signals off as this week's. */}
+      {data.windowEmpty && (
+        <div className="window-notice">
+          <strong>No signals captured in the last {data.windowDays} days.</strong>{' '}
+          Showing the most recent signals instead — run{' '}
+          <code>python -m pipeline.live</code> for a fresh scrape.
+        </div>
+      )}
+
       {/* KPI strip */}
       <div className="kpi-row">
-        <Kpi label="Roles detected · 7d" kpi={data.kpis.rolesThisWeek} />
+        <Kpi
+          label={data.windowEmpty ? 'Roles detected · latest' : `Roles detected · ${data.windowDays}d`}
+          kpi={data.kpis.rolesThisWeek}
+        />
         <Kpi label="Key signals" kpi={data.kpis.newSignals} />
         <Kpi label="New Names" kpi={data.kpis.newNames} />
         <Kpi label="Mode Push queries" kpi={data.kpis.pushQueries} />
@@ -175,6 +190,7 @@ function WeeklyDigest() {
 
       <div style={{ textAlign: 'center', padding: '24px 0', fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--muted)', letterSpacing: '0.08em' }}>
         END OF DIGEST · DATA FROM MIOS PYTHON PIPELINE ({data.sourceMode.toUpperCase()})
+        {data.sourceMode === 'live' && ` · ${data.windowEmpty ? 'LATEST' : `LAST ${data.windowDays}D`}`}
       </div>
 
       <Drawer open={!!drawer} onClose={() => setDrawer(null)} title={drawer ? `Signal · ${drawer.id.slice(0, 12)}` : ''}>

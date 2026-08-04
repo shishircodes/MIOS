@@ -80,7 +80,8 @@ Then edit `.env`:
 | `GEMINI_API_KEY`        | https://aistudio.google.com → Get API key (free tier, no card required)         |
 | `SLACK_WEBHOOK_URL`     | https://api.slack.com/apps → Create App → Incoming Webhooks → activate + copy  |
 | `GEMINI_MODEL`          | Default `gemini-2.5-flash`                                                     |
-| `DB_PATH`               | Default `data/mios.db`                                                          |
+| `DATABASE_URL`          | Neon PostgreSQL connection string. Blank = use SQLite. See [Database](#database--neon-postgresql) |
+| `DB_PATH`               | SQLite fallback path. Default `data/mios.db`                                    |
 | `LOG_LEVEL`             | Default `INFO`                                                                  |
 | `PNGWORKFORCE_BASE_URL` | Default `https://www.pngworkforce.com`                                         |
 | `SEEK_BASE_URL`         | Default `https://au.seek.com`                                                   |
@@ -94,6 +95,86 @@ python -m pip install -e ".[api]"
 ```
 
 > ⚠️ `.env` is gitignored. Never commit it.
+
+---
+
+## Database — Neon PostgreSQL
+
+The pipeline runs on **Neon PostgreSQL** when `DATABASE_URL` is set, and falls
+back to a local **SQLite** file otherwise.
+
+Both are supported on purpose. Neon is the deployment target; SQLite keeps
+`pytest` runnable offline and lets someone clone the repo and run the whole
+pipeline without provisioning a database — reproducibility that a Postgres-only
+cut would have thrown away. `loader/db.py` is a thin adapter, not an ORM:
+modules still write plain SQL, and it handles the three things that actually
+differ (placeholder style, row access, duplicate-key errors).
+
+| | Set `DATABASE_URL` | Leave it blank |
+|---|---|---|
+| Backend | Neon PostgreSQL | SQLite at `DB_PATH` |
+| Used by | pipeline, API, digest, KPI harness | same |
+| Tests | never (see below) | always |
+
+### 1. Create the Neon database
+
+1. Sign up at [neon.tech](https://neon.tech) and create a project.
+2. **Connection Details → Connection string** → copy the **URI** (not the `psql`
+   command). Prefer the **pooled** endpoint — the hostname contains `-pooler` —
+   since the API opens a connection per request.
+3. Put it in `.env`:
+
+```
+DATABASE_URL=postgresql://USER:PASSWORD@ep-NAME-123.REGION.aws.neon.tech/DBNAME?sslmode=require
+```
+
+If the password contains `@`, `:`, `/` or `?`, percent-encode it (`@` → `%40`).
+`sslmode=require` is added automatically if you omit it — Neon refuses plaintext
+connections, and the failure without it is an opaque dropped connection rather
+than anything mentioning TLS.
+
+### 2. Check the connection
+
+```bash
+python -m loader.check
+```
+
+Reports the backend, server version and row counts. Add `--init` to create the
+schema. Run this before anything else — it separates "can I reach Neon?" from
+"does the pipeline work?", so a failure points at one thing rather than both.
+
+### 3. Move your existing data across
+
+```bash
+python -m loader.migrate --dry-run
+```
+
+```bash
+python -m loader.migrate
+```
+
+Copies `watchlist` and `signals` from the SQLite file into Neon. Idempotent —
+rows insert with `ON CONFLICT DO NOTHING`, so re-running after a partial failure
+tops up rather than duplicating. `--wipe` clears the target first.
+
+### Schema
+
+One `loader/schema.sql` serves both engines, written in the subset they share
+(`CREATE TABLE IF NOT EXISTS`, partial unique indexes, `ON CONFLICT … DO UPDATE`).
+Timestamps stay ISO-8601 `TEXT` rather than becoming `timestamptz`: the strings
+sort correctly and it keeps one schema instead of two.
+
+### Testing against PostgreSQL
+
+Parity tests exist but are skipped unless a server is configured, via a
+**separate** variable so a stray `pytest` cannot touch your Neon data:
+
+```bash
+TEST_DATABASE_URL=postgresql://... python -m pytest tests/test_db_postgres.py
+```
+
+They truncate tables between tests — point them at a scratch database, never one
+holding real signals.
 
 ---
 
@@ -298,7 +379,10 @@ scraper, so they run offline and are reproducible.
 │   ├── pngworkforce.py       ← Apify SDK (crawlee) scraper, fails gracefully
 │   └── seek.py               ← au.seek.com scraper, robots.txt-constrained
 ├── loader/
-│   ├── schema.sql            ← signals + watchlist DDL
+│   ├── db.py                 ← Neon PostgreSQL / SQLite adapter
+│   ├── schema.sql            ← signals + watchlist DDL (both engines)
+│   ├── check.py              ← `python -m loader.check` connectivity probe
+│   ├── migrate.py            ← `python -m loader.migrate` SQLite → Neon copy
 │   └── ingest.py             ← UUID + dedupe-on-source_url ingestion
 ├── api/
 │   ├── auth.py               ← Google Sign-In (OAuth2/OIDC) + require_user gate

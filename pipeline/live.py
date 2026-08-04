@@ -27,6 +27,7 @@ from agents.signal_analyst import classify_pending
 from config.settings import configure_logging, settings
 from delivery.digest import build_digest
 from delivery.slack import post_digest
+from loader.db import describe, resolve_target
 from loader.ingest import ingest, init_db
 from scraper import SOURCE_NAMES, scrape_all
 
@@ -50,7 +51,9 @@ def run_live_cycle(
     Returns a summary dict with scraped/ingested/classified counts and the
     digest text, plus a `slack_ok` boolean (False if Slack was skipped).
     """
-    db_path = Path(db_path or settings.db_path)
+    # resolve_target, not Path(): wrapping in Path would turn a Neon DSN into a
+    # (nonsensical) file path and silently write to SQLite instead.
+    db_path = resolve_target(db_path)
     init_db(db_path)
 
     scraped = 0
@@ -89,6 +92,7 @@ def run_live_cycle(
         log.info("live: --no-slack; skipping Slack delivery")
 
     summary = {
+        "database": describe(db_path),
         "scraped": scraped,
         "scraped_by_source": scraped_by_source,
         "ingested": inserted,

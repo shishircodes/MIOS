@@ -1,11 +1,12 @@
 """Weekly digest formatter. Produces Slack mrkdwn from classified signals."""
 from __future__ import annotations
 
-import sqlite3
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Iterable
+from typing import Any
+
+from loader.db import connect
 
 # Geography inference keywords (raw_content substring match, case-insensitive).
 PNG_KEYWORDS = (
@@ -39,7 +40,7 @@ def _header(week_of: datetime) -> str:
     return f":large_blue_circle: *MIOS Weekly Intelligence — Week of {week_of.strftime('%-d %B %Y') if hasattr(week_of, 'strftime') else week_of}*"
 
 
-def _key_signals_section(signals: list[sqlite3.Row], max_items: int = 10) -> str:
+def _key_signals_section(signals: list[Any], max_items: int = 10) -> str:
     """Group up to `max_items` of the most informative classified signals by geography."""
     # Prioritise: leadership > project > financial > competitive > hiring_velocity > market_intel
     rank = {"leadership": 0, "project": 1, "financial": 2, "competitive": 3,
@@ -76,7 +77,7 @@ def _key_signals_section(signals: list[sqlite3.Row], max_items: int = 10) -> str
     return "\n".join(lines)
 
 
-def _market_pulse_section(signals: list[sqlite3.Row]) -> str:
+def _market_pulse_section(signals: list[Any]) -> str:
     sectors = Counter(r["sector"] for r in signals if r["sector"])
     geos = Counter(infer_geography(r["raw_content"]) for r in signals)
     cycles = Counter(r["review_cycle"] for r in signals if r["review_cycle"])
@@ -104,7 +105,7 @@ def _market_pulse_section(signals: list[sqlite3.Row]) -> str:
     return "\n".join(bullets)
 
 
-def _hiring_velocity_section(signals: list[sqlite3.Row], top_n: int = 10) -> str:
+def _hiring_velocity_section(signals: list[Any], top_n: int = 10) -> str:
     counter: Counter[str] = Counter()
     sector_by_company: dict[str, str] = {}
     for r in signals:
@@ -130,7 +131,7 @@ def _hiring_velocity_section(signals: list[sqlite3.Row], top_n: int = 10) -> str
     return "\n".join(lines)
 
 
-def _new_names_section(signals: list[sqlite3.Row]) -> str:
+def _new_names_section(signals: list[Any]) -> str:
     rows = [r for r in signals if r["is_new_prospect"] and r["company_name"]]
     lines = [":new: *New Names (Not in Watchlist)*"]
     if not rows:
@@ -163,14 +164,16 @@ def _format_week_of(d: datetime) -> str:
     return s.lstrip("0")
 
 
-def build_digest(db_path: str | Path, since: datetime) -> str:
-    """Build a Slack-flavoured weekly digest covering classified signals since `since`."""
+def build_digest(db_path: str | Path | None, since: datetime) -> str:
+    """Build a Slack-flavoured weekly digest covering classified signals since `since`.
+
+    `db_path` may be a SQLite path, a Postgres DSN, or None to use configuration.
+    """
     if since.tzinfo is None:
         since = since.replace(tzinfo=timezone.utc)
     since_iso = since.isoformat(timespec="seconds")
 
-    with sqlite3.connect(db_path) as conn:
-        conn.row_factory = sqlite3.Row
+    with connect(db_path) as conn:
         signals = conn.execute(
             "SELECT signal_id, company_name, sector, signal_category, review_cycle, "
             "watchlist_tier, is_new_prospect, raw_content, analysis_notes, captured_at "

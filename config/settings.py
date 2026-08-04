@@ -19,6 +19,8 @@ class Settings:
     gemini_model: str
     slack_webhook_url: str
     db_path: Path
+    #: Neon/PostgreSQL DSN. When set it wins over db_path everywhere.
+    database_url: str
     log_level: str
     apify_token: str
     pngworkforce_base_url: str
@@ -84,6 +86,7 @@ def load_settings() -> Settings:
         gemini_model=_get("GEMINI_MODEL", "gemini-2.5-flash"),
         slack_webhook_url=_get("SLACK_WEBHOOK_URL"),
         db_path=db_path,
+        database_url=_get("DATABASE_URL"),
         log_level=_get("LOG_LEVEL", "INFO"),
         apify_token=_get("APIFY_TOKEN"),
         pngworkforce_base_url=_get("PNGWORKFORCE_BASE_URL", "https://www.pngworkforce.com"),

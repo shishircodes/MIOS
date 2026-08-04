@@ -301,3 +301,7 @@ input, textarea, select { font-family: inherit; }
 .who-menu .signout { font-family: var(--sans); font-size: 11.5px; color: var(--muted); background: none; border: none; cursor: pointer; padding: 2px 6px; border-radius: 6px; }
 .who-menu .signout:hover { background: var(--paper-2); color: var(--ink); }
 .app.has-auth-bar { height: calc(100vh - 26px); }
+
+/* Stale-window notice on the digest page */
+.window-notice { border: 1px solid rgba(214,162,10,0.35); background: var(--amber-bg); color: #6B4F00; border-radius: 10px; padding: 11px 14px; margin-bottom: 18px; font-size: 12.5px; line-height: 1.55; }
+.window-notice code { font-family: var(--mono); font-size: 11.5px; background: var(--surface); padding: 1px 5px; border-radius: 4px; border: 1px solid var(--line-2); }
