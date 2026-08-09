@@ -1,0 +1,53 @@
+# Local stack — builds both images from source.
+#
+#   docker compose up --build
+#
+# Dashboard  http://localhost:3000
+# API        http://localhost:8787
+#
+# This is for checking that the *production* containers work before you push,
+# not for day-to-day development: there is no hot reload here. Editing a file
+# does nothing until you rebuild. For normal work use `npm run dev` and
+# `python -m uvicorn api.server:app --reload --port 8787`, which reload on save.
+#
+# Configuration comes from your existing .env — the same file the native setup
+# uses, so DATABASE_URL points at the same Neon database.
+#
+# Google Sign-In works here. `localhost` is the one exception to Google's
+# "no plain HTTP redirect URIs" rule, so the http://localhost:8787/auth/callback
+# you already registered is valid.
+
+name: mios-local
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # Overrides for the container, in case .env carries deployment values.
+      # These are the URLs the *browser* uses, not internal service names.
+      WEB_APP_URL: http://localhost:3000
+      API_BASE_URL: http://localhost:8787
+      OAUTH_REDIRECT_URI: http://localhost:8787/auth/callback
+    ports:
+      - "8787:8787"
+
+  web:
+    build:
+      context: web
+      args:
+        # Baked into the client bundle at build time — changing it needs
+        # `docker compose build web`, not just a restart.
+        VITE_API_BASE: http://localhost:8787
+    restart: unless-stopped
+    depends_on:
+      api:
+        # Waits on the API's HEALTHCHECK, so the dashboard never comes up
+        # pointing at a backend that is still starting.
+        condition: service_healthy
+    ports:
+      - "3000:3000"

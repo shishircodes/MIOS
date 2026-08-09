@@ -9,7 +9,11 @@ export default defineConfig({
   plugins: [
     tsConfigPaths(),
     tailwindcss(),
-    tanstackStart({ customViteReactPlugin: true }),
+    // `customViteReactPlugin: true` used to tell tanstackStart not to inject its
+    // own React plugin. The option was removed upstream (it is no longer in any
+    // @tanstack type or bundle), so passing it was a no-op that failed tsc.
+    // The plugin no longer injects React, so listing viteReact() here is correct.
+    tanstackStart(),
     viteReact(),
   ],
 })

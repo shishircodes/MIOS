@@ -356,6 +356,257 @@ warning strip. **Never set this in a deployed environment.**
 
 ---
 
+## CI/CD, previews and deployment
+
+Four workflows in `.github/workflows/`:
+
+| Workflow | Trigger | What it does |
+|---|---|---|
+| `ci.yml` | every PR + push to `main` | pytest (against **both** SQLite and a real PostgreSQL service container), web typecheck + build, Docker image builds |
+| `pr-preview.yml` | PR opened/updated | Neon branch per PR, publishes images to GHCR, deploys a preview stack, comments the URLs |
+| `pr-cleanup.yml` | PR closed/merged | deletes the Neon branch, tears down the containers |
+| `deploy-main.yml` | `main` **after CI passes** | publishes images, applies the schema, deploys to the Hetzner VPS behind HTTPS |
+
+`deploy-main.yml` chains off CI with `workflow_run`, so a red build never reaches
+the server.
+
+`ci.yml` needs no secrets and runs on forks. The preview workflows degrade
+gracefully: until the VPS secrets exist, they still create the branch, build the
+images, and comment what *would* be deployed.
+
+### What a PR gets
+
+* **An isolated Neon branch** (`preview/pr-42`), copy-on-write from `main` — instant,
+  and starts with real data. Writes never touch production.
+* **Its own containers** on the VPS, ports derived from the PR number
+  (`30000+N` web, `40000+N` api) so concurrent previews never collide and the
+  URL stays stable across pushes.
+* **A comment** with both URLs, updated in place rather than spamming the thread.
+
+### Required GitHub configuration
+
+**Settings → Secrets and variables → Actions.**
+
+Variables (not secret):
+
+| Variable | Example | Needed for |
+|---|---|---|
+| `NEON_PROJECT_ID` | `crimson-lab-12345678` | Neon branching |
+| `NEON_PARENT_BRANCH` | `main` (default) | which branch to copy from |
+| `NEON_DB_USER` | `neondb_owner` (default) | branch connection string |
+| `NEON_DB_NAME` | `neondb` (default) | branch connection string |
+| `PREVIEW_HOST` | `203.0.113.10` or `preview.example.com` | deploying |
+| `DEPLOY_USER` | `deploy` (default) | deploying |
+
+Secrets:
+
+| Secret | Where to get it |
+|---|---|
+| `NEON_API_KEY` | Neon Console → Account settings → API keys |
+| `DEPLOY_SSH_KEY` | private half of a keypair whose public half is in the VPS's `~/.ssh/authorized_keys` |
+| `GEMINI_API_KEY` | only if you want previews to run classification |
+
+`GITHUB_TOKEN` is provided automatically — no setup for GHCR.
+
+### Production deployment (Hetzner VPS)
+
+While the project is early, `main` deploys straight to production — there is no
+separate staging tier.
+
+```
+                 Hetzner VPS
+  internet ─► [ your TLS layer ] ─► web  (SSR, :3000)
+                                 └► api  (FastAPI, :8787)
+```
+
+`docker-compose.prod.yml` runs the two app containers and publishes plain HTTP
+ports. **It does not terminate TLS** — you put something in front.
+
+#### TLS is required, and it is on you
+
+Google **rejects OAuth redirect URIs that are not `https`** (only `localhost` is
+exempt), so sign-in will not work until HTTPS is in front of the API. Pick one:
+
+| Option | How it works |
+|---|---|
+| **Cloudflare** (simplest) | Point your Namecheap domain's nameservers at Cloudflare, add A records for both hostnames, set SSL mode to *Full*. TLS terminates at the edge; the VPS stays plain HTTP. Free. |
+| **nginx + certbot on the host** | Terminate TLS on the VPS itself and proxy to `127.0.0.1:3000` / `127.0.0.1:8787`. Set `WEB_BIND`/`API_BIND` to `127.0.0.1` so the container ports are not exposed publicly. |
+| **A proxy container** | Add Traefik or nginx to `docker-compose.prod.yml` yourself. |
+
+Until then, deploys succeed and the app runs, but the dashboard cannot
+authenticate.
+
+#### DNS (Namecheap)
+
+Two hostnames, both A records pointing at the VPS IP:
+
+```
+mios.example.com      ->  <vps-ip>     # dashboard
+api.mios.example.com  ->  <vps-ip>     # API
+```
+
+Two names rather than one keeps the split simple without a reverse proxy in the
+compose file. They share a registrable domain, so the session cookie is still
+first-party; CORS is already configured from `WEB_APP_URL`.
+
+#### Provision the VPS
+
+On a fresh Hetzner box (Ubuntu 24.04):
+
+```bash
+sudo apt update && sudo apt install -y docker.io docker-compose-plugin
+```
+
+```bash
+sudo useradd -m -s /bin/bash deploy && sudo usermod -aG docker deploy
+```
+
+```bash
+sudo ufw allow 22 && sudo ufw allow 80 && sudo ufw allow 443 && sudo ufw enable
+```
+
+Add your CI deploy key to `/home/deploy/.ssh/authorized_keys`. If TLS terminates
+on the host, keep 3000/8787 closed and set `WEB_BIND=127.0.0.1` /
+`API_BIND=127.0.0.1`. If you go the Cloudflare route, those ports must be
+reachable — restrict them to Cloudflare's IP ranges rather than the whole world.
+
+#### Register the redirect URI with Google
+
+In the Cloud Console OAuth client, add **exactly**:
+
+```
+https://api.mios.example.com/auth/callback
+```
+
+It must match `PROD_API_URL` byte for byte — scheme, host, no trailing slash.
+
+#### Required GitHub configuration for production
+
+Variables:
+
+| Variable | Example |
+|---|---|
+| `PROD_HOST` | `5.75.130.42` (VPS IP, used for SSH) |
+| `PROD_WEB_URL` | `https://mios.example.com` |
+| `PROD_API_URL` | `https://api.mios.example.com` |
+| `DEPLOY_USER` | `deploy` (default) |
+| `ALLOWED_GOOGLE_DOMAIN` | `easyskill.com` |
+| `ALLOWED_EMAILS` | your account, while testing |
+
+Secrets:
+
+| Secret | Notes |
+|---|---|
+| `DEPLOY_SSH_KEY` | private half of the deploy keypair |
+| `PROD_DATABASE_URL` | Neon pooled connection string |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | from the Cloud Console |
+| `SESSION_SECRET` | `python -c "import secrets;print(secrets.token_urlsafe(48))"` |
+| `GEMINI_API_KEY`, `SLACK_WEBHOOK_URL` | optional |
+
+`PROD_WEB_URL` and `PROD_API_URL` are set explicitly rather than derived: they
+depend on your domain and on where TLS terminates. `PROD_API_URL` is also baked
+into the web bundle at build time and registered with Google, so a wrong value
+fails silently rather than loudly.
+
+#### Rolling back
+
+Every deploy tags images with the commit SHA as well as `main`. To go back, SSH
+in and point `.env` at an older SHA:
+
+```bash
+cd ~/mios && sed -i 's/:[0-9a-f]\{40\}/:<older-sha>/g' .env && docker compose -p mios -f docker-compose.prod.yml up -d
+```
+
+### Setting up a preview server
+
+Once you have a Linux box:
+
+```bash
+sudo apt update && sudo apt install -y docker.io docker-compose-plugin
+```
+
+```bash
+sudo useradd -m -s /bin/bash deploy && sudo usermod -aG docker deploy
+```
+
+Then generate a deploy key locally, add the **public** half to the server and the
+**private** half to `DEPLOY_SSH_KEY`:
+
+```bash
+ssh-keygen -t ed25519 -f mios-deploy -C "github-actions" -N ""
+```
+
+Open the preview port range on the firewall (`30000-30999`, `40000-40999`), set
+`PREVIEW_HOST`, and the next PR deploys automatically.
+
+### Sign-in is disabled on previews
+
+Google **does not accept wildcard redirect URIs**, so a per-PR hostname can't be
+registered in advance. Previews therefore run with `AUTH_DISABLED=true` — the API
+logs a banner and the dashboard shows a permanent warning strip.
+
+That means **anyone with the preview URL can read the dashboard**. The data is
+scraped public job ads, but if that isn't acceptable, restrict the port range to
+your own IP at the firewall. Production runs on one fixed URL, so it registers a
+single redirect URI and keeps auth on.
+
+### Upgrading previews to real hostnames
+
+The port-number scheme is deliberate: it needs no DNS. Once you own a domain, you
+can move previews to `pr-42.preview.example.com` by adding a wildcard `*.preview`
+A record, putting a reverse proxy in front, dropping the `ports:` blocks from
+`docker-compose.preview.yml` and adding routing labels. Nothing else changes.
+
+### Running the whole stack locally with Docker
+
+```bash
+docker compose up --build
+```
+
+Dashboard on <http://localhost:3000>, API on <http://localhost:8787>. Both images
+build from source, and configuration comes from your existing `.env` — same Neon
+database as the native setup.
+
+Google Sign-In works here: `localhost` is the one exception to Google's
+"no plain HTTP redirect URIs" rule, so the `http://localhost:8787/auth/callback`
+you already registered is valid.
+
+**This is not a replacement for `npm run dev`.** There is no hot reload — editing
+a file changes nothing until you rebuild. Use it to check the production
+containers work before pushing; use the native servers to actually write code.
+
+| | Docker | Native (`npm run dev` + `uvicorn --reload`) |
+|---|---|---|
+| Hot reload | ✗ | ✓ |
+| Matches production | ✓ | ✗ |
+| Needs Python/Node installed | ✗ | ✓ |
+| Start-up | ~2 min first build | seconds |
+
+Rebuild after changes:
+
+```bash
+docker compose up --build --force-recreate
+```
+
+> `VITE_API_BASE` is baked into the web bundle at **build** time, so pointing the
+> dashboard at a different API needs `docker compose build web`, not a restart.
+
+### Building the images individually
+
+```bash
+docker build -f Dockerfile.api -t mios-api .
+```
+
+```bash
+docker build --build-arg VITE_API_BASE=http://localhost:8787 -t mios-web web/
+```
+
+> `VITE_API_BASE` is baked in at **build** time — Vite inlines `import.meta.env`
+> into the client bundle, so it cannot be changed by setting an env var on the
+> running container. That's why the preview workflow rebuilds the web image per PR.
+
+---
+
 ## Run the tests
 
 ```bash
@@ -364,6 +615,14 @@ python -m pytest -q
 
 Tests use mocked Gemini (no live API calls) and a saved HTML fixture for the
 scraper, so they run offline and are reproducible.
+
+The PostgreSQL parity tests skip locally unless you point them at a scratch
+database. CI always runs them against a Postgres service container, so dialect
+bugs that only appear on Neon are caught on every PR:
+
+```bash
+TEST_DATABASE_URL=postgresql://... python -m pytest -q
+```
 
 ---
 

@@ -1,0 +1,45 @@
+# FastAPI bridge over the MIOS pipeline.
+#
+# Build from the repo root:
+#   docker build -f Dockerfile.api -t mios-api .
+#
+# The scraper and Gemini pipeline live in the same image, so the container can
+# also run `python -m pipeline.live` as a one-off job or cron task.
+
+FROM python:3.12-slim AS base
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1
+
+WORKDIR /app
+
+# Dependency metadata first so this layer caches across code-only changes.
+COPY pyproject.toml README.md ./
+# The packages listed in [tool.setuptools.packages.find] must exist for the
+# editable-style install to resolve; copy them before installing.
+COPY config ./config
+COPY scraper ./scraper
+COPY loader ./loader
+COPY agents ./agents
+COPY delivery ./delivery
+COPY evaluation ./evaluation
+COPY api ./api
+COPY pipeline ./pipeline
+
+RUN pip install --no-cache-dir ".[api]"
+
+COPY data/synthetic_postings.jsonl ./data/synthetic_postings.jsonl
+
+# Non-root: nothing here needs write access beyond /tmp.
+RUN useradd --create-home --uid 10001 mios && chown -R mios:mios /app
+USER mios
+
+EXPOSE 8787
+
+# Container health is "the API answers", not "the process exists" — /api/health
+# is public precisely so a probe can reach it without a session.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+    CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8787/api/health', timeout=4).status==200 else 1)"
+
+CMD ["uvicorn", "api.server:app", "--host", "0.0.0.0", "--port", "8787"]

@@ -1,0 +1,234 @@
+name: Deploy main
+
+# Every push to main goes to the Hetzner VPS. Treated as production while the
+# project is early — there is no separate staging tier.
+#
+# Runs only after CI passes, so a red build never reaches the server.
+#
+# Like the preview workflows, this degrades gracefully: with no PROD_HOST or
+# DEPLOY_SSH_KEY configured it skips, so the repo is safe to push before the
+# server exists.
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  # Never let two deploys race for the same docker compose project.
+  group: deploy-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE_BASE: ghcr.io/${{ github.repository }}
+
+jobs:
+  gate:
+    name: Should we deploy?
+    runs-on: ubuntu-latest
+    # workflow_run fires on failure too; only proceed when CI was green.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    outputs:
+      configured: ${{ steps.cfg.outputs.configured }}
+      web_url: ${{ steps.cfg.outputs.web_url }}
+      api_url: ${{ steps.cfg.outputs.api_url }}
+      sha: ${{ steps.cfg.outputs.sha }}
+    steps:
+      - id: cfg
+        env:
+          HOST: ${{ vars.PROD_HOST }}
+          WEB_URL: ${{ vars.PROD_WEB_URL }}
+          API_URL: ${{ vars.PROD_API_URL }}
+          HAS_SSH: ${{ secrets.DEPLOY_SSH_KEY != '' }}
+          # workflow_run carries the SHA of the triggering run, not of this one.
+          RUN_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+        run: |
+          set -euo pipefail
+          echo "sha=$RUN_SHA" >> "$GITHUB_OUTPUT"
+
+          if [ -z "$HOST" ] || [ "$HAS_SSH" != "true" ]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::PROD_HOST or DEPLOY_SSH_KEY not set — skipping deploy."
+            exit 0
+          fi
+
+          # The public URLs are set explicitly rather than derived: they depend on
+          # your domain and on where TLS terminates, which this workflow cannot
+          # know. They are also what gets baked into the web bundle and
+          # registered with Google, so guessing them would fail silently.
+          if [ -z "$WEB_URL" ] || [ -z "$API_URL" ]; then
+            echo "::error::Set the PROD_WEB_URL and PROD_API_URL variables (e.g. https://mios.example.com and https://api.mios.example.com)."
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+
+          case "$API_URL" in
+            https://*) ;;
+            *) echo "::warning::PROD_API_URL is not https. Google rejects non-https OAuth redirect URIs, so sign-in will fail until TLS is in front of the API." ;;
+          esac
+
+          # Trailing slashes would produce '//auth/callback' and break the exact
+          # redirect-URI match Google requires.
+          echo "web_url=${WEB_URL%/}" >> "$GITHUB_OUTPUT"
+          echo "api_url=${API_URL%/}" >> "$GITHUB_OUTPUT"
+          echo "configured=true" >> "$GITHUB_OUTPUT"
+
+  images:
+    name: Publish images
+    needs: gate
+    if: needs.gate.outputs.configured == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.gate.outputs.sha }}
+
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: API image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.api
+          push: true
+          # Both tags: `main` is what compose pulls, the SHA makes rollback possible.
+          tags: |
+            ${{ env.IMAGE_BASE }}/api:main
+            ${{ env.IMAGE_BASE }}/api:${{ needs.gate.outputs.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Web image
+        uses: docker/build-push-action@v6
+        with:
+          context: web
+          push: true
+          tags: |
+            ${{ env.IMAGE_BASE }}/web:main
+            ${{ env.IMAGE_BASE }}/web:${{ needs.gate.outputs.sha }}
+          build-args: |
+            VITE_API_BASE=${{ needs.gate.outputs.api_url }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  schema:
+    name: Apply schema to Neon
+    needs: gate
+    if: needs.gate.outputs.configured == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.gate.outputs.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: loader.check --init
+        env:
+          DATABASE_URL: ${{ secrets.PROD_DATABASE_URL }}
+        run: |
+          python -m pip install -e ".[api]"
+          # Idempotent: all DDL is IF NOT EXISTS, so this is a no-op unless the
+          # schema changed in this push.
+          python -m loader.check --init
+
+  deploy:
+    name: Deploy to VPS
+    needs: [gate, images, schema]
+    if: needs.gate.outputs.configured == 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: ${{ needs.gate.outputs.web_url }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.gate.outputs.sha }}
+
+      - name: Copy compose file
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ vars.PROD_HOST }}
+          username: ${{ vars.DEPLOY_USER || 'deploy' }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          source: "docker-compose.prod.yml"
+          target: ~/mios/
+
+      - name: Bring the stack up
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ vars.PROD_HOST }}
+          username: ${{ vars.DEPLOY_USER || 'deploy' }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            set -euo pipefail
+            cd ~/mios
+            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+            umask 077
+            cat > .env <<'ENVEOF'
+            WEB_APP_URL=${{ needs.gate.outputs.web_url }}
+            API_BASE_URL=${{ needs.gate.outputs.api_url }}
+            API_IMAGE=${{ env.IMAGE_BASE }}/api:${{ needs.gate.outputs.sha }}
+            WEB_IMAGE=${{ env.IMAGE_BASE }}/web:${{ needs.gate.outputs.sha }}
+            DATABASE_URL=${{ secrets.PROD_DATABASE_URL }}
+            GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}
+            SLACK_WEBHOOK_URL=${{ secrets.SLACK_WEBHOOK_URL }}
+            GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }}
+            GOOGLE_CLIENT_SECRET=${{ secrets.GOOGLE_CLIENT_SECRET }}
+            SESSION_SECRET=${{ secrets.SESSION_SECRET }}
+            ALLOWED_GOOGLE_DOMAIN=${{ vars.ALLOWED_GOOGLE_DOMAIN }}
+            ALLOWED_EMAILS=${{ vars.ALLOWED_EMAILS }}
+            ENVEOF
+
+            docker compose -p mios -f docker-compose.prod.yml pull
+            docker compose -p mios -f docker-compose.prod.yml up -d --remove-orphans
+            docker image prune -af --filter "until=168h" || true
+
+      - name: Wait for health
+        env:
+          API_URL: ${{ needs.gate.outputs.api_url }}
+        run: |
+          echo "Waiting for $API_URL/api/health ..."
+          for i in $(seq 1 24); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$API_URL/api/health" || true)
+            if [ "$code" = "200" ]; then
+              echo "healthy after $((i*5))s"
+              curl -s "$API_URL/api/health"; echo
+              exit 0
+            fi
+            echo "  attempt $i: HTTP $code"
+            sleep 5
+          done
+          echo "::error::Never became healthy. Check DNS, your TLS proxy, and: docker compose -p mios logs"
+          exit 1
+
+      - name: Summary
+        if: always()
+        env:
+          WEB_URL: ${{ needs.gate.outputs.web_url }}
+          API_URL: ${{ needs.gate.outputs.api_url }}
+        run: |
+          {
+            echo "### Deployed to production"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Dashboard | $WEB_URL |"
+            echo "| API | $API_URL/api/health |"
+            echo "| Commit | \`${{ needs.gate.outputs.sha }}\` |"
+            echo "| Rollback | point \`.env\` at an older SHA tag and re-run \`up -d\` |"
+          } >> "$GITHUB_STEP_SUMMARY"

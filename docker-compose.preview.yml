@@ -1,0 +1,49 @@
+# Per-PR preview stack. One of these runs per open pull request.
+#
+# Isolation comes from the compose project name, so nothing here is hardcoded to
+# a PR: the workflow sets `-p mios-pr-<N>` and passes the ports/URLs below.
+#
+#   PR_NUMBER=123 WEB_PORT=31023 API_PORT=41023 \
+#   DATABASE_URL=... IMAGE_TAG=pr-123 \
+#   docker compose -p mios-pr-123 -f docker-compose.preview.yml up -d
+#
+# Ports are derived from the PR number by the workflow (see pr-preview.yml) so
+# concurrent previews never collide. If you later put Traefik or nginx in front
+# with wildcard DNS, drop the `ports:` blocks and add routing labels instead —
+# see the README's "Upgrading previews to real hostnames".
+
+name: mios-preview
+
+services:
+  api:
+    image: ${API_IMAGE}
+    restart: unless-stopped
+    environment:
+      # Each PR gets its own Neon branch; the workflow injects the branch DSN.
+      DATABASE_URL: ${DATABASE_URL}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      WEB_APP_URL: ${WEB_APP_URL}
+      API_BASE_URL: ${API_BASE_URL}
+      # Previews run without Google Sign-In. Google does not accept wildcard
+      # redirect URIs, so a per-PR hostname cannot be registered in advance.
+      # The API logs a banner and the dashboard shows a permanent warning strip.
+      # Production sets this to false and registers its one fixed redirect URI.
+      AUTH_DISABLED: ${AUTH_DISABLED:-true}
+      SESSION_SECRET: ${SESSION_SECRET:-}
+      ALLOWED_GOOGLE_DOMAIN: ${ALLOWED_GOOGLE_DOMAIN:-}
+      ALLOWED_EMAILS: ${ALLOWED_EMAILS:-}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+    ports:
+      - "${API_PORT}:8787"
+
+  web:
+    image: ${WEB_IMAGE}
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "${WEB_PORT}:3000"
