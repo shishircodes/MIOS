@@ -4,8 +4,8 @@ A working proof of concept for **Mode Monitor**, the first of three modes in the
 **Market Intelligence Operating System (MIOS)** — a multi-agent AI pipeline
 designed for industrial recruitment company **Easy Skill Australia**.
 
-This PoC implements the four-stage Monitor pipeline end-to-end on a single
-data source (PNGworkforce) and demonstrates the contract for the rest of MIOS.
+This PoC implements the four-stage Monitor pipeline end-to-end across three
+data sources and demonstrates the contract for the rest of MIOS.
 
 ---
 
@@ -15,7 +15,7 @@ data source (PNGworkforce) and demonstrates the contract for the rest of MIOS.
 ┌─────────────────────┐   ┌──────────────┐   ┌──────────────────┐   ┌─────────────────┐
 │ 1. Scrape           │   │ 2. Store     │   │ 3. Classify      │   │ 4. Deliver      │
 │ scraper/            │ ─ │ loader/      │ ─ │ agents/          │ ─ │ delivery/       │
-│ pngworkforce · seek │   │ ingest.py    │   │ signal_analyst   │   │ slack.py        │
+│ png · seek · adzuna │   │ ingest.py    │   │ signal_analyst   │   │ slack.py        │
 └─────────────────────┘   └──────────────┘   └──────────────────┘   └─────────────────┘
                                                        │
                                                        ▼
@@ -26,8 +26,8 @@ data source (PNGworkforce) and demonstrates the contract for the rest of MIOS.
                                        └─────────────────────────────────┘
 ```
 
-1. **Scrape** job postings from `pngworkforce.com` (PNG) and `au.seek.com` (AU)
-   via the Apify SDK / `crawlee`. See [Data sources](#data-sources).
+1. **Scrape** job postings from `pngworkforce.com` (PNG), `au.seek.com` (AU)
+   and the Adzuna API (AU). See [Data sources](#data-sources).
 2. **Store** raw + processed signals in a local SQLite database.
 3. **Classify** each signal with **Google Gemini 2.5 Flash** —
    `signal_category`, `review_cycle`, watchlist match (fuzzy via `rapidfuzz`),
@@ -180,10 +180,20 @@ holding real signals.
 
 ## Data sources
 
-| Source | Module | Geography | Records/run |
+| Source | Module | Geography | How |
 |---|---|---|---|
-| PNGworkforce | `scraper/pngworkforce.py` | PNG | listing pages |
-| SEEK | `scraper/seek.py` | AU | ~32 per category path |
+| PNGworkforce | `scraper/pngworkforce.py` | PNG | HTML listing pages |
+| SEEK | `scraper/seek.py` | AU | HTML cards, ~32 per category path |
+| Adzuna | `scraper/adzuna.py` | AU | **JSON API**, one search per watchlist company |
+
+**Adzuna is the simplest of the three and the only one that isn't scraping.** It
+calls a documented API with a free key, so there are no robots.txt carve-outs to
+honour, no selectors to break on a redesign, and no terms-of-use tension. It also
+searches by keyword, so it asks directly about watchlist companies rather than
+browsing a category and hoping they appear — much stronger input for the hiring
+velocity table. Set `ADZUNA_APP_ID` / `ADZUNA_APP_KEY` from
+[developer.adzuna.com](https://developer.adzuna.com/); leave them blank and the
+source is skipped while the other two still run.
 
 Both expose the same contract — `parse_listing(html, source_url, base_url)` (pure,
 fixture-testable) and `scrape_async(limit, base_url)` (never raises; returns `[]`

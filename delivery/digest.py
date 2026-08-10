@@ -40,39 +40,78 @@ def _header(week_of: datetime) -> str:
     return f":large_blue_circle: *MIOS Weekly Intelligence — Week of {week_of.strftime('%-d %B %Y') if hasattr(week_of, 'strftime') else week_of}*"
 
 
+#: Signal categories, most newsworthy first. A leadership change says more about
+#: an employer's direction than another routine vacancy, so it earns a slot first.
+SIGNAL_RANK = {
+    "leadership": 0, "project": 1, "financial": 2,
+    "competitive": 3, "hiring_velocity": 4, "market_intel": 5,
+}
+
+#: Region display order. Anything outside this list is appended after these.
+REGION_ORDER = ("AU", "PNG")
+
+
+def rank_signal(category: str | None, weight: int) -> tuple[int, int]:
+    """Sort key: category importance first, longer content as the tiebreak."""
+    return (SIGNAL_RANK.get(category or "hiring_velocity", 9), -weight)
+
+
+def interleave_regions(buckets: dict[str, list], limit: int) -> list:
+    """Take up to `limit` items round-robin across regions.
+
+    Replaces "fill from AU, then PNG if any budget is left". That shared counter
+    meant a busy AU week consumed the entire quota and Papua New Guinea vanished
+    from the digest — not because it had no signals, but because it was second in
+    the loop. Round-robin guarantees every region with data is represented, and
+    because each bucket is pre-sorted, the items taken are still its strongest.
+    """
+    order = [r for r in REGION_ORDER if buckets.get(r)]
+    order += [r for r in buckets if r not in REGION_ORDER and buckets[r]]
+
+    out: list = []
+    cursor = {r: 0 for r in order}
+    while len(out) < limit and any(cursor[r] < len(buckets[r]) for r in order):
+        for region in order:
+            if len(out) >= limit:
+                break
+            i = cursor[region]
+            if i < len(buckets[region]):
+                out.append(buckets[region][i])
+                cursor[region] = i + 1
+    return out
+
+
 def _key_signals_section(signals: list[Any], max_items: int = 10) -> str:
-    """Group up to `max_items` of the most informative classified signals by geography."""
-    # Prioritise: leadership > project > financial > competitive > hiring_velocity > market_intel
-    rank = {"leadership": 0, "project": 1, "financial": 2, "competitive": 3,
-            "hiring_velocity": 4, "market_intel": 5}
+    """The strongest classified signals, balanced across geographies."""
     by_geo: dict[str, list] = defaultdict(list)
     for r in signals:
-        geo = infer_geography(r["raw_content"])
-        by_geo[geo].append(r)
+        by_geo[infer_geography(r["raw_content"])].append(r)
+
+    for region in by_geo:
+        by_geo[region].sort(
+            key=lambda r: rank_signal(r["signal_category"], len(r["raw_content"] or ""))
+        )
+
+    chosen = interleave_regions(by_geo, max_items)
+
+    # Selection is balanced; presentation is still grouped by region.
+    grouped: dict[str, list] = defaultdict(list)
+    for r in chosen:
+        grouped[infer_geography(r["raw_content"])].append(r)
 
     lines = [":red_circle: *Key Signals This Week*"]
-    chosen_total = 0
     for geo_label, geo_key in (("AUSTRALIA", "AU"), ("PAPUA NEW GUINEA", "PNG")):
-        bucket = sorted(
-            by_geo.get(geo_key, []),
-            key=lambda r: (rank.get(r["signal_category"] or "hiring_velocity", 9),
-                           -len(r["raw_content"] or "")),
-        )
+        bucket = grouped.get(geo_key)
         if not bucket:
             continue
         lines.append(f"*{geo_label}*")
         for r in bucket:
-            if chosen_total >= max_items:
-                break
             company = r["company_name"] or "Unknown"
             cat = (r["signal_category"] or "signal").replace("_", " ")
             tier = f" _(Tier {r['watchlist_tier']})_" if r["watchlist_tier"] else ""
             note = (r["analysis_notes"] or "").strip()
             lines.append(f"• *{company}*{tier} — {cat}. {note}")
-            chosen_total += 1
-        if chosen_total >= max_items:
-            break
-    if chosen_total == 0:
+    if not chosen:
         lines.append("_No classified signals in the reporting window._")
     return "\n".join(lines)
 

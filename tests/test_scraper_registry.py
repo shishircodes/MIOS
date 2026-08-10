@@ -10,25 +10,37 @@ import scraper
 from scraper import SOURCE_NAMES, scrape_all
 
 
-def _fake_registry(png=None, seek=None):
-    async def _png(limit=200, base_url=None):
-        return list(png or [])
+def _fake_registry(png=None, seek=None, adzuna=None):
+    """A stand-in registry covering every declared source.
 
-    async def _seek(limit=200, base_url=None):
-        return list(seek or [])
+    It must stay in step with SOURCE_NAMES: scrape_all() defaults to all of them,
+    so a source missing here fails with a bare KeyError rather than a useful
+    message. `test_registry_covers_declared_source_names` guards the real one.
+    """
+    def _fixed(rows):
+        async def _fn(limit=200, base_url=None):
+            return list(rows or [])
+        return _fn
 
-    return {"pngworkforce": _png, "seek": _seek}
+    return {
+        "pngworkforce": _fixed(png),
+        "seek": _fixed(seek),
+        "adzuna": _fixed(adzuna),
+    }
 
 
 PNG_REC = {"source_url": "https://www.pngworkforce.com/jobs/view/1", "raw_content": "png job"}
 SEEK_REC = {"source_url": "https://au.seek.com/job/1", "raw_content": "seek job", "source_name": "seek"}
+ADZUNA_REC = {"source_url": "https://www.adzuna.com.au/details/1", "raw_content": "adzuna job",
+              "source_name": "adzuna"}
 
 
 def test_scrape_all_merges_every_source_by_default():
-    with patch.object(scraper, "_registry", lambda: _fake_registry([PNG_REC], [SEEK_REC])):
+    with patch.object(scraper, "_registry",
+                      lambda: _fake_registry([PNG_REC], [SEEK_REC], [ADZUNA_REC])):
         records = scrape_all(limit=10)
-    assert len(records) == 2
-    assert {r["source_name"] for r in records} == {"pngworkforce", "seek"}
+    assert len(records) == 3
+    assert {r["source_name"] for r in records} == {"pngworkforce", "seek", "adzuna"}
 
 
 def test_scrape_all_can_select_one_source():
@@ -45,7 +57,7 @@ def test_scrape_all_stamps_source_name_when_scraper_omits_it():
 
 def test_scrape_all_survives_a_dead_source():
     # A source that fails returns [] (its own contract) — the other still lands.
-    with patch.object(scraper, "_registry", lambda: _fake_registry([], [SEEK_REC])):
+    with patch.object(scraper, "_registry", lambda: _fake_registry([], [SEEK_REC], [])):
         records = scrape_all(limit=10)
     assert len(records) == 1
 
@@ -70,12 +82,12 @@ def test_scrape_all_runs_every_source_in_one_event_loop():
         async def _fn(limit=200, base_url=None):
             loops.append(id(asyncio.get_running_loop()))
             return []
-        return {"pngworkforce": _fn, "seek": _fn}
+        return {name: _fn for name in SOURCE_NAMES}
 
     with patch.object(scraper, "_registry", _registry_capturing_loop):
         scrape_all(limit=10)
-    assert len(loops) == 2
-    assert loops[0] == loops[1]
+    assert len(loops) == len(SOURCE_NAMES)
+    assert len(set(loops)) == 1, "every source must share one event loop"
 
 
 def test_registry_covers_declared_source_names():

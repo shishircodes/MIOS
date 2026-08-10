@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Drawer, Icons, Section, SparkBar, TierChip, Trend } from '~/components/ui'
 import { digestQueryOptions } from '~/lib/api'
 import { UnauthenticatedError } from '~/lib/auth'
@@ -15,6 +15,24 @@ function WeeklyDigest() {
   const { data, isLoading, isError, error } = useQuery(digestQueryOptions)
   const { refresh } = useAuth()
   const [drawer, setDrawer] = useState<Signal | null>(null)
+  const [query, setQuery] = useState('')
+
+  // Hooks must run before any early return, so this tolerates `data` being
+  // undefined while the query is still in flight.
+  const matched = useMemo(() => {
+    const all = data?.signals ?? []
+    const q = query.trim().toLowerCase()
+    if (!q) return all
+    // Every term must appear somewhere in the row, so "bhp mining" narrows
+    // rather than widening the way a plain OR would.
+    const terms = q.split(/\s+/)
+    return all.filter((s) => {
+      const haystack = [s.company, s.title, s.desc, s.sector, s.region, s.source, s.tier ?? '']
+        .join(' ')
+        .toLowerCase()
+      return terms.every((t) => haystack.includes(t))
+    })
+  }, [data?.signals, query])
 
   if (isLoading) {
     return (
@@ -52,8 +70,10 @@ function WeeklyDigest() {
     )
   }
 
-  const au = data.signals.filter((s) => s.region === 'AU')
-  const png = data.signals.filter((s) => s.region === 'PNG')
+  // Split the *filtered* set, so the region headings and counts agree with
+  // what the search actually left on screen.
+  const au = matched.filter((s) => s.region === 'AU')
+  const png = matched.filter((s) => s.region === 'PNG')
 
   return (
     <div className="page">
@@ -99,7 +119,20 @@ function WeeklyDigest() {
       {/* Key Signals */}
       <Section
         title="Key Signals This Week"
-        tools={<span>{data.signals.length} ITEMS</span>}
+        tools={
+          <div className="section-search">
+            <input
+              type="search"
+              value={query}
+              placeholder="Filter by company, role, sector…"
+              aria-label="Filter key signals"
+              onChange={(e) => setQuery(e.target.value)}
+            />
+            <span className="count mono">
+              {query ? `${matched.length} / ${data.signals.length}` : `${data.signals.length} ITEMS`}
+            </span>
+          </div>
+        }
       >
         {au.length > 0 && (
           <>
@@ -121,7 +154,15 @@ function WeeklyDigest() {
             {png.map((s) => <SignalRow key={s.id} s={s} onOpen={() => setDrawer(s)} />)}
           </>
         )}
-        {data.signals.length === 0 && <div className="center-empty">No classified signals yet.</div>}
+        {matched.length === 0 && (
+          <div className="center-empty">
+            {query
+              ? <>No signals match “{query}”.{' '}
+                  <button className="btn sm" onClick={() => setQuery('')}>Clear filter</button>
+                </>
+              : 'No classified signals yet.'}
+          </div>
+        )}
       </Section>
 
       {/* Hiring Velocity */}

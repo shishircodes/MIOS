@@ -50,6 +50,9 @@ export interface DigestPayload {
   windowDays: number
   /** True when nothing was captured in the window and these are older signals. */
   windowEmpty: boolean
+  /** ISO timestamps bounding when the rendered signals were scraped. */
+  collectedFrom: string | null
+  collectedTo: string | null
   week: string
   weekLabel: string
   generatedAt: string

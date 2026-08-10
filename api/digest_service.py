@@ -12,13 +12,13 @@ from __future__ import annotations
 
 import json
 import logging
-from collections import Counter
+from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
 from config.settings import settings
-from delivery.digest import infer_geography
+from delivery.digest import infer_geography, interleave_regions, rank_signal
 from loader.db import connect, is_postgres, resolve_target
 
 log = logging.getLogger(__name__)
@@ -137,6 +137,51 @@ def _watchlist_tiers(path: Path) -> dict[str, str]:
 
 DEFAULT_WINDOW_DAYS = 7
 
+#: How many signals the dashboard renders. Selection is balanced across regions,
+#: so this cap can never silently drop a whole geography.
+MAX_SIGNALS_SHOWN = 40
+
+
+def _fmt_day(d: datetime) -> str:
+    # Windows-safe: %-d is not supported by the MSVC strftime.
+    return d.strftime("%d %B %Y").lstrip("0")
+
+
+def _collection_span(rows: list[dict[str, Any]]) -> tuple[datetime | None, datetime | None]:
+    """Earliest and latest `captured_at` across the rendered rows.
+
+    Synthetic rows carry no capture time, so this returns (None, None) for them.
+    """
+    stamps: list[datetime] = []
+    for r in rows:
+        raw = r.get("captured_at")
+        if not raw:
+            continue
+        try:
+            stamps.append(datetime.fromisoformat(str(raw)))
+        except ValueError:
+            continue
+    if not stamps:
+        return None, None
+    return min(stamps), max(stamps)
+
+
+def _collection_label(start: datetime | None, end: datetime | None) -> str:
+    """Heading that describes when the data was gathered.
+
+    Previously this was simply today's date, which claimed freshness the data did
+    not have — a dashboard opened a week after the last scrape still announced
+    today. Now it names the actual collection date, and a range when the signals
+    were gathered across more than one day.
+    """
+    if start is None or end is None:
+        return "Sample dataset"
+    if start.date() == end.date():
+        return f"Week of {_fmt_day(end)}"
+    if (start.year, start.month) == (end.year, end.month):
+        return f"{start.day} – {_fmt_day(end)}"
+    return f"{_fmt_day(start)} – {_fmt_day(end)}"
+
 
 def build_digest_payload(
     db_path: str | Path | None = None,
@@ -194,7 +239,7 @@ def build_digest_payload(
 
         signals.append({
             "id": r.get("signal_id") or f"sig-{i:03d}",
-            "n": f"{i + 1:02d}",
+            # `n` is assigned after selection — reordering happens below.
             "region": region,
             "tier": tier,
             "company": company,
@@ -203,8 +248,10 @@ def build_digest_payload(
             "action": (r.get("analysis_notes") or "").strip() or None,
             "sector": sector,
             "source": r.get("source_name") or "pngworkforce",
+            "category": r.get("signal_category") or "hiring_velocity",
             "cycle": (r.get("review_cycle") or "weekly").upper(),
             "conf": _confidence(i, tier, is_new),
+            "_rank": rank_signal(r.get("signal_category"), len(raw)),
         })
 
         if tier and company != "Unknown":
@@ -233,10 +280,30 @@ def build_digest_payload(
         for co, n in velocity_counter.most_common(10)
     ]
 
+    # Pick the 40 shown rows the same way the Slack digest picks its 10: strongest
+    # signals first, balanced across regions.
+    #
+    # Previously this was `signals[:40]` over a captured_at DESC list. The two
+    # scrapers finish a second apart, so every SEEK row sorted ahead of every
+    # PNGworkforce row and the cut landed inside SEEK — the entire Papua New
+    # Guinea section disappeared despite having 50 signals.
+    by_region: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for s in signals:
+        by_region[s["region"]].append(s)
+    for region in by_region:
+        by_region[region].sort(key=lambda s: s["_rank"])
+
+    shown = interleave_regions(by_region, MAX_SIGNALS_SHOWN)
+    for i, s in enumerate(shown):
+        s["n"] = f"{i + 1:02d}"
+    for s in signals:
+        s.pop("_rank", None)
+
     classified = len(signals)
     geos = Counter(s["region"] for s in signals)
-    # Windows-safe day formatting (no %-d).
-    week_label = datetime.now(timezone.utc).strftime("Week of %d %B %Y").replace(" 0", " ")
+
+    collected_from, collected_to = _collection_span(rows)
+    week_label = _collection_label(collected_from, collected_to)
 
     return {
         "sourceMode": source_mode,
@@ -245,7 +312,12 @@ def build_digest_payload(
         #: True when the window held nothing and these are older signals instead.
         #: The UI must say so rather than presenting them as this week's.
         "windowEmpty": window_empty,
-        "week": datetime.now(timezone.utc).strftime("WEEK %d %b %Y").upper(),
+        #: When the rendered signals were actually scraped — NOT when this payload
+        #: was built. The heading used to show today's date, which read as "this
+        #: data is from today" even when the last scrape was a week ago.
+        "collectedFrom": collected_from.isoformat() if collected_from else None,
+        "collectedTo": collected_to.isoformat() if collected_to else None,
+        "week": (collected_to or datetime.now(timezone.utc)).strftime("WEEK %d %b %Y").upper(),
         "weekLabel": week_label,
         "generatedAt": datetime.now(timezone.utc).strftime("%a %d %b %Y · %H:%M UTC"),
         "kpis": {
@@ -254,7 +326,7 @@ def build_digest_payload(
             "newNames": {"val": len(new_names), "delta": f"{len(new_names)} to review", "dir": "flat"},
             "pushQueries": {"val": 0, "delta": "—", "dir": "flat"},
         },
-        "signals": signals[:40],
+        "signals": shown,
         "velocity": velocity,
         "newNames": list(new_names.values())[:8],
     }

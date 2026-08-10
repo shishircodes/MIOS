@@ -23,6 +23,14 @@ services:
       SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
 
+      # Scraper credentials. The API image also contains the pipeline, so the
+      # scheduled `pipeline.live` run inside this container needs these.
+      # Blank simply skips the Adzuna source; the other two still run.
+      ADZUNA_APP_ID: ${ADZUNA_APP_ID:-}
+      ADZUNA_APP_KEY: ${ADZUNA_APP_KEY:-}
+      ADZUNA_COUNTRY: ${ADZUNA_COUNTRY:-au}
+      ADZUNA_QUERIES: ${ADZUNA_QUERIES:-}
+
       # Public URLs, as the browser sees them — i.e. whatever your TLS layer
       # presents, not the container ports below.
       WEB_APP_URL: ${WEB_APP_URL}

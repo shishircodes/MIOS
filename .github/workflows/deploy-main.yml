@@ -192,7 +192,12 @@ jobs:
             WEB_IMAGE=${{ needs.gate.outputs.image_base }}/web:${{ needs.gate.outputs.sha }}
             DATABASE_URL=${{ secrets.PROD_DATABASE_URL }}
             GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}
+            GEMINI_MODEL=${{ vars.GEMINI_MODEL || 'gemini-2.5-flash' }}
             SLACK_WEBHOOK_URL=${{ secrets.SLACK_WEBHOOK_URL }}
+            ADZUNA_APP_ID=${{ secrets.ADZUNA_APP_ID }}
+            ADZUNA_APP_KEY=${{ secrets.ADZUNA_APP_KEY }}
+            ADZUNA_COUNTRY=${{ vars.ADZUNA_COUNTRY || 'au' }}
+            ADZUNA_QUERIES=${{ vars.ADZUNA_QUERIES }}
             GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }}
             GOOGLE_CLIENT_SECRET=${{ secrets.GOOGLE_CLIENT_SECRET }}
             SESSION_SECRET=${{ secrets.SESSION_SECRET }}

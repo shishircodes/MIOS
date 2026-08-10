@@ -1,0 +1,66 @@
+{
+  "count": 3,
+  "__CLASS__": "Adzuna::API::Response::JobSearchResults",
+  "results": [
+    {
+      "id": "5182749311",
+      "title": "Maintenance Planner",
+      "company": {
+        "display_name": "BHP",
+        "__CLASS__": "Adzuna::API::Response::Company"
+      },
+      "location": {
+        "display_name": "Newman, Pilbara WA",
+        "area": [
+          "Australia",
+          "Western Australia",
+          "Pilbara",
+          "Newman"
+        ]
+      },
+      "category": {
+        "label": "Engineering Jobs",
+        "tag": "engineering-jobs"
+      },
+      "description": "BHP is seeking an experienced Maintenance Planner to join the Iron Ore team at Newman. FIFO ex-Perth on an 8/6 roster.",
+      "created": "2026-08-08T04:12:33Z",
+      "redirect_url": "https://www.adzuna.com.au/details/5182749311?utm_medium=api&utm_source=abc123&v=XYZ",
+      "salary_min": 145000,
+      "salary_max": 165000,
+      "salary_is_predicted": "0",
+      "contract_time": "full_time"
+    },
+    {
+      "id": "5182749312",
+      "title": "Process Operator",
+      "company": {
+        "display_name": "Rio Tinto"
+      },
+      "location": {
+        "display_name": "Karratha, Pilbara WA",
+        "area": [
+          "Australia",
+          "Western Australia"
+        ]
+      },
+      "category": {
+        "label": "Manufacturing Jobs",
+        "tag": "manufacturing-jobs"
+      },
+      "description": "Rio Tinto is recruiting Process Operators for its Pilbara operations.",
+      "created": "2026-08-07T22:00:00Z",
+      "redirect_url": "https://www.adzuna.com.au/details/5182749312?utm_medium=api",
+      "salary_min": 110000,
+      "salary_max": 130000,
+      "salary_is_predicted": "1"
+    },
+    {
+      "id": "5182749313",
+      "title": "Site Superintendent",
+      "location": {
+        "display_name": "Brisbane QLD"
+      },
+      "redirect_url": "https://www.adzuna.com.au/details/5182749313"
+    }
+  ]
+}

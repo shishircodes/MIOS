@@ -26,6 +26,10 @@ class Settings:
     pngworkforce_base_url: str
     seek_base_url: str
     seek_paths: tuple[str, ...]
+    adzuna_app_id: str
+    adzuna_app_key: str
+    adzuna_country: str
+    adzuna_queries: tuple[str, ...]
     watchlist_path: Path
     # --- Google Sign-In (OAuth 2.0 / OIDC) ---
     google_client_id: str
@@ -45,6 +49,11 @@ class Settings:
     @property
     def synthetic_postings_path(self) -> Path:
         return REPO_ROOT / "data" / "synthetic_postings.jsonl"
+
+    @property
+    def adzuna_configured(self) -> bool:
+        """True when the free Adzuna API credentials are present."""
+        return bool(self.adzuna_app_id and self.adzuna_app_key)
 
     @property
     def oauth_configured(self) -> bool:
@@ -92,6 +101,10 @@ def load_settings() -> Settings:
         pngworkforce_base_url=_get("PNGWORKFORCE_BASE_URL", "https://www.pngworkforce.com"),
         seek_base_url=_get("SEEK_BASE_URL", "https://au.seek.com"),
         seek_paths=_get_list("SEEK_PATHS"),
+        adzuna_app_id=_get("ADZUNA_APP_ID"),
+        adzuna_app_key=_get("ADZUNA_APP_KEY"),
+        adzuna_country=_get("ADZUNA_COUNTRY", "au"),
+        adzuna_queries=_get_list("ADZUNA_QUERIES"),
         watchlist_path=REPO_ROOT / "config" / "watchlist.json",
         google_client_id=_get("GOOGLE_CLIENT_ID"),
         google_client_secret=_get("GOOGLE_CLIENT_SECRET"),
