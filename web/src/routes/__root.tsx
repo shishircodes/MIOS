@@ -11,6 +11,7 @@ import {
 } from '@tanstack/react-router'
 import type { ReactNode } from 'react'
 import { useEffect } from 'react'
+import { NotFound } from '~/components/NotFound'
 import { Icons } from '~/components/ui'
 import { AuthProvider, useAuth } from '~/lib/auth-context'
 import appCss from '~/styles/app.css?url'
@@ -20,6 +21,7 @@ interface RouterContext {
 }
 
 export const Route = createRootRouteWithContext<RouterContext>()({
+  notFoundComponent: NotFound,
   head: () => ({
     meta: [
       { charSet: 'utf-8' },
