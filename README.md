@@ -454,7 +454,15 @@ first-party; CORS is already configured from `WEB_APP_URL`.
 On a fresh Hetzner box (Ubuntu 24.04):
 
 ```bash
-sudo apt update && sudo apt install -y docker.io docker-compose-plugin
+sudo apt update && sudo apt install -y docker.io docker-compose-v2
+```
+
+> `docker-compose-plugin` is Docker's own package name and only exists if you
+> add their APT repo. Ubuntu ships the same v2 plugin as `docker-compose-v2`.
+> Confirm with `docker compose version` — the space matters.
+
+```bash
+sudo usermod -aG docker $USER   # log out and back in for this to apply
 ```
 
 ```bash
@@ -522,7 +530,7 @@ cd ~/mios && sed -i 's/:[0-9a-f]\{40\}/:<older-sha>/g' .env && docker compose -p
 Once you have a Linux box:
 
 ```bash
-sudo apt update && sudo apt install -y docker.io docker-compose-plugin
+sudo apt update && sudo apt install -y docker.io docker-compose-v2
 ```
 
 ```bash

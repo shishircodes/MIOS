@@ -192,6 +192,11 @@ jobs:
             SESSION_SECRET=${{ secrets.SESSION_SECRET }}
             ALLOWED_GOOGLE_DOMAIN=${{ vars.ALLOWED_GOOGLE_DOMAIN }}
             ALLOWED_EMAILS=${{ vars.ALLOWED_EMAILS }}
+            # Set PROD_AUTH_DISABLED=true only while there is no domain/TLS:
+            # Google refuses redirect URIs on a raw IP over http, so sign-in
+            # cannot complete and the dashboard would be unreachable. Flip it
+            # back to false the moment the domain and certificate are in place.
+            AUTH_DISABLED=${{ vars.PROD_AUTH_DISABLED || 'false' }}
             ENVEOF
 
             docker compose -p mios -f docker-compose.prod.yml pull
