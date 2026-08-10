@@ -26,7 +26,9 @@ permissions:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_BASE: ghcr.io/${{ github.repository }}
+# IMAGE_BASE is computed in the `setup` job instead of here: Docker rejects
+# uppercase repository names and `github.repository` keeps the repo's own
+# capitalisation, which GitHub expressions cannot lowercase.
 
 jobs:
   # ---------------------------------------------------------------------------
@@ -38,6 +40,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       pr: ${{ steps.ids.outputs.pr }}
+      image_base: ${{ steps.ids.outputs.image_base }}
       tag: ${{ steps.ids.outputs.tag }}
       branch: ${{ steps.ids.outputs.branch }}
       web_port: ${{ steps.ids.outputs.web_port }}
@@ -49,6 +52,7 @@ jobs:
       - id: ids
         env:
           PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
           HOST: ${{ vars.PREVIEW_HOST }}
           HAS_SSH: ${{ secrets.DEPLOY_SSH_KEY != '' }}
         run: |
@@ -57,6 +61,7 @@ jobs:
           WEB_PORT=$((30000 + PR))
           API_PORT=$((40000 + PR))
           {
+            echo "image_base=ghcr.io/$(echo "$REPO" | tr '[:upper:]' '[:lower:]')"
             echo "pr=$PR"
             echo "tag=pr-$PR"
             echo "branch=preview/pr-$PR"
@@ -132,7 +137,7 @@ jobs:
           context: .
           file: Dockerfile.api
           push: true
-          tags: ${{ env.IMAGE_BASE }}/api:${{ needs.setup.outputs.tag }}
+          tags: ${{ needs.setup.outputs.image_base }}/api:${{ needs.setup.outputs.tag }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -141,7 +146,7 @@ jobs:
         with:
           context: web
           push: true
-          tags: ${{ env.IMAGE_BASE }}/web:${{ needs.setup.outputs.tag }}
+          tags: ${{ needs.setup.outputs.image_base }}/web:${{ needs.setup.outputs.tag }}
           build-args: |
             VITE_API_BASE=${{ needs.setup.outputs.api_url }}
           cache-from: type=gha
@@ -186,8 +191,8 @@ jobs:
             echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
             cat > .env <<'ENVEOF'
-            API_IMAGE=${{ env.IMAGE_BASE }}/api:${{ needs.setup.outputs.tag }}
-            WEB_IMAGE=${{ env.IMAGE_BASE }}/web:${{ needs.setup.outputs.tag }}
+            API_IMAGE=${{ needs.setup.outputs.image_base }}/api:${{ needs.setup.outputs.tag }}
+            WEB_IMAGE=${{ needs.setup.outputs.image_base }}/web:${{ needs.setup.outputs.tag }}
             DATABASE_URL=${{ needs.database.outputs.db_url }}
             GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}
             WEB_APP_URL=${{ needs.setup.outputs.web_url }}

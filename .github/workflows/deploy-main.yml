@@ -25,8 +25,10 @@ permissions:
   contents: read
   packages: write
 
-env:
-  IMAGE_BASE: ghcr.io/${{ github.repository }}
+# NOTE: no workflow-level IMAGE_BASE. `github.repository` preserves the repo's
+# capitalisation (shishircodes/MIOS) and Docker rejects uppercase in a
+# repository name. GitHub expressions have no lower() function, so it is
+# lowercased in a shell step and passed through as a job output.
 
 jobs:
   gate:
@@ -38,12 +40,14 @@ jobs:
       github.event.workflow_run.conclusion == 'success'
     outputs:
       configured: ${{ steps.cfg.outputs.configured }}
+      image_base: ${{ steps.cfg.outputs.image_base }}
       web_url: ${{ steps.cfg.outputs.web_url }}
       api_url: ${{ steps.cfg.outputs.api_url }}
       sha: ${{ steps.cfg.outputs.sha }}
     steps:
       - id: cfg
         env:
+          REPO: ${{ github.repository }}
           HOST: ${{ vars.PROD_HOST }}
           WEB_URL: ${{ vars.PROD_WEB_URL }}
           API_URL: ${{ vars.PROD_API_URL }}
@@ -53,6 +57,8 @@ jobs:
         run: |
           set -euo pipefail
           echo "sha=$RUN_SHA" >> "$GITHUB_OUTPUT"
+          # Docker requires a lowercase repository name.
+          echo "image_base=ghcr.io/$(echo "$REPO" | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
 
           if [ -z "$HOST" ] || [ "$HAS_SSH" != "true" ]; then
             echo "configured=false" >> "$GITHUB_OUTPUT"
@@ -106,8 +112,8 @@ jobs:
           push: true
           # Both tags: `main` is what compose pulls, the SHA makes rollback possible.
           tags: |
-            ${{ env.IMAGE_BASE }}/api:main
-            ${{ env.IMAGE_BASE }}/api:${{ needs.gate.outputs.sha }}
+            ${{ needs.gate.outputs.image_base }}/api:main
+            ${{ needs.gate.outputs.image_base }}/api:${{ needs.gate.outputs.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -117,8 +123,8 @@ jobs:
           context: web
           push: true
           tags: |
-            ${{ env.IMAGE_BASE }}/web:main
-            ${{ env.IMAGE_BASE }}/web:${{ needs.gate.outputs.sha }}
+            ${{ needs.gate.outputs.image_base }}/web:main
+            ${{ needs.gate.outputs.image_base }}/web:${{ needs.gate.outputs.sha }}
           build-args: |
             VITE_API_BASE=${{ needs.gate.outputs.api_url }}
           cache-from: type=gha
@@ -182,8 +188,8 @@ jobs:
             cat > .env <<'ENVEOF'
             WEB_APP_URL=${{ needs.gate.outputs.web_url }}
             API_BASE_URL=${{ needs.gate.outputs.api_url }}
-            API_IMAGE=${{ env.IMAGE_BASE }}/api:${{ needs.gate.outputs.sha }}
-            WEB_IMAGE=${{ env.IMAGE_BASE }}/web:${{ needs.gate.outputs.sha }}
+            API_IMAGE=${{ needs.gate.outputs.image_base }}/api:${{ needs.gate.outputs.sha }}
+            WEB_IMAGE=${{ needs.gate.outputs.image_base }}/web:${{ needs.gate.outputs.sha }}
             DATABASE_URL=${{ secrets.PROD_DATABASE_URL }}
             GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}
             SLACK_WEBHOOK_URL=${{ secrets.SLACK_WEBHOOK_URL }}
