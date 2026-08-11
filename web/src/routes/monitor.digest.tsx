@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Drawer, Icons, Section, SparkBar, TierChip, Trend } from '~/components/ui'
 import { digestQueryOptions } from '~/lib/api'
 import { UnauthenticatedError } from '~/lib/auth'
@@ -8,6 +8,14 @@ import { useAuth } from '~/lib/auth-context'
 import type { Signal } from '~/lib/types'
 
 export const Route = createFileRoute('/monitor/digest')({
+  // `?q=` lets the topbar search deep-link into this page's filter, so the
+  // global box does something real instead of decorating the header.
+  //
+  // The key is omitted rather than set to undefined: returning `{ q: undefined }`
+  // types the param as required, and every existing `<Link to="/monitor/digest">`
+  // then fails to compile for want of a `search` prop.
+  validateSearch: (search: Record<string, unknown>): { q?: string } =>
+    typeof search.q === 'string' && search.q ? { q: search.q } : {},
   component: WeeklyDigest,
 })
 
@@ -15,7 +23,13 @@ function WeeklyDigest() {
   const { data, isLoading, isError, error } = useQuery(digestQueryOptions)
   const { refresh } = useAuth()
   const [drawer, setDrawer] = useState<Signal | null>(null)
-  const [query, setQuery] = useState('')
+  const { q: urlQuery } = Route.useSearch()
+  const [query, setQuery] = useState(urlQuery ?? '')
+
+  // Follow the URL when the topbar search navigates here while already on the page.
+  useEffect(() => {
+    setQuery(urlQuery ?? '')
+  }, [urlQuery])
 
   // Hooks must run before any early return, so this tolerates `data` being
   // undefined while the query is still in flight.

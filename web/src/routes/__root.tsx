@@ -10,7 +10,7 @@ import {
   useRouterState,
 } from '@tanstack/react-router'
 import type { ReactNode } from 'react'
-import { useEffect } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { NotFound } from '~/components/NotFound'
 import { Icons } from '~/components/ui'
 import { AuthProvider, useAuth } from '~/lib/auth-context'
@@ -128,7 +128,26 @@ function AuthGate({ children }: { children: ReactNode }) {
 
 function UserMenu() {
   const { session, signOut } = useAuth()
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
   const user = session?.user
+
+  // Click-outside and Escape both close it — a menu that can only be dismissed
+  // by clicking the trigger again feels broken.
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false)
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
   if (!user) return null
 
   // Letters only — a name like "Dev (auth disabled)" would otherwise render "D(".
@@ -142,14 +161,36 @@ function UserMenu() {
       .join('') || user.email.charAt(0).toUpperCase()
 
   return (
-    <div className="who who-menu">
-      {user.picture ? (
-        <img className="avatar" src={user.picture} alt="" width={22} height={22} referrerPolicy="no-referrer" />
-      ) : (
-        <div className="avatar">{initials || '?'}</div>
+    <div className="who-menu" ref={ref}>
+      <button
+        className="who-trigger"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+      >
+        {user.picture ? (
+          <img className="avatar" src={user.picture} alt="" width={26} height={26} referrerPolicy="no-referrer" />
+        ) : (
+          <div className="avatar">{initials || '?'}</div>
+        )}
+        <span className="who-name">{user.name.split(' ')[0]}</span>
+        <span className="who-caret" aria-hidden="true">▾</span>
+      </button>
+
+      {open && (
+        <div className="who-dropdown" role="menu">
+          <div className="who-identity">
+            <div className="who-fullname">{user.name}</div>
+            {/* Shown in full: on a shared dashboard, knowing which account you
+                are signed in as matters more than a tidy truncation. */}
+            <div className="who-email">{user.email}</div>
+            {user.domain && <span className="chip">{user.domain}</span>}
+          </div>
+          <button className="who-action" role="menuitem" onClick={() => void signOut()}>
+            Sign out
+          </button>
+        </div>
       )}
-      <span title={user.email}>{user.name.split(' ')[0]}</span>
-      <button className="signout" onClick={() => void signOut()}>Sign out</button>
     </div>
   )
 }
@@ -172,20 +213,19 @@ function Shell({ children }: { children: ReactNode }) {
           <div className="brand-mark" />
           <span>MIOS</span>
         </div>
-        <div className="crumbs">
+        {/* flex:1 so the badge and user menu sit hard right now that the
+            search has been removed from between them. */}
+        <nav className="crumbs" aria-label="Breadcrumb">
           {crumbs.map((c, i) => (
             <span key={i} className={i === crumbs.length - 1 ? 'current' : ''}>
               {c}
-              {i < crumbs.length - 1 && <span className="sep" style={{ marginLeft: 10 }}>/</span>}
+              {i < crumbs.length - 1 && <span className="sep" aria-hidden="true">/</span>}
             </span>
           ))}
+        </nav>
+        <div className="week-badge" title="Easy Skill Australia · Australia and Papua New Guinea">
+          EASY SKILL · AU · PNG
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--muted)' }}>
-          {Icons.search}
-          <span>Search signals, companies, profiles…</span>
-          <span className="kbd">⌘K</span>
-        </div>
-        <div className="week-badge">EASY SKILL · AU · PNG</div>
         <UserMenu />
       </div>
 
