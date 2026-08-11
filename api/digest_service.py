@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from config.settings import settings
-from delivery.digest import infer_geography, interleave_regions, rank_signal
+from delivery.digest import infer_geography, interleave, interleave_regions, rank_signal
 from loader.db import connect, is_postgres, resolve_target
 
 log = logging.getLogger(__name__)
@@ -58,7 +58,10 @@ def _confidence(row_index: int, tier: str | None, is_new: bool) -> int:
 SELECT_SIGNALS = (
     "SELECT signal_id, company_name, sector, signal_category, review_cycle, "
     "watchlist_tier, is_new_prospect, raw_content, analysis_notes, source_name, "
-    "captured_at "
+    # `geography` is what the scraper recorded about its own market. Without it
+    # the region falls back to keyword inference alone, which filed PNGworkforce
+    # jobs under Australia whenever their teaser named no PNG landmark.
+    "geography, captured_at "
     "FROM signals WHERE classified_at IS NOT NULL "
 )
 
@@ -229,7 +232,12 @@ def build_digest_payload(
 
     for i, r in enumerate(rows):
         raw = r.get("raw_content") or ""
-        region = infer_geography(raw)
+        # The scrapers already know their market — pngworkforce is PNG, seek and
+        # adzuna are AU — so use that as the baseline and let the keywords only
+        # promote a row to PNG. Inferring from text alone put 15 PNGworkforce
+        # jobs under "Australia" purely because their teaser named no PNG
+        # landmark, while still correctly catching a PNG role advertised on SEEK.
+        region = infer_geography(raw, default=(r.get("geography") or "AU"))
         tier = r.get("watchlist_tier")
         is_new = bool(r.get("is_new_prospect"))
         company = r.get("company_name") or "Unknown"
@@ -251,7 +259,7 @@ def build_digest_payload(
             "category": r.get("signal_category") or "hiring_velocity",
             "cycle": (r.get("review_cycle") or "weekly").upper(),
             "conf": _confidence(i, tier, is_new),
-            "_rank": rank_signal(r.get("signal_category"), len(raw)),
+            "_rank": rank_signal(r.get("signal_category"), len(raw), tier),
         })
 
         if tier and company != "Unknown":
@@ -289,11 +297,22 @@ def build_digest_payload(
     # Guinea section disappeared despite having 50 signals.
     by_region: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for s in signals:
+        # Within a region, round-robin the sources too. Ranking alone gave every
+        # Australian slot to Adzuna, whose ~610-character records always beat
+        # SEEK's ~245 on the length tiebreak — SEEK disappeared from the section
+        # despite having the most AU signals.
         by_region[s["region"]].append(s)
-    for region in by_region:
-        by_region[region].sort(key=lambda s: s["_rank"])
 
-    shown = interleave_regions(by_region, MAX_SIGNALS_SHOWN)
+    ordered_by_region: dict[str, list[dict[str, Any]]] = {}
+    for region, rows_in_region in by_region.items():
+        by_source: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for s in rows_in_region:
+            by_source[s["source"]].append(s)
+        for src in by_source:
+            by_source[src].sort(key=lambda s: s["_rank"])
+        ordered_by_region[region] = interleave(by_source, len(rows_in_region))
+
+    shown = interleave_regions(ordered_by_region, MAX_SIGNALS_SHOWN)
     for i, s in enumerate(shown):
         s["n"] = f"{i + 1:02d}"
     for s in signals:

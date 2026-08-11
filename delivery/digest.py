@@ -51,34 +51,57 @@ SIGNAL_RANK = {
 REGION_ORDER = ("AU", "PNG")
 
 
-def rank_signal(category: str | None, weight: int) -> tuple[int, int]:
-    """Sort key: category importance first, longer content as the tiebreak."""
-    return (SIGNAL_RANK.get(category or "hiring_velocity", 9), -weight)
+#: Watchlist tiers, most important first. Untiered companies sort last.
+TIER_RANK = {"A": 0, "B": 1, "C": 2}
+
+
+def rank_signal(category: str | None, weight: int, tier: str | None = None) -> tuple[int, int, int]:
+    """Sort key: category, then watchlist tier, then content length.
+
+    Length used to be the only tiebreak, which quietly ranked sources by how
+    verbose their listings are — Adzuna's ~610-character records displaced every
+    SEEK record at ~245, so an entire source vanished from the digest. Tier is
+    the honest second key: a Tier A employer hiring is a stronger signal than a
+    longer advertisement.
+    """
+    return (
+        SIGNAL_RANK.get(category or "hiring_velocity", 9),
+        TIER_RANK.get((tier or "").upper(), 9),
+        -weight,
+    )
+
+
+def interleave(buckets: dict[str, list], limit: int, order: tuple[str, ...] = ()) -> list:
+    """Take up to `limit` items round-robin across buckets.
+
+    Used twice: across regions, and across sources within a region. Both exist to
+    stop one bucket consuming the whole quota — "fill from AU, then PNG with
+    what's left" hid Papua New Guinea entirely on a busy AU week, and sorting by
+    content length handed every Australian slot to whichever source writes the
+    longest blurbs. Round-robin guarantees each bucket with data is represented,
+    and since buckets are pre-sorted, the items taken are still its strongest.
+
+    `order` fixes the leading keys; anything else follows in dict order.
+    """
+    keys = [k for k in order if buckets.get(k)]
+    keys += [k for k in buckets if k not in order and buckets[k]]
+
+    out: list = []
+    cursor = {k: 0 for k in keys}
+    while len(out) < limit and any(cursor[k] < len(buckets[k]) for k in keys):
+        for key in keys:
+            if len(out) >= limit:
+                break
+            i = cursor[key]
+            if i < len(buckets[key]):
+                out.append(buckets[key][i])
+                cursor[key] = i + 1
+    return out
 
 
 def interleave_regions(buckets: dict[str, list], limit: int) -> list:
-    """Take up to `limit` items round-robin across regions.
-
-    Replaces "fill from AU, then PNG if any budget is left". That shared counter
-    meant a busy AU week consumed the entire quota and Papua New Guinea vanished
-    from the digest — not because it had no signals, but because it was second in
-    the loop. Round-robin guarantees every region with data is represented, and
-    because each bucket is pre-sorted, the items taken are still its strongest.
-    """
-    order = [r for r in REGION_ORDER if buckets.get(r)]
-    order += [r for r in buckets if r not in REGION_ORDER and buckets[r]]
-
-    out: list = []
-    cursor = {r: 0 for r in order}
-    while len(out) < limit and any(cursor[r] < len(buckets[r]) for r in order):
-        for region in order:
-            if len(out) >= limit:
-                break
-            i = cursor[region]
-            if i < len(buckets[region]):
-                out.append(buckets[region][i])
-                cursor[region] = i + 1
-    return out
+    """Round-robin across geographies, AU then PNG first."""
+    return interleave(buckets, limit, REGION_ORDER)
 
 
 def _key_signals_section(signals: list[Any], max_items: int = 10) -> str:
@@ -89,7 +112,9 @@ def _key_signals_section(signals: list[Any], max_items: int = 10) -> str:
 
     for region in by_geo:
         by_geo[region].sort(
-            key=lambda r: rank_signal(r["signal_category"], len(r["raw_content"] or ""))
+            key=lambda r: rank_signal(
+                r["signal_category"], len(r["raw_content"] or ""), r["watchlist_tier"]
+            )
         )
 
     chosen = interleave_regions(by_geo, max_items)

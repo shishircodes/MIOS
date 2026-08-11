@@ -253,3 +253,76 @@ def test_display_numbers_follow_the_shown_order(db):
         _add_region(db, f"au-{i}", region="AU")
     p = build_digest_payload(db, days=7)
     assert [s["n"] for s in p["signals"]] == ["01", "02", "03", "04"]
+
+
+# ---------- region derivation + source balance ----------
+
+
+def _add_full(db, signal_id, *, source, geography, raw, days_ago=1,
+              category="hiring_velocity", tier=None):
+    captured = (datetime.now(timezone.utc) - timedelta(days=days_ago)).isoformat(timespec="seconds")
+    with connect(db) as conn:
+        conn.execute(
+            "INSERT INTO signals (signal_id, source_type, source_name, source_url, "
+            "captured_at, geography, sector, company_name, watchlist_tier, "
+            "signal_category, review_cycle, raw_content, analysis_notes, "
+            "is_new_prospect, classified_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (signal_id, "job_board", source, f"https://x/{signal_id}", captured, geography,
+             "mining", "Acme", tier, category, "weekly", raw, "note", 0, captured),
+        )
+
+
+def test_source_geography_wins_when_content_names_no_landmark(db):
+    """Regression: region came from keyword inference alone, so PNGworkforce jobs
+    whose teaser mentioned no PNG place were filed under Australia."""
+    _add_full(db, "png-generic", source="pngworkforce", geography="PNG",
+              raw="Administrative Assistant | Acme | full time office role")
+
+    p = build_digest_payload(db, days=7)
+    assert p["signals"][0]["region"] == "PNG"
+
+
+def test_content_can_still_promote_an_au_row_to_png(db):
+    """A PNG role advertised on an Australian board is a PNG signal — the source's
+    own geography is a baseline, not a ceiling."""
+    _add_full(db, "seek-png", source="seek", geography="AU",
+              raw="Project Engineers to work in PNG on civil projects | Kiwi Niugini")
+
+    p = build_digest_payload(db, days=7)
+    assert p["signals"][0]["region"] == "PNG"
+
+
+def test_au_rows_stay_au(db):
+    _add_full(db, "seek-au", source="seek", geography="AU",
+              raw="Maintenance Planner | BHP | Newman WA")
+    p = build_digest_payload(db, days=7)
+    assert p["signals"][0]["region"] == "AU"
+
+
+def test_verbose_source_cannot_monopolise_a_region(db):
+    """Regression: the sort tiebreak was content length, so Adzuna's ~610-char
+    records displaced every SEEK record at ~245 and SEEK vanished from the
+    Australia section despite having the most AU signals."""
+    for i in range(30):
+        _add_full(db, f"adz-{i}", source="adzuna", geography="AU",
+                  raw="Engineer at Acme in Perth. " + ("detail " * 90))
+    for i in range(30):
+        _add_full(db, f"seek-{i}", source="seek", geography="AU",
+                  raw="Engineer at Acme in Perth. short")
+
+    p = build_digest_payload(db, days=7)
+    sources = Counter(s["source"] for s in p["signals"])
+    assert sources["seek"] > 0, f"the terser source was squeezed out: {sources}"
+    assert sources["adzuna"] > 0
+    # Round-robin, so the split is even.
+    assert abs(sources["adzuna"] - sources["seek"]) <= 1, sources
+
+
+def test_watchlist_tier_outranks_a_longer_advert(db):
+    _add_full(db, "wordy", source="seek", geography="AU", tier=None,
+              raw="Engineer at Acme. " + ("padding " * 60))
+    _add_full(db, "tier-a", source="seek", geography="AU", tier="A",
+              raw="Engineer at Acme. short")
+
+    p = build_digest_payload(db, days=7)
+    assert p["signals"][0]["id"] == "tier-a"
