@@ -382,3 +382,71 @@ input, textarea, select { font-family: inherit; }
 .feed-search input::placeholder { color: var(--muted); }
 .feed-search input:focus { background: var(--surface); border-color: var(--line-3); }
 .feed-search input:focus-visible { box-shadow: 0 0 0 3px var(--primary-bg); }
+
+/* Mobile dashboard layout */
+@media (max-width: 768px) {
+html,
+body {
+width: 100%;
+max-width: 100%;
+overflow-x: hidden;
+}
+
+.app {
+display: flex;
+flex-direction: column;
+width: 100%;
+height: auto;
+min-height: 100vh;
+}
+
+.topbar {
+width: 100%;
+}
+
+.sidebar {
+position: static;
+width: 100%;
+height: auto;
+min-height: 0;
+display: flex;
+flex-direction: row;
+align-items: stretch;
+gap: 8px;
+padding: 8px;
+overflow-x: auto;
+overflow-y: hidden;
+}
+
+.sidebar > div {
+flex: 0 0 auto;
+min-width: 170px;
+}
+
+.sidebar .footer {
+flex: 0 0 auto;
+}
+
+.main {
+width: 100%;
+min-width: 0;
+margin: 0;
+}
+
+.page {
+width: 100%;
+min-width: 0;
+padding: 12px;
+}
+
+.kpi-row {
+grid-template-columns: 1fr;
+}
+
+table {
+display: block;
+width: 100%;
+max-width: 100%;
+overflow-x: auto;
+}
+}
