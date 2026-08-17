@@ -106,16 +106,39 @@ jobs:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
 
-      # Build only — proves the Dockerfiles are valid on every PR without
-      # needing registry credentials, which forks don't have.
+      # Built and run locally, never pushed — so this works on forks, which have
+      # no registry credentials.
       - name: Build API image
         uses: docker/build-push-action@v6
         with:
           context: .
           file: Dockerfile.api
           push: false
+          load: true               # keep it locally so the next step can run it
+          tags: mios-api:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # Building only proves the Dockerfile parses. A package missing from the
+      # COPY list builds cleanly and then fails when uvicorn imports the app —
+      # which reaches the deploy as "container is unhealthy", naming neither the
+      # module nor the file. This runs the image the same way production does
+      # and waits for the same endpoint the container healthcheck uses.
+      - name: API image starts and serves /api/health
+        run: |
+          docker run -d --name mios-api-ci -p 8787:8787 mios-api:ci
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8787/api/health > /dev/null; then
+              echo "healthy after ${i}s"
+              docker rm -f mios-api-ci > /dev/null
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::API image never answered /api/health"
+          docker logs mios-api-ci
+          docker rm -f mios-api-ci > /dev/null
+          exit 1
 
       - name: Build web image
         uses: docker/build-push-action@v6

@@ -26,6 +26,10 @@ COPY delivery ./delivery
 COPY evaluation ./evaluation
 COPY api ./api
 COPY pipeline ./pipeline
+# Mode Push. `api/push_api.py` imports from here at module load, so leaving it
+# out does not fail the build — it fails when uvicorn starts, which surfaces as
+# an unhealthy container rather than anything mentioning a missing module.
+COPY push ./push
 
 RUN pip install --no-cache-dir ".[api]"
 

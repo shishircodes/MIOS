@@ -493,7 +493,7 @@ Four workflows in `.github/workflows/`:
 
 | Workflow | Trigger | What it does |
 |---|---|---|
-| `ci.yml` | every PR + push to `main` | pytest against **both** SQLite and a real PostgreSQL service container, web typecheck + build, Docker image builds |
+| `ci.yml` | every PR + push to `main` | pytest against **both** SQLite and a real PostgreSQL service container, web typecheck + build, Docker images built **and started** |
 | `pr-preview.yml` | PR opened/updated | Neon branch per PR, publishes images to GHCR, deploys a preview stack, comments the URLs |
 | `pr-cleanup.yml` | PR closed/merged | deletes the Neon branch, tears down the containers |
 | `deploy-main.yml` | `main` **after CI passes** | publishes images, applies the schema, deploys to the VPS |
@@ -504,6 +504,13 @@ the server. `ci.yml` needs no secrets and runs on forks.
 Running the tests against a real PostgreSQL container on every PR is what catches
 dialect bugs that only appear on Neon — three were found this way, all invisible
 against SQLite.
+
+CI also **starts** the API image and waits for `/api/health`, not just builds it.
+A build proves the Dockerfile parses; it does not prove the app runs. `Dockerfile.api`
+copies packages in one by one, so **a new top-level package needs a `COPY` line
+added** — miss it and the image builds cleanly, then fails when uvicorn imports
+the app. That reaches the deploy as `container mios-api-1 is unhealthy`, which
+names neither the module nor the file.
 
 ### What a PR gets
 
