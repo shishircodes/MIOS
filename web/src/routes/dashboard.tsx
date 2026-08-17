@@ -3,6 +3,7 @@ import { BarBlock, Section, SparkBar } from '~/components/ui'
 import { hist } from '~/data/mock'
 
 export const Route = createFileRoute('/dashboard')({
+  head: () => ({ meta: [{ title: 'Dashboard · MIOS' }] }),
   component: DashboardScreen,
 })
 

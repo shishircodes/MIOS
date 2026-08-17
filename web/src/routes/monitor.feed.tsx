@@ -5,6 +5,7 @@ import { Icons, Section, TierChip } from '~/components/ui'
 import { digestQueryOptions } from '~/lib/api'
 
 export const Route = createFileRoute('/monitor/feed')({
+  head: () => ({ meta: [{ title: 'Signal Feed · MIOS' }] }),
   component: SignalFeed,
 })
 

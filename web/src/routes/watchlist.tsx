@@ -3,6 +3,7 @@ import { Section, TierChip, Trend } from '~/components/ui'
 import { watchlist } from '~/data/mock'
 
 export const Route = createFileRoute('/watchlist')({
+  head: () => ({ meta: [{ title: 'Watchlist · MIOS' }] }),
   component: WatchlistScreen,
 })
 
