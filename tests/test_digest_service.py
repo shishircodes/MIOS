@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 from collections import Counter
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone
 
 import pytest
 
@@ -455,11 +455,21 @@ def test_a_scrape_that_started_later_in_the_day_still_counts_as_a_prior_week(db)
     """Regression, found against live data: the two runs started at 23:14 and
     23:40. Anchoring the window on the exact timestamp put the boundary 26
     minutes before the earlier scrape, so a full prior week was absorbed into
-    'this week' and the baseline vanished."""
+    'this week' and the baseline vanished.
+
+    The two runs are placed at fixed wall-clock times rather than at offsets
+    from `now`. An earlier version used `days_ago=7.98`, which drifts across the
+    midnight boundary as the day advances — the test passed in the morning and
+    failed at 23:49.
+    """
     now = datetime.now(timezone.utc)
-    # Prior week's run started 26 minutes later in the day than this week's.
-    _week(db, days_ago=1 + 0.02, count=4)   # this week, earlier in the day
-    _week(db, days_ago=8 - 0.02, count=6)   # a week back, later in the day
+    midnight = datetime.combine(now.date(), time.min, tzinfo=timezone.utc)
+    this_run = midnight - timedelta(days=1) + timedelta(hours=23, minutes=14)
+    prior_run = this_run - timedelta(days=7) + timedelta(minutes=26)  # 26 min later in its day
+
+    since = lambda ts: (now - ts).total_seconds() / 86400.0
+    _week(db, days_ago=since(this_run), count=4, prefix="this")
+    _week(db, days_ago=since(prior_run), count=6, prefix="prior")
 
     r = _row(build_digest_payload(db, days=7), "BHP")
     assert r["basis"] == 1, "the earlier week was swallowed by the current window"

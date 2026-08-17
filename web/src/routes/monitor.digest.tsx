@@ -15,6 +15,10 @@ function baselineLabel(velocity: VelocityRow[]): string {
   return `WEEK / AVG OF PRIOR ${basis} / Δ`
 }
 
+/** Signals rendered before the reader has to ask for more. Twelve fills a
+ *  screen without burying the rail beside it. */
+const PREVIEW_COUNT = 12
+
 export const Route = createFileRoute('/monitor/digest')({
   // `?q=` lets the topbar search deep-link into this page's filter, so the
   // global box does something real instead of decorating the header.
@@ -33,6 +37,7 @@ function WeeklyDigest() {
   const [drawer, setDrawer] = useState<Signal | null>(null)
   const { q: urlQuery } = Route.useSearch()
   const [query, setQuery] = useState(urlQuery ?? '')
+  const [showAll, setShowAll] = useState(false)
 
   // Follow the URL when the topbar search navigates here while already on the page.
   useEffect(() => {
@@ -94,8 +99,14 @@ function WeeklyDigest() {
 
   // Split the *filtered* set, so the region headings and counts agree with
   // what the search actually left on screen.
-  const au = matched.filter((s) => s.region === 'AU')
-  const png = matched.filter((s) => s.region === 'PNG')
+  const visible = showAll ? matched : matched.slice(0, PREVIEW_COUNT)
+  const hidden = matched.length - visible.length
+  const au = visible.filter((s) => s.region === 'AU')
+  const png = visible.filter((s) => s.region === 'PNG')
+
+  // Bars are scaled against the busiest company, so the rail reads as a
+  // comparison rather than ten unrelated numbers.
+  const velocityMax = data.velocity.reduce((m, r) => Math.max(m, r.wk), 0)
 
   return (
     <div className="page">
@@ -138,132 +149,124 @@ function WeeklyDigest() {
         <Kpi label="Mode Push queries" kpi={data.kpis.pushQueries} />
       </div>
 
-      {/* Key Signals */}
-      <Section
-        title="Key Signals This Week"
-        tools={
-          <div className="section-search">
-            <input
-              type="search"
-              value={query}
-              placeholder="Filter by company, role, sector…"
-              aria-label="Filter key signals"
-              onChange={(e) => setQuery(e.target.value)}
-            />
-            <span className="count mono">
-              {query ? `${matched.length} / ${data.signals.length}` : `${data.signals.length} ITEMS`}
-            </span>
-          </div>
-        }
-      >
-        {au.length > 0 && (
-          <>
-            <div className="region-h">
-              <span className="flag" style={{ background: '#1A2837' }} />
-              <h3>Australia</h3>
-              <span className="count">{au.length} signals</span>
-            </div>
-            {au.map((s) => <SignalRow key={s.id} s={s} onOpen={() => setDrawer(s)} />)}
-          </>
-        )}
-        {png.length > 0 && (
-          <>
-            <div className="region-h">
-              <span className="flag" style={{ background: '#0F6E3D' }} />
-              <h3>Papua New Guinea</h3>
-              <span className="count">{png.length} signals</span>
-            </div>
-            {png.map((s) => <SignalRow key={s.id} s={s} onOpen={() => setDrawer(s)} />)}
-          </>
-        )}
-        {matched.length === 0 && (
-          <div className="center-empty">
-            {query
-              ? <>No signals match “{query}”.{' '}
-                  <button className="btn sm" onClick={() => setQuery('')}>Clear filter</button>
-                </>
-              : 'No classified signals yet.'}
-          </div>
-        )}
-      </Section>
-
-      {/* Hiring Velocity */}
-      <Section
-        title="Hiring Velocity · Top 10 Watchlist"
-        tools={<span>{baselineLabel(data.velocity)}</span>}
-      >
-        <table className="tbl">
-          <thead>
-            <tr>
-              <th>Company</th>
-              <th>Sector</th>
-              <th>Tier</th>
-              <th className="num">This wk</th>
-              <th className="num">Prior avg</th>
-              <th className="num">Change</th>
-              <th style={{ width: 120 }}>Pattern</th>
-            </tr>
-          </thead>
-          <tbody>
-            {data.velocity.map((row, i) => (
-              <tr key={i}>
-                <td><strong>{row.co}</strong></td>
-                <td className="muted">{row.sector}</td>
-                <td><TierChip tier={row.tier} /></td>
-                <td className="num"><strong>{row.wk}</strong></td>
-                {/* No baseline means no comparison. Showing a dash is the honest
-                    render: the previous version filled both of these columns with
-                    arithmetic on `wk` itself. */}
-                <td className="num muted">{row.avg ?? '—'}</td>
-                <td className="num">
-                  {row.change === null
-                    ? <span className="muted">{row.basis === 0 ? '—' : 'new'}</span>
-                    : <Trend
-                        dir={row.change > 5 ? 'up' : row.change < -5 ? 'down' : 'flat'}
-                        value={Math.abs(row.change)}
-                        unit="%"
-                      />}
-                </td>
-                <td>
-                  {row.trend.length > 1
-                    ? <SparkBar
-                        data={row.trend}
-                        color={(row.change ?? 0) > 25 ? 'var(--rust)' : 'var(--ink-3)'}
-                        height={20}
-                      />
-                    : <span className="muted">—</span>}
-                </td>
-              </tr>
-            ))}
-            {data.velocity.length === 0 && (
-              <tr><td colSpan={7} className="muted" style={{ textAlign: 'center', padding: 24 }}>No watchlist activity.</td></tr>
+      {/* Signals on the left, the week's measurements alongside them on the
+          right. Previously everything was one column, so Hiring Velocity and
+          New Names sat below forty signal rows — the numbers that answer "what
+          changed?" were the last thing anyone saw, if they scrolled at all. */}
+      <div className="digest-grid">
+        <div className="digest-main">
+          <Section
+            title="Key Signals This Week"
+            tools={
+              <div className="section-search">
+                <input
+                  type="search"
+                  value={query}
+                  placeholder="Filter by company, role, sector…"
+                  aria-label="Filter key signals"
+                  onChange={(e) => setQuery(e.target.value)}
+                />
+                <span className="count mono">
+                  {query ? `${matched.length} / ${data.signals.length}` : `${data.signals.length} ITEMS`}
+                </span>
+              </div>
+            }
+          >
+            {au.length > 0 && (
+              <>
+                <div className="region-h">
+                  <span className="flag" style={{ background: 'var(--ink)' }} />
+                  <h3>Australia</h3>
+                  <span className="count">{au.length} shown</span>
+                </div>
+                {au.map((s) => <SignalRow key={s.id} s={s} onOpen={() => setDrawer(s)} />)}
+              </>
             )}
-          </tbody>
-        </table>
-      </Section>
-
-      {/* New Names */}
-      <Section title="New Names · Not in Watchlist" tools={<span>{data.newNames.length} CANDIDATES</span>}>
-        <table className="tbl">
-          <thead>
-            <tr><th>Company</th><th>Signal</th><th>Sector</th><th>Region</th><th>Recommendation</th></tr>
-          </thead>
-          <tbody>
-            {data.newNames.map((n, i) => (
-              <tr key={i}>
-                <td><strong>{n.co}</strong></td>
-                <td className="muted">{n.signal}</td>
-                <td className="muted">{n.sector}</td>
-                <td><span className="chip">{n.region}</span></td>
-                <td><span className="chip new">{n.reco}</span></td>
-              </tr>
-            ))}
-            {data.newNames.length === 0 && (
-              <tr><td colSpan={5} className="muted" style={{ textAlign: 'center', padding: 24 }}>No new prospects.</td></tr>
+            {png.length > 0 && (
+              <>
+                <div className="region-h">
+                  <span className="flag" style={{ background: 'var(--moss)' }} />
+                  <h3>Papua New Guinea</h3>
+                  <span className="count">{png.length} shown</span>
+                </div>
+                {png.map((s) => <SignalRow key={s.id} s={s} onOpen={() => setDrawer(s)} />)}
+              </>
             )}
-          </tbody>
-        </table>
-      </Section>
+            {matched.length === 0 && (
+              <div className="center-empty">
+                {query
+                  ? <>No signals match “{query}”.{' '}
+                      <button className="btn sm" onClick={() => setQuery('')}>Clear filter</button>
+                    </>
+                  : 'No classified signals yet.'}
+              </div>
+            )}
+            {/* Forty rows is a wall. Showing a readable slice first, with the
+                rest one click away, keeps the page scannable without hiding
+                anything. */}
+            {hidden > 0 && (
+              <div className="feed-more">
+                <span className="muted">
+                  Showing {visible.length} of {matched.length}
+                  {query ? ' matching signals' : ' signals'}
+                </span>
+                <button className="btn sm" onClick={() => setShowAll(true)}>
+                  Show all {matched.length}
+                </button>
+              </div>
+            )}
+            {showAll && matched.length > PREVIEW_COUNT && (
+              <div className="feed-more">
+                <span className="muted">Showing all {matched.length}</span>
+                <button className="btn sm" onClick={() => setShowAll(false)}>Show fewer</button>
+              </div>
+            )}
+          </Section>
+        </div>
+
+        <aside className="digest-rail" aria-label="Measurements for this week">
+          <Section
+            title="Hiring Velocity"
+            tools={<span>TOP {data.velocity.length}</span>}
+          >
+            {data.velocity.length === 0 ? (
+              <div className="center-empty" style={{ padding: 28 }}>No watchlist activity.</div>
+            ) : (
+              <>
+                <div className="vel-list">
+                  {data.velocity.map((row, i) => (
+                    <VelocityItem key={i} row={row} max={velocityMax} />
+                  ))}
+                </div>
+                <p className="rail-foot">{baselineLabel(data.velocity)}</p>
+              </>
+            )}
+          </Section>
+
+          <Section title="New Names" tools={<span>{data.newNames.length} FOUND</span>}>
+            {data.newNames.length === 0 ? (
+              <div className="center-empty" style={{ padding: 28 }}>No new prospects.</div>
+            ) : (
+              <div className="nn-list">
+                {data.newNames.map((n, i) => (
+                  <div className="nn-item" key={i}>
+                    <div className="nn-head">
+                      <strong>{n.co}</strong>
+                      <span className="chip">{n.region}</span>
+                    </div>
+                    <p className="nn-sig">{n.signal}</p>
+                    <div className="nn-foot">
+                      <span className="muted">{n.sector}</span>
+                      <span className="chip teal">{n.reco}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            <p className="rail-foot">Not on the watchlist — review before adding.</p>
+          </Section>
+        </aside>
+      </div>
 
       <div style={{ textAlign: 'center', padding: '24px 0', fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--muted)', letterSpacing: '0.08em' }}>
         END OF DIGEST · DATA FROM MIOS PYTHON PIPELINE ({data.sourceMode.toUpperCase()})
@@ -356,5 +359,38 @@ function SignalDetail({ s }: { s: Signal }) {
         <button className="btn ghost">{Icons.archive} Archive</button>
       </div>
     </>
+  )
+}
+
+/** One company in the rail: how much they are hiring, how that compares with
+ *  their own recent norm, and how they rank against the others on screen. */
+function VelocityItem({ row, max }: { row: VelocityRow; max: number }) {
+  // A floor of 3% keeps a company with one signal visible as a mark rather
+  // than an empty rail that reads as "no data".
+  const pct = max > 0 ? Math.max(3, Math.round((row.wk / max) * 100)) : 0
+  return (
+    <div className="vel-item">
+      <div className="vel-head">
+        <span className="co">{row.co}</span>
+        <span className="wk mono tnum">{row.wk}</span>
+      </div>
+      <div className="vel-rail"><span style={{ width: `${pct}%` }} /></div>
+      <div className="vel-meta">
+        <TierChip tier={row.tier} />
+        <span className="sector">{row.sector}</span>
+        <span className="vel-chg">
+          {row.change === null
+            ? <span className="muted">{row.basis === 0 ? 'no baseline' : 'new'}</span>
+            : <Trend
+                dir={row.change > 5 ? 'up' : row.change < -5 ? 'down' : 'flat'}
+                value={Math.abs(row.change)}
+                unit="%"
+              />}
+          {row.trend.length > 1 && (
+            <SparkBar data={row.trend} color="var(--teal)" height={14} />
+          )}
+        </span>
+      </div>
+    </div>
   )
 }

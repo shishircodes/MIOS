@@ -163,6 +163,57 @@ def test_classify_pending_happy_path(db):
     assert row[5] is not None
 
 
+def test_classify_pending_has_no_batch_cap_by_default(db):
+    """Regression: `batch_size` defaulted to a number the caller guessed from the
+    source count. Three sources at 50 each produced 150 rows against a cap of
+    100, so 50 stayed unclassified every run and the digest ran a week behind on
+    a third of its input. Quota is the only ceiling that means anything."""
+    ingest(
+        [
+            {"source_url": f"u{i}",
+             "raw_content": f"Maintenance Planner {i} at BHP Pilbara, FIFO 8/6 ex-Perth, multiple roles."}
+            for i in range(150)
+        ],
+        db,
+    )
+    fake = _fake_caller_factory({
+        "company_name": "BHP", "sector": "mining",
+        "signal_category": "hiring_velocity", "review_cycle": "weekly",
+        "watchlist_match": "BHP", "is_new_prospect": False, "reasoning": "hiring",
+    })
+    counts = classify_pending(db, gemini_caller=fake)
+
+    assert counts["total_pending"] == 150, "every pending row should be picked up"
+    assert counts["classified"] == 150
+
+    with sqlite3.connect(db) as c:
+        left = c.execute("SELECT count(*) FROM signals WHERE classified_at IS NULL").fetchone()[0]
+    assert left == 0, f"{left} rows left unclassified"
+
+
+def test_classify_pending_still_honours_an_explicit_batch_size(db):
+    """Short runs are still possible — the cap just is not the default."""
+    ingest(
+        [
+            {"source_url": f"b{i}",
+             "raw_content": f"Maintenance Planner {i} at BHP Pilbara, FIFO 8/6 ex-Perth, multiple roles."}
+            for i in range(30)
+        ],
+        db,
+    )
+    fake = _fake_caller_factory({
+        "company_name": "BHP", "sector": "mining",
+        "signal_category": "hiring_velocity", "review_cycle": "weekly",
+        "watchlist_match": "BHP", "is_new_prospect": False, "reasoning": "hiring",
+    })
+    counts = classify_pending(db, batch_size=10, gemini_caller=fake)
+    assert counts["total_pending"] == 10
+
+    with sqlite3.connect(db) as c:
+        left = c.execute("SELECT count(*) FROM signals WHERE classified_at IS NULL").fetchone()[0]
+    assert left == 20, "the rest stay pending for the next run"
+
+
 def test_classify_pending_prefilter_short(db):
     ingest([{"source_url": "u-short", "raw_content": "tiny"}], db)
     # raw_content="tiny" gets stripped by ingest? It's < MIN but not empty,

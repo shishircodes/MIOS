@@ -73,7 +73,9 @@ def run_live_cycle(
 
     classify_counts = classify_pending(
         db_path,
-        batch_size=max(scrape_limit * 2, 100),
+        # No batch cap: classify whatever is pending, bounded by the daily Gemini
+        # quota. The old `scrape_limit * 2` assumed two sources and left 50 rows
+        # unclassified per run once a third was added.
         gemini_caller=gemini_caller,
     )
     classified = int(classify_counts.get("classified", 0))

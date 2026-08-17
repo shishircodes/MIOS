@@ -416,10 +416,21 @@ def _now_iso() -> str:
 
 def classify_pending(
     db_path: str | Path,
-    batch_size: int = 100,
+    batch_size: int | None = None,
     gemini_caller: Callable[..., dict[str, Any]] | None = None,
 ) -> dict[str, int]:
     """Classify unclassified signals.
+
+    `batch_size` caps how many rows this run will touch. The default of `None`
+    means "everything pending", leaving the daily Gemini quota as the only
+    limit — which is the only ceiling that reflects a real constraint.
+
+    Callers previously had to guess a number, and the guess went stale: a cap of
+    100 was fine for two sources scraping 50 each, then a third source was added
+    and every run silently left 50 rows unclassified. They were not lost — the
+    next run picks them up — but the digest was always a week behind on a third
+    of its input. An explicit `batch_size` is still honoured, for tests and for
+    deliberately short runs.
 
     Returns counts keyed by signal_category, plus 'filtered_too_short',
     'filtered_blocklist', 'errors', 'classified', 'total_pending',
@@ -443,9 +454,9 @@ def classify_pending(
             conn.commit()
             return dict(counts)
 
-        # Cap signals to what quota allows
+        # Cap signals to what quota allows, and to `batch_size` if one was given.
         max_signals = remaining_calls * SIGNALS_PER_API_CALL
-        effective_limit = min(batch_size, max_signals)
+        effective_limit = max_signals if batch_size is None else min(batch_size, max_signals)
         # ------------------------------------
 
         watchlist = _load_watchlist(conn)
