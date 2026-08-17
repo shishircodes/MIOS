@@ -27,6 +27,10 @@ api = [
     "authlib>=1.3.0",
     "httpx>=0.27.0",
     "itsdangerous>=2.2.0",  # signs the session cookie (Starlette SessionMiddleware)
+    # Mode Push CV intake: multipart parses the upload, pypdf reads PDF CVs.
+    # Word .docx needs nothing extra — push/cv_extract reads it with zipfile.
+    "python-multipart>=0.0.9",
+    "pypdf>=4.2.0",
 ]
 
 [build-system]
@@ -37,7 +41,7 @@ build-backend = "setuptools.build_meta"
 where = ["."]
 include = [
     "config*", "scraper*", "loader*", "agents*", "delivery*", "evaluation*",
-    "api*", "pipeline*",
+    "api*", "pipeline*", "push*",
 ]
 
 [tool.pytest.ini_options]

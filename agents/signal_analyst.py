@@ -3,13 +3,14 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
-from rapidfuzz import fuzz, process
+from rapidfuzz import fuzz
 
 from agents.prompts import (
     BLOCKLIST_KEYWORDS,
@@ -138,37 +139,107 @@ def _load_watchlist(conn) -> list[dict[str, Any]]:
     return out
 
 
+#: Legal-form and generic words that carry no identity. "Downer EDI Limited" and
+#: "Downer" are the same client; "Ltd" must not contribute to a match.
+_COMPANY_NOISE = {
+    "pty", "ltd", "limited", "inc", "incorporated", "plc", "llc", "lp", "llp",
+    "corp", "corporation", "co", "company", "group", "holdings", "holding",
+    "international", "intl", "australia", "australian", "png", "nz", "global",
+    "services", "service", "solutions", "resources", "industries", "enterprises",
+    "sa", "nv", "bv", "ag", "gmbh", "as", "asa", "spa", "the", "and", "t/a", "ta",
+}
+
+_NON_ALNUM = re.compile(r"[^a-z0-9]+")
+
+
+def _normalise_company(name: str) -> str:
+    """Lowercase, strip punctuation, and drop legal-form and geography words.
+
+    'Downer EDI Limited' -> 'downer edi'; 'CAPS Australia Pty Ltd' -> 'caps'.
+    """
+    tokens = [t for t in _NON_ALNUM.sub(" ", (name or "").lower()).split() if t]
+    kept = [t for t in tokens if t not in _COMPANY_NOISE]
+    # Everything was noise ("Australia Pty Ltd") — fall back so it can still be
+    # compared rather than matching every other emptied string.
+    return " ".join(kept or tokens)
+
+
+def _contains_phrase(haystack: str, needle: str) -> bool:
+    """True when `needle` appears in `haystack` as whole words.
+
+    Word boundaries matter: without them 'Vale' matches 'Valeria' and 'BHP'
+    matches any string containing those letters in sequence.
+    """
+    if not needle:
+        return False
+    return re.search(rf"(?<!\w){re.escape(needle)}(?!\w)", haystack) is not None
+
+
 def fuzzy_match_watchlist(
     candidate: str | None,
     watchlist: list[dict[str, Any]],
     threshold: int = FUZZY_THRESHOLD,
 ) -> tuple[str | None, str | None]:
-    """Fuzzy-match a candidate company name against the watchlist.
-    Returns (matched_canonical_name, tier) or (None, None)."""
-    if not candidate:
-        return None, None
-    candidate = candidate.strip()
-    if not candidate:
+    """Match a company name against the watchlist.
+
+    Returns (canonical_name, tier) or (None, None).
+
+    Deliberately NOT `fuzz.WRatio`, which was the previous implementation and
+    produced false positives at scale — 26 of 29 tiered companies in production
+    were wrong, including 'Hastings Deering PNG Ltd' -> ExxonMobil and
+    'CAPS Australia Pty Ltd' -> Vale. WRatio blends in `partial_ratio`, which
+    scores a short name highly against any longer string sharing a few
+    characters, so short watchlist entries matched almost anything.
+
+    A false positive here is expensive: Mode Monitor over-reports hiring
+    velocity, and Mode Push tells the BD team to pitch a candidate to what is
+    actually a competitor, labelled as an active client. The strategy below
+    therefore prefers a miss over a wrong match:
+
+      1. exact match once legal forms are stripped
+      2. the watchlist name appears as whole words in the candidate
+         ('Downer' in 'Downer EDI Limited')
+      3. high token_sort_ratio on the normalised strings, for word-order
+         differences and typos — no substring component
+    """
+    if not candidate or not candidate.strip():
         return None, None
 
-    pool: list[tuple[str, dict[str, Any]]] = []
+    cand_norm = _normalise_company(candidate)
+    if not cand_norm:
+        return None, None
+
+    best_entry: dict[str, Any] | None = None
+    best_score = 0.0
+    best_name = ""
+
     for entry in watchlist:
         for name in entry["all_names"]:
-            pool.append((name, entry))
+            name_norm = _normalise_company(name)
+            if not name_norm:
+                continue
 
-    best = process.extractOne(
-        candidate,
-        [name for name, _ in pool],
-        scorer=fuzz.WRatio,
-        score_cutoff=threshold,
-    )
-    if not best:
+            if cand_norm == name_norm:
+                score = 100.0
+            elif _contains_phrase(cand_norm, name_norm):
+                # A contained match is strong, but rank longer names higher:
+                # 'rio tinto' inside a string beats a bare 'bhp' appearing in it.
+                score = 99.0 + len(name_norm) / 1000
+            else:
+                ratio = fuzz.token_sort_ratio(cand_norm, name_norm)
+                if ratio < max(threshold, 90):
+                    continue
+                score = float(ratio)
+
+            if score > best_score:
+                best_entry, best_score, best_name = entry, score, name
+
+    if best_entry is None:
         return None, None
-    matched_name, score, idx = best
-    entry = pool[idx][1]
-    log.debug("fuzzy match: %r -> %r (score=%s, canonical=%s)",
-              candidate, matched_name, score, entry["company_name"])
-    return entry["company_name"], entry["tier"]
+
+    log.debug("watchlist match: %r -> %r (via %r, score=%.1f)",
+              candidate, best_entry["company_name"], best_name, best_score)
+    return best_entry["company_name"], best_entry["tier"]
 
 
 # --------------------------------------------------------------------------

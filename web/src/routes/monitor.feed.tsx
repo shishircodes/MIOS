@@ -130,7 +130,7 @@ function FilterGroup({ label, value, options, onChange }: { label: string; value
   return (
     <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
       <span className="muted" style={{ fontSize: 11 }}>{label}:</span>
-      <div style={{ display: 'flex', border: '1px solid var(--line-2)', background: 'var(--surface-2)', borderRadius: 6, overflow: 'hidden' }}>
+      <div style={{ display: 'flex', border: '1px solid var(--line-2)', background: 'var(--surface-2)', overflow: 'hidden' }}>
         {options.map((o) => (
           <button
             key={o}

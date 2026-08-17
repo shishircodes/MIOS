@@ -27,8 +27,16 @@ export interface Signal {
 export interface VelocityRow {
   co: string
   wk: number
-  avg: number
-  change: number
+  /** Measured average over the previous `basis` windows. Null when there is no
+   *  history to compare against — the table must then show no comparison. */
+  avg: number | null
+  /** Percentage change against `avg`. Null when there is no baseline, or when
+   *  the company had no prior signals (nothing to be a percentage of). */
+  change: number | null
+  /** Number of earlier windows `avg` covers. 0 means no history exists yet. */
+  basis: number
+  /** Counts per window, oldest first, ending with this window. */
+  trend: number[]
   sector: string
   tier: Tier
 }
@@ -40,6 +48,66 @@ export interface NewName {
   region: string
   reco: string
   status: string
+}
+
+// ---------- Mode Push (api/push_api.py) ----------
+
+export type Confidence = 'high' | 'medium' | 'low'
+
+/** A profile as the BD team edits it. Every field is optional except the name,
+ *  because a CV parse can miss any of them and a half-known consultant is still
+ *  worth matching. */
+export interface ProfileDraft {
+  fullName: string | null
+  email: string | null
+  phone: string | null
+  currentTitle: string | null
+  sector: string | null
+  yearsExperience: number | null
+  region: string | null
+  skills: string[]
+  availability?: string | null
+  notes?: string | null
+  /** Per-field parser confidence, keyed by snake_case field name. Absent on a
+   *  form the user typed themselves — nothing was guessed. */
+  confidence?: Record<string, Confidence>
+}
+
+/** A stored profile: a draft plus its identity and provenance. */
+export interface StoredProfile extends ProfileDraft {
+  id: string
+  intakeSource: 'cv_upload' | 'manual_form'
+  sourceFilename: string | null
+  createdAt: string
+}
+
+export interface ParsedCV {
+  draft: ProfileDraft
+  sourceFilename: string
+  charactersRead: number
+  /** Always false — the draft is for review, not a saved record. */
+  saved: boolean
+}
+
+export interface Match {
+  rank: number
+  co: string
+  score: number
+  rel: string
+  region: string
+  sector: string
+  evidence: string[]
+  action: string
+  signalCount: number
+  breakdown: Record<string, number>
+}
+
+export interface MatchResponse {
+  profile: ProfileDraft
+  matches: Match[]
+  windowDays: number
+  /** How many signals the ranking stood on — context for a short result list. */
+  signalsConsidered: number
 }
 
 export interface DigestPayload {

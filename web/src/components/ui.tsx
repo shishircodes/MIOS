@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 // ----- Inline monoline icons -----
 function Icon({ d, size = 14, sw = 1.4 }: { d: string; size?: number; sw?: number }) {
@@ -31,6 +32,9 @@ export const Icons: Record<string, ReactNode> = {
   spark: <Icon d="M3 13l4-6 4 4 4-8 4 6 2-2" />,
   ext: <Icon d="M14 4h6v6M20 4l-9 9M10 6H4v14h14v-6" />,
   check: <Icon d="M5 12l5 5 9-11" sw={1.8} />,
+  alert: <Icon d="M12 3L1 21h22L12 3zM12 10v5M12 18h.01" sw={1.6} />,
+  panel: <Icon d="M3 4h18v16H3zM9 4v16" sw={1.6} />,
+  info: <Icon d="M12 3a9 9 0 100 18 9 9 0 000-18zM12 11v6M12 7h.01" sw={1.6} />,
   x: <Icon d="M6 6l12 12M18 6l-12 12" />,
   filter: <Icon d="M3 5h18l-7 9v6l-4-2v-4z" />,
   sort: <Icon d="M7 4v16M3 16l4 4 4-4M17 20V4M13 8l4-4 4 4" />,
@@ -93,19 +97,73 @@ export function BarBlock({ label, value, max, suffix = '' }: { label: string; va
 }
 
 // ----- Drawer -----
+
+/** Must match the exit animation in app.css, or the panel is torn out of the
+ *  DOM part-way through sliding away. */
+const DRAWER_EXIT_MS = 180
+
 export function Drawer({ open, onClose, title, children }: { open: boolean; onClose: () => void; title: string; children: ReactNode }) {
-  if (!open) return null
+  // Stays mounted for the length of the exit animation, so closing slides out
+  // instead of vanishing. `open` alone cannot express that: it is already false
+  // while the panel is still on screen.
+  const [mounted, setMounted] = useState(open)
+  const closeRef = useRef<HTMLButtonElement>(null)
+
+  useEffect(() => {
+    if (open) {
+      setMounted(true)
+      return
+    }
+    const t = setTimeout(() => setMounted(false), DRAWER_EXIT_MS)
+    return () => clearTimeout(t)
+  }, [open])
+
+  // Escape closes it. A modal overlay that can only be dismissed by finding the
+  // right pixel is a trap for keyboard users.
+  useEffect(() => {
+    if (!open) return
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [open, onClose])
+
+  // Move focus into the panel when it opens, so the next Tab lands inside it
+  // rather than continuing from wherever the trigger was in the page.
+  // `mounted` is in the deps because the render that flips `open` still returns
+  // null — the button does not exist until the following render.
+  useEffect(() => {
+    if (open && mounted) closeRef.current?.focus()
+  }, [open, mounted])
+
+  // The caller renders content from the same state that drives `open`
+  // (`{signal && <Detail/>}`), so both are already empty by the time the exit
+  // animation runs. Holding the last non-empty pair keeps the panel populated
+  // on its way out.
+  const last = useRef({ title, children })
+  if (open) last.current = { title, children }
+  const shown = open ? { title, children } : last.current
+
+  if (!mounted) return null
+  const closing = !open
+
   return (
     <>
-      <div className="drawer-mask" onClick={onClose} />
-      <div className="drawer">
+      <div className={closing ? 'drawer-mask closing' : 'drawer-mask'} onClick={onClose} />
+      <div
+        className={closing ? 'drawer closing' : 'drawer'}
+        role="dialog"
+        aria-modal="true"
+        aria-label={shown.title || 'Details'}
+      >
         <div className="drawer-h">
           <div style={{ fontFamily: 'var(--mono)', fontSize: 11, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--muted)' }}>
-            {title}
+            {shown.title}
           </div>
-          <button className="close" onClick={onClose}>{Icons.x}</button>
+          <button ref={closeRef} className="close" onClick={onClose} aria-label="Close">
+            {Icons.x}
+          </button>
         </div>
-        <div className="drawer-body">{children}</div>
+        <div className="drawer-body">{shown.children}</div>
       </div>
     </>
   )

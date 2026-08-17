@@ -326,3 +326,155 @@ def test_watchlist_tier_outranks_a_longer_advert(db):
 
     p = build_digest_payload(db, days=7)
     assert p["signals"][0]["id"] == "tier-a"
+
+
+# ---------- hiring velocity baseline ----------
+#
+# The baseline used to be `round(wk * 0.7)`, so the change was always ~+43% —
+# derived from this week's own number rather than measured against history.
+
+
+def _week(db, *, days_ago, count, company="BHP", prefix=None):
+    """`count` watchlist signals for one company, all captured `days_ago`."""
+    tag = prefix or f"{company.lower().replace(' ', '')}-{days_ago}"
+    for i in range(count):
+        _add(db, f"{tag}-{i}", days_ago=days_ago, company=company)
+
+
+def _row(payload, company):
+    return next(r for r in payload["velocity"] if r["co"] == company)
+
+
+def test_baseline_is_measured_from_earlier_windows(db):
+    _week(db, days_ago=1, count=10)    # this window
+    _week(db, days_ago=9, count=4)     # one window back
+    _week(db, days_ago=16, count=6)    # two windows back
+
+    r = _row(build_digest_payload(db, days=7), "BHP")
+    assert r["wk"] == 10
+    assert r["avg"] == 5.0, "average of the two prior windows, not 70% of 10"
+    assert r["change"] == 100
+    assert r["basis"] == 2
+
+
+def test_baseline_is_not_a_fraction_of_this_week(db):
+    """The tell of the old formula: change was ~+43% whatever the numbers."""
+    _week(db, days_ago=1, count=10)
+    _week(db, days_ago=9, count=10)
+
+    r = _row(build_digest_payload(db, days=7), "BHP")
+    assert r["change"] == 0, "flat activity must read as flat"
+
+
+def test_a_decline_is_reported_as_a_decline(db):
+    _week(db, days_ago=1, count=3)
+    _week(db, days_ago=9, count=12)
+
+    r = _row(build_digest_payload(db, days=7), "BHP")
+    assert r["change"] == -75
+
+
+def test_no_history_reports_no_baseline_rather_than_inventing_one(db):
+    _week(db, days_ago=1, count=7)
+
+    r = _row(build_digest_payload(db, days=7), "BHP")
+    assert r["avg"] is None
+    assert r["change"] is None
+    assert r["basis"] == 0
+
+
+def test_a_company_new_this_window_has_no_percentage(db):
+    """History exists, but not for this company — there is nothing to be a
+    percentage of, so the change is undefined rather than infinite."""
+    _week(db, days_ago=9, count=5, company="BHP")
+    _week(db, days_ago=1, count=4, company="BHP")
+    _week(db, days_ago=1, count=3, company="Newmont")
+
+    r = _row(build_digest_payload(db, days=7), "Newmont")
+    assert r["avg"] == 0.0
+    assert r["change"] is None
+    assert r["basis"] == 1
+
+
+def test_windows_with_no_pipeline_run_do_not_count_as_zero(db):
+    """A week nobody scraped is not a week nobody hired. Counting it would halve
+    the average and manufacture a rise that never happened."""
+    _week(db, days_ago=1, count=6)
+    _week(db, days_ago=9, count=6)
+    # Nothing at all 15-28 days ago: the pipeline did not run.
+
+    r = _row(build_digest_payload(db, days=7), "BHP")
+    assert r["basis"] == 1, "only the window that actually ran should count"
+    assert r["avg"] == 6.0
+    assert r["change"] == 0
+
+
+def test_a_quiet_company_in_a_window_that_ran_does_count_as_zero(db):
+    """The distinction above is about whether the *pipeline* ran, not whether
+    this particular company appeared."""
+    _week(db, days_ago=16, count=4, company="Newmont")   # ran, no BHP
+    _week(db, days_ago=9, count=4, company="BHP")
+    _week(db, days_ago=1, count=4, company="BHP")
+
+    r = _row(build_digest_payload(db, days=7), "BHP")
+    assert r["basis"] == 2
+    assert r["avg"] == 2.0, "the window BHP sat out is a real zero"
+
+
+def test_trend_series_is_real_counts(db):
+    """The sparkline was `[avg, avg*1.1, avg*0.95, avg*1.05, wk]` — decoration
+    shaped like data."""
+    _week(db, days_ago=16, count=2)
+    _week(db, days_ago=9, count=8)
+    _week(db, days_ago=1, count=5)
+
+    r = _row(build_digest_payload(db, days=7), "BHP")
+    assert r["trend"] == [2, 8, 5], "oldest first, ending with this window"
+
+
+def test_baseline_looks_back_no_further_than_the_window_count(db):
+    _week(db, days_ago=1, count=4)
+    for w in range(1, 7):  # six prior windows; only four may be used
+        _week(db, days_ago=2 + w * 7, count=4)
+
+    assert _row(build_digest_payload(db, days=7), "BHP")["basis"] == 4
+
+
+def test_this_week_excludes_older_rows_when_the_window_is_empty(db):
+    """With an empty window the payload falls back to older signals. The velocity
+    column says 'this week', so it must still mean one window — not everything."""
+    _week(db, days_ago=30, count=5)
+    _week(db, days_ago=40, count=9)
+
+    p = build_digest_payload(db, days=7)
+    assert p["windowEmpty"] is True
+    assert _row(p, "BHP")["wk"] == 5, "only the most recent window's signals"
+
+
+def test_a_scrape_that_started_later_in_the_day_still_counts_as_a_prior_week(db):
+    """Regression, found against live data: the two runs started at 23:14 and
+    23:40. Anchoring the window on the exact timestamp put the boundary 26
+    minutes before the earlier scrape, so a full prior week was absorbed into
+    'this week' and the baseline vanished."""
+    now = datetime.now(timezone.utc)
+    # Prior week's run started 26 minutes later in the day than this week's.
+    _week(db, days_ago=1 + 0.02, count=4)   # this week, earlier in the day
+    _week(db, days_ago=8 - 0.02, count=6)   # a week back, later in the day
+
+    r = _row(build_digest_payload(db, days=7), "BHP")
+    assert r["basis"] == 1, "the earlier week was swallowed by the current window"
+    assert r["wk"] == 4
+    assert r["avg"] == 6.0
+
+
+def test_synthetic_rows_get_no_baseline(db):
+    for r in build_digest_payload(db, days=7)["velocity"]:
+        assert r["basis"] == 0
+        assert r["change"] is None
+
+
+def test_velocity_rows_always_declare_their_basis(db):
+    _week(db, days_ago=1, count=3)
+    for r in build_digest_payload(db, days=7)["velocity"]:
+        for key in ("co", "wk", "avg", "change", "basis", "trend", "sector", "tier"):
+            assert key in r, f"the velocity table reads {key}"

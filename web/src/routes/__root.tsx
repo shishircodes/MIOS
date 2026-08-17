@@ -195,10 +195,37 @@ function UserMenu() {
   )
 }
 
+const NAV_KEY = 'mios.nav.collapsed'
+
 function Shell({ children }: { children: ReactNode }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname })
   const crumbs = CRUMBS[pathname] ?? ['Mode Monitor', 'Weekly Digest']
   const { session } = useAuth()
+
+  // Expanded is the default, and the server always renders that. The stored
+  // preference is applied after mount rather than read during render: this app
+  // is server-rendered, so touching localStorage in the render path would make
+  // the client's first paint disagree with the server's HTML.
+  const [collapsed, setCollapsed] = useState(false)
+  useEffect(() => {
+    try {
+      if (localStorage.getItem(NAV_KEY) === '1') setCollapsed(true)
+    } catch {
+      // Private mode or blocked storage — the default is fine.
+    }
+  }, [])
+
+  const toggleNav = () =>
+    setCollapsed((c) => {
+      try {
+        localStorage.setItem(NAV_KEY, c ? '0' : '1')
+      } catch { /* not worth failing the toggle over */ }
+      return !c
+    })
+
+  const shellClass = ['app', collapsed && 'nav-collapsed', session?.authDisabled && 'has-auth-bar']
+    .filter(Boolean)
+    .join(' ')
 
   return (
     <>
@@ -207,8 +234,18 @@ function Shell({ children }: { children: ReactNode }) {
           AUTH_DISABLED — sign-in is bypassed. Development only.
         </div>
       )}
-      <div className={session?.authDisabled ? 'app has-auth-bar' : 'app'}>
+      <div className={shellClass}>
       <div className="topbar">
+        <button
+          className="nav-toggle"
+          onClick={toggleNav}
+          aria-expanded={!collapsed}
+          aria-controls="sidebar-nav"
+          aria-label={collapsed ? 'Expand navigation' : 'Collapse navigation'}
+          title={collapsed ? 'Expand navigation' : 'Collapse navigation'}
+        >
+          {Icons.panel}
+        </button>
         <div className="brand">
           <div className="brand-mark" />
           <span>MIOS</span>
@@ -229,25 +266,39 @@ function Shell({ children }: { children: ReactNode }) {
         <UserMenu />
       </div>
 
-      <div className="sidebar">
+      <nav className="sidebar" id="sidebar-nav" aria-label="Main">
         {NAV.map((g) => (
-          <div key={g.group}>
-            <div className="nav-group-label">{g.group}</div>
+          <div className="nav-group" key={g.group}>
+            {/* Collapsed, the text is hidden by CSS and the element becomes a
+                rule between groups — so the sections stay visually separated
+                without a label that no longer fits. */}
+            <div className="nav-group-label"><span>{g.group}</span></div>
             {g.items.map((it) => (
               <Link
                 key={it.to}
                 to={it.to}
                 className="nav-item"
                 activeProps={{ className: 'nav-item active' }}
+                // Collapsed there is no visible text, so the icon needs an
+                // accessible name of its own; expanded, the label supplies it
+                // and a duplicate would be read twice.
+                aria-label={collapsed ? it.label : undefined}
+                title={collapsed ? it.label : undefined}
               >
-                <span className="ico">{Icons[it.icon]}</span>
-                <span>{it.label}</span>
+                <span className="ico" aria-hidden="true">{Icons[it.icon]}</span>
+                <span className="label">{it.label}</span>
                 {it.badge && <span className="count mono">{it.badge}</span>}
               </Link>
             ))}
           </div>
         ))}
         <div className="footer">
+          <span
+            className="rail-dot dot-ok"
+            title="Python backend online"
+            aria-label="Python backend online"
+            role="img"
+          />
           <div>MIOS v0.2.0 · build 14</div>
           <div style={{ marginTop: 4 }}>
             <span className="dot-ok" />
@@ -255,7 +306,7 @@ function Shell({ children }: { children: ReactNode }) {
           </div>
           <div style={{ marginTop: 8, color: 'var(--ink-3)' }}>Sun batch: 22:00 AEST</div>
         </div>
-      </div>
+      </nav>
 
       <div className="main">{children}</div>
       </div>

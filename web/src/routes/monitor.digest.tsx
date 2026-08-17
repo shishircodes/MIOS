@@ -5,7 +5,15 @@ import { Drawer, Icons, Section, SparkBar, TierChip, Trend } from '~/components/
 import { digestQueryOptions } from '~/lib/api'
 import { UnauthenticatedError } from '~/lib/auth'
 import { useAuth } from '~/lib/auth-context'
-import type { Signal } from '~/lib/types'
+import type { Signal, VelocityRow } from '~/lib/types'
+
+/** Says what the "Change" column is measured against, so the reader is never
+ *  left to assume a comparison that the data cannot support. */
+function baselineLabel(velocity: VelocityRow[]): string {
+  const basis = velocity[0]?.basis ?? 0
+  if (basis === 0) return 'WEEK / NO BASELINE YET'
+  return `WEEK / AVG OF PRIOR ${basis} / Δ`
+}
 
 export const Route = createFileRoute('/monitor/digest')({
   // `?q=` lets the topbar search deep-link into this page's filter, so the
@@ -180,7 +188,10 @@ function WeeklyDigest() {
       </Section>
 
       {/* Hiring Velocity */}
-      <Section title="Hiring Velocity · Top 10 Watchlist" tools={<span>WEEK / EST AVG / Δ</span>}>
+      <Section
+        title="Hiring Velocity · Top 10 Watchlist"
+        tools={<span>{baselineLabel(data.velocity)}</span>}
+      >
         <table className="tbl">
           <thead>
             <tr>
@@ -188,7 +199,7 @@ function WeeklyDigest() {
               <th>Sector</th>
               <th>Tier</th>
               <th className="num">This wk</th>
-              <th className="num">Est avg</th>
+              <th className="num">Prior avg</th>
               <th className="num">Change</th>
               <th style={{ width: 120 }}>Pattern</th>
             </tr>
@@ -200,16 +211,27 @@ function WeeklyDigest() {
                 <td className="muted">{row.sector}</td>
                 <td><TierChip tier={row.tier} /></td>
                 <td className="num"><strong>{row.wk}</strong></td>
-                <td className="num muted">{row.avg}</td>
+                {/* No baseline means no comparison. Showing a dash is the honest
+                    render: the previous version filled both of these columns with
+                    arithmetic on `wk` itself. */}
+                <td className="num muted">{row.avg ?? '—'}</td>
                 <td className="num">
-                  <Trend dir={row.change > 5 ? 'up' : row.change < -5 ? 'down' : 'flat'} value={Math.abs(row.change)} unit="%" />
+                  {row.change === null
+                    ? <span className="muted">{row.basis === 0 ? '—' : 'new'}</span>
+                    : <Trend
+                        dir={row.change > 5 ? 'up' : row.change < -5 ? 'down' : 'flat'}
+                        value={Math.abs(row.change)}
+                        unit="%"
+                      />}
                 </td>
                 <td>
-                  <SparkBar
-                    data={[row.avg, row.avg * 1.1, row.avg * 0.95, row.avg * 1.05, row.wk]}
-                    color={row.change > 25 ? 'var(--rust)' : 'var(--ink-3)'}
-                    height={20}
-                  />
+                  {row.trend.length > 1
+                    ? <SparkBar
+                        data={row.trend}
+                        color={(row.change ?? 0) > 25 ? 'var(--rust)' : 'var(--ink-3)'}
+                        height={20}
+                      />
+                    : <span className="muted">—</span>}
                 </td>
               </tr>
             ))}

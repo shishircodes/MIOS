@@ -1,3 +1,4 @@
+import { Icons } from '~/components/ui'
 import { useAuth } from '~/lib/auth-context'
 import { startSignIn } from '~/lib/auth'
 
@@ -30,9 +31,53 @@ export interface SignInProps {
 }
 
 /**
- * The /signin screen. Deliberately minimal — a brand mark, one line of context
- * and the Google button. Everything else here is a failure state that only
- * appears when something is actually wrong.
+ * What MIOS is, for whoever lands here.
+ *
+ * Everything on this panel is a fixed description of the product. Nothing is
+ * read from the API: this screen renders *before* anyone has authenticated, so
+ * a signal count or a client name here would be intelligence leaked to an
+ * unauthenticated visitor — the exact thing the sign-in gate exists to prevent.
+ */
+function ContextPanel() {
+  return (
+    <aside className="signin-aside" aria-label="About MIOS">
+      <p className="signin-aside-kicker">Easy Skill Australia</p>
+      <p className="signin-aside-lead">
+        Market intelligence for industrial recruitment across Australia and
+        Papua New Guinea.
+      </p>
+
+      <ul className="signin-modes">
+        <li>
+          <span className="ico" aria-hidden="true">{Icons.monitor}</span>
+          <div>
+            <h2>Monitor</h2>
+            <p>Watches the market each week and reports what changed.</p>
+          </div>
+        </li>
+        <li>
+          <span className="ico" aria-hidden="true">{Icons.push}</span>
+          <div>
+            <h2>Push</h2>
+            <p>Takes one consultant and ranks the companies who need them.</p>
+          </div>
+        </li>
+      </ul>
+
+      <p className="signin-aside-foot">
+        <span className="tag">AU</span>
+        <span className="tag">PNG</span>
+        <span>Mining · Oil &amp; Gas · Construction · Defence · Energy</span>
+      </p>
+    </aside>
+  )
+}
+
+/**
+ * The /signin screen. The card itself stays deliberately minimal — a brand
+ * mark, one line of context and the Google button. Everything else in the card
+ * is a failure state that only appears when something is actually wrong; the
+ * panel beside it is static product context.
  */
 export function SignIn({ next, error: errCode, detail }: SignInProps) {
   const { session, status, error: apiError } = useAuth()
@@ -43,6 +88,14 @@ export function SignIn({ next, error: errCode, detail }: SignInProps) {
 
   return (
     <main className="signin">
+      {/* Decorative only — the pattern and glow carry no meaning, so they are
+          hidden from assistive tech rather than announced as empty regions. */}
+      <div className="signin-bg" aria-hidden="true">
+        <span className="signin-glow" />
+        <span className="signin-rule" />
+      </div>
+
+      <div className="signin-split">
       <div className="signin-inner">
         <div className="signin-brand">
           <div className="brand-mark" />
@@ -94,6 +147,9 @@ export function SignIn({ next, error: errCode, detail }: SignInProps) {
             {session.domain} accounts{session.hasAllowlist ? ' and approved exceptions' : ' only'}
           </p>
         )}
+      </div>
+
+        <ContextPanel />
       </div>
     </main>
   )

@@ -14,6 +14,8 @@ Endpoints:
     GET  /auth/callback-> OAuth redirect target
     POST /auth/logout  -> clear the session
     GET  /api/digest   -> structured weekly digest  [AUTH REQUIRED]
+
+Mode Push adds /api/push/* (see api/push_api.py), all auth-required.
 """
 from __future__ import annotations
 
@@ -27,6 +29,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from api.auth import check_google_client_id, require_user, router as auth_router
 from api.digest_service import DEFAULT_WINDOW_DAYS, build_digest_payload
+from api.push_api import router as push_router
 from config.settings import configure_logging, settings
 from loader.db import backend_label
 
@@ -68,11 +71,14 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["GET", "POST"],
+    # DELETE is here for /api/push/profiles/{id}: these rows describe real
+    # people, so removing one has to be possible from the UI.
+    allow_methods=["GET", "POST", "DELETE"],
     allow_headers=["*"],
 )
 
 app.include_router(auth_router)
+app.include_router(push_router)
 
 
 def _warn_on_insecure_config() -> None:

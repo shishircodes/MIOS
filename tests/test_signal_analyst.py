@@ -252,3 +252,84 @@ def test_classify_pending_handles_caller_exception(db):
             "SELECT classified_at FROM signals"
         ).fetchone()[0]
     assert classified_at is None  # left pending so a re-run can retry
+
+
+# ---------- watchlist matching precision ----------
+
+WATCHLIST = [
+    {"company_name": "BHP", "tier": "A", "all_names": ["BHP", "BHP Group", "BHP Billiton"]},
+    {"company_name": "Rio Tinto", "tier": "A", "all_names": ["Rio Tinto"]},
+    {"company_name": "Newmont", "tier": "A", "all_names": ["Newmont"]},
+    {"company_name": "Glencore", "tier": "A", "all_names": ["Glencore"]},
+    {"company_name": "Downer", "tier": "A", "all_names": ["Downer"]},
+    {"company_name": "Ok Tedi", "tier": "A", "all_names": ["Ok Tedi", "OTML"]},
+    {"company_name": "Vale", "tier": "B", "all_names": ["Vale"]},
+    {"company_name": "Vinci", "tier": "B", "all_names": ["Vinci"]},
+    {"company_name": "ExxonMobil", "tier": "A", "all_names": ["ExxonMobil"]},
+    {"company_name": "TotalEnergies", "tier": "A", "all_names": ["TotalEnergies"]},
+]
+
+
+@pytest.mark.parametrize("candidate,expected", [
+    ("BHP", "BHP"),
+    ("BHP Iron Ore", "BHP"),
+    ("BHP Group Limited", "BHP"),
+    ("Rio Tinto Iron Ore", "Rio Tinto"),
+    ("Newmont Lihir", "Newmont"),
+    ("Glencore Coal", "Glencore"),
+    ("Downer EDI Limited", "Downer"),
+    ("Ok Tedi Mining Limited", "Ok Tedi"),
+    ("OTML", "Ok Tedi"),
+])
+def test_real_clients_are_matched(candidate, expected):
+    assert fuzzy_match_watchlist(candidate, WATCHLIST)[0] == expected
+
+
+@pytest.mark.parametrize("candidate", [
+    # Every one of these was a false positive in production under fuzz.WRatio.
+    "Hastings Deering PNG Ltd",       # -> ExxonMobil
+    "CARE International in PNG",      # -> ExxonMobil
+    "AutoPacific Australia Pty Ltd",  # -> Glencore
+    "Greatland Holdings Group Pty Ltd",  # -> BHP
+    "CAPS Australia Pty Ltd",         # -> Vale
+    "Daikin PNG",                     # -> TotalEnergies
+    "Construction Talent Authority",  # -> Vinci
+    # Competing recruitment agencies: pitching a candidate to these would be
+    # actively harmful, which is what made this bug worth fixing.
+    "Brunel",
+    "PeopleConnexion",
+    "Kiwi Niugini Recruitment",
+])
+def test_unrelated_companies_are_not_matched(candidate):
+    """WRatio's partial_ratio component scored short watchlist names highly
+    against any longer string sharing a few characters."""
+    assert fuzzy_match_watchlist(candidate, WATCHLIST)[0] is None
+
+
+def test_short_names_require_whole_word_boundaries():
+    """'Vale' must not match 'Valeria'; 'BHP' must not match 'BHPX Services'."""
+    assert fuzzy_match_watchlist("Valeria Mining Pty Ltd", WATCHLIST)[0] is None
+    assert fuzzy_match_watchlist("BHPX Services", WATCHLIST)[0] is None
+
+
+def test_legal_suffixes_do_not_create_matches():
+    """After stripping 'Pty Ltd' these share nothing, so they must not match
+    each other through the emptied-string path."""
+    assert fuzzy_match_watchlist("Australia Pty Ltd", WATCHLIST)[0] is None
+
+
+def test_longer_name_wins_when_two_could_match():
+    entries = [
+        {"company_name": "Rio", "tier": "C", "all_names": ["Rio"]},
+        {"company_name": "Rio Tinto", "tier": "A", "all_names": ["Rio Tinto"]},
+    ]
+    assert fuzzy_match_watchlist("Rio Tinto Iron Ore", entries)[0] == "Rio Tinto"
+
+
+def test_tier_is_returned_with_the_match():
+    assert fuzzy_match_watchlist("Vale Resources", WATCHLIST) == ("Vale", "B")
+
+
+def test_blank_input_matches_nothing():
+    assert fuzzy_match_watchlist(None, WATCHLIST) == (None, None)
+    assert fuzzy_match_watchlist("   ", WATCHLIST) == (None, None)

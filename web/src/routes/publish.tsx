@@ -31,7 +31,7 @@ function PublishScreen() {
         </div>
       </div>
 
-      <div className="doc-shell" style={{ display: 'grid', gridTemplateColumns: '220px 1fr 280px', border: '1px solid var(--line)', borderRadius: 12, overflow: 'hidden', background: 'var(--surface)' }}>
+      <div className="doc-shell" style={{ display: 'grid', gridTemplateColumns: '220px 1fr 280px', border: '1px solid var(--line)', overflow: 'hidden', background: 'var(--surface)' }}>
         <div className="doc-toc" style={{ borderRight: '1px solid var(--line)', padding: '16px 14px', background: 'var(--paper)' }}>
           <div style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.10em', textTransform: 'uppercase', color: 'var(--muted)', marginBottom: 10 }}>Contents</div>
           <ol style={{ listStyle: 'none', padding: 0, margin: 0 }}>

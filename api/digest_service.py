@@ -150,23 +150,101 @@ def _fmt_day(d: datetime) -> str:
     return d.strftime("%d %B %Y").lstrip("0")
 
 
+#: How many earlier windows the hiring-velocity baseline averages over. Four
+#: weeks is what a consultant intuitively means by "the recent norm", and it is
+#: short enough that a genuine ramp-up still moves the number.
+BASELINE_WINDOWS = 4
+
+
+def _parse_ts(raw: Any) -> datetime | None:
+    """`captured_at` as an aware UTC datetime, or None if unparseable.
+
+    Timestamps written by the scrapers are ISO-8601 with an offset, but rows
+    imported from the old SQLite database can be naive. Those are read as UTC —
+    that is what they were — so the two never compare as hours apart.
+    """
+    if not raw:
+        return None
+    try:
+        ts = datetime.fromisoformat(str(raw))
+    except (TypeError, ValueError):
+        return None
+    return ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc)
+
+
+def _day_after(ts: datetime) -> datetime:
+    """Midnight UTC following `ts` — the exclusive end of the day it falls in."""
+    return datetime.combine(ts.date(), datetime.min.time(), tzinfo=timezone.utc) + timedelta(days=1)
+
+
 def _collection_span(rows: list[dict[str, Any]]) -> tuple[datetime | None, datetime | None]:
     """Earliest and latest `captured_at` across the rendered rows.
 
     Synthetic rows carry no capture time, so this returns (None, None) for them.
     """
-    stamps: list[datetime] = []
-    for r in rows:
-        raw = r.get("captured_at")
-        if not raw:
-            continue
-        try:
-            stamps.append(datetime.fromisoformat(str(raw)))
-        except ValueError:
-            continue
+    stamps = [ts for r in rows if (ts := _parse_ts(r.get("captured_at"))) is not None]
     if not stamps:
         return None, None
     return min(stamps), max(stamps)
+
+
+def _history_windows(
+    target: str | Path | None,
+    *,
+    window_start: datetime,
+    days: int,
+    windows: int = BASELINE_WINDOWS,
+) -> list[Counter[str]]:
+    """Per-company watchlist signal counts for each period before `window_start`.
+
+    Returns one Counter per period, oldest first, covering only the periods in
+    which the pipeline actually ran. That exclusion is the whole point: a week
+    nobody scraped is not a week in which nobody hired, and counting it as zero
+    would drag every baseline down and manufacture a rise that never happened.
+
+    Returns [] when there is no prior history at all, which the caller reports
+    as "no baseline" rather than inventing one.
+    """
+    resolved = resolve_target(target)
+    if not is_postgres(resolved) and not Path(resolved).exists():
+        return []
+
+    oldest = window_start - timedelta(days=days * windows)
+    try:
+        with connect(resolved) as conn:
+            rows = conn.execute(
+                "SELECT company_name, watchlist_tier, captured_at FROM signals "
+                "WHERE classified_at IS NOT NULL "
+                "AND captured_at >= ? AND captured_at < ?",
+                (
+                    oldest.isoformat(timespec="seconds"),
+                    window_start.isoformat(timespec="seconds"),
+                ),
+            ).fetchall()
+    except Exception as exc:  # noqa: BLE001 - same failure modes as _rows_from_db
+        log.warning("digest: no velocity baseline available (%s)", exc)
+        return []
+
+    buckets: list[Counter[str]] = [Counter() for _ in range(windows)]
+    ran = [False] * windows
+
+    for r in rows:
+        ts = _parse_ts(r["captured_at"])
+        if ts is None:
+            continue
+        # Bucket 0 is the oldest period; the one just before `window_start` is last.
+        age = (window_start - ts).total_seconds() / 86400.0
+        idx = windows - 1 - int(age // days)
+        if not 0 <= idx < windows:
+            continue
+        # A run happened in this period regardless of who was hiring, so the
+        # period counts towards the average even when it contributes a zero.
+        ran[idx] = True
+        company = r["company_name"]
+        if r["watchlist_tier"] and company and company != "Unknown":
+            buckets[idx][company] += 1
+
+    return [b for b, did_run in zip(buckets, ran) if did_run]
 
 
 def _collection_label(start: datetime | None, end: datetime | None) -> str:
@@ -225,6 +303,21 @@ def build_digest_payload(
             if match and match in tiers:
                 r["watchlist_tier"] = tiers[match]
 
+    collected_from, collected_to = _collection_span(rows)
+
+    # The velocity table compares a window against the windows before it, so it
+    # needs a fixed window rather than "whatever rows we are showing". When the
+    # requested window was empty we fell back to older signals, and anchoring on
+    # `now` would then count a month of history as "this week".
+    #
+    # The boundary is snapped to a day, not to the last timestamp. Two runs a
+    # week apart started at 23:40 and 23:14 — so a timestamp-anchored boundary
+    # sat 26 minutes *before* the earlier scrape and swallowed the entire prior
+    # week into "this week", leaving nothing to compare against. Scrapes never
+    # start at the same minute; the window must not depend on it.
+    velocity_end = _day_after(collected_to or datetime.now(timezone.utc))
+    velocity_start = velocity_end - timedelta(days=days)
+
     signals: list[dict[str, Any]] = []
     velocity_counter: Counter[str] = Counter()
     velocity_meta: dict[str, dict[str, Any]] = {}
@@ -263,8 +356,12 @@ def build_digest_payload(
         })
 
         if tier and company != "Unknown":
-            velocity_counter[company] += 1
-            velocity_meta.setdefault(company, {"sector": sector, "tier": tier})
+            captured = _parse_ts(r.get("captured_at"))
+            # Synthetic rows carry no timestamp; they are all "this week" by
+            # definition, and get no baseline anyway.
+            if captured is None or captured >= velocity_start:
+                velocity_counter[company] += 1
+                velocity_meta.setdefault(company, {"sector": sector, "tier": tier})
 
         if is_new and company != "Unknown" and company not in new_names:
             new_names[company] = {
@@ -276,17 +373,38 @@ def build_digest_payload(
                 "status": "review",
             }
 
-    velocity = [
-        {
+    # The baseline is measured, not assumed. This used to be `round(n * 0.7)`,
+    # which made every company appear to be hiring ~43% above its own average —
+    # including one that had never been seen before. A trend that is derived
+    # from this week's number is not a trend.
+    history = (
+        _history_windows(db_path, window_start=velocity_start, days=days)
+        if source_mode == "live"
+        else []
+    )
+
+    velocity = []
+    for co, n in velocity_counter.most_common(10):
+        if history:
+            avg: float | None = round(sum(h.get(co, 0) for h in history) / len(history), 1)
+            # A company with no prior signals has no percentage to be up by;
+            # `None` tells the UI to say "new" instead of dividing by zero.
+            change = round((n - avg) / avg * 100) if avg else None
+            trend = [h.get(co, 0) for h in history] + [n]
+        else:
+            avg, change, trend = None, None, [n]
+        velocity.append({
             "co": co,
             "wk": n,
-            "avg": max(1, round(n * 0.7)),
-            "change": round(((n - max(1, round(n * 0.7))) / max(1, round(n * 0.7))) * 100),
+            "avg": avg,
+            "change": change,
+            #: How many earlier windows the average covers. 0 means there is no
+            #: history yet and the UI must not imply a comparison.
+            "basis": len(history),
+            "trend": trend,
             "sector": velocity_meta[co]["sector"],
             "tier": velocity_meta[co]["tier"],
-        }
-        for co, n in velocity_counter.most_common(10)
-    ]
+        })
 
     # Pick the 40 shown rows the same way the Slack digest picks its 10: strongest
     # signals first, balanced across regions.
@@ -320,8 +438,6 @@ def build_digest_payload(
 
     classified = len(signals)
     geos = Counter(s["region"] for s in signals)
-
-    collected_from, collected_to = _collection_span(rows)
     week_label = _collection_label(collected_from, collected_to)
 
     return {
