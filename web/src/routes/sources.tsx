@@ -3,6 +3,7 @@ import { Section } from '~/components/ui'
 import { sources } from '~/data/mock'
 
 export const Route = createFileRoute('/sources')({
+  head: () => ({ meta: [{ title: 'Sources · MIOS' }] }),
   component: SourcesScreen,
 })
 

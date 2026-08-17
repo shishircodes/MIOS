@@ -24,6 +24,7 @@ export const Route = createFileRoute('/monitor/digest')({
   // then fails to compile for want of a `search` prop.
   validateSearch: (search: Record<string, unknown>): { q?: string } =>
     typeof search.q === 'string' && search.q ? { q: search.q } : {},
+  head: () => ({ meta: [{ title: 'Weekly Digest · MIOS' }] }),
   component: WeeklyDigest,
 })
 
