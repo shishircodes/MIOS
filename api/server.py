@@ -14,6 +14,7 @@ Endpoints:
     GET  /auth/callback-> OAuth redirect target
     POST /auth/logout  -> clear the session
     GET  /api/digest   -> structured weekly digest  [AUTH REQUIRED]
+    GET  /api/signals  -> the full signal list, paginated  [AUTH REQUIRED]
 
 Mode Push adds /api/push/* (see api/push_api.py), all auth-required.
 """
@@ -28,7 +29,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
 from api.auth import check_google_client_id, require_user, router as auth_router
-from api.digest_service import DEFAULT_WINDOW_DAYS, build_digest_payload
+from api.digest_service import (
+    DEFAULT_PAGE_SIZE,
+    DEFAULT_WINDOW_DAYS,
+    MAX_PAGE_SIZE,
+    build_digest_payload,
+    build_feed_payload,
+)
 from api.push_api import router as push_router
 from config.settings import configure_logging, settings
 from loader.db import backend_label
@@ -121,3 +128,26 @@ def digest(
     # password, so it must not reach the browser or a log line.
     payload["backend"] = backend_label()
     return payload
+
+@app.get("/api/signals")
+def signals(
+    limit: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
+    offset: int = Query(0, ge=0),
+    region: str | None = Query(None, description="AU or PNG; omit for all"),
+    cycle: str | None = Query(None, description="WEEKLY, MONTHLY or QUARTERLY"),
+    q: str | None = Query(None, description="free-text search across the row"),
+    user: dict[str, Any] = Depends(require_user),
+) -> dict:
+    """The Signal Feed: every classified signal, paginated and filtered.
+
+    Separate from /api/digest because the two answer different questions. The
+    digest is a ranked, region-balanced selection from one week; this is the
+    whole list, newest first, with no cap.
+    """
+    payload = build_feed_payload(
+        limit=limit, offset=offset, region=region, cycle=cycle, q=q
+    )
+    log.info("api: /api/signals served to %s (%d-%d of %d)",
+             user["email"], offset, offset + len(payload["signals"]), payload["total"])
+    return payload
+

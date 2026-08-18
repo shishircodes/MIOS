@@ -3,6 +3,8 @@ import { API_BASE } from './config'
 import { fetchJson } from './auth'
 import type {
   DigestPayload,
+  FeedPayload,
+  FeedQuery,
   MatchResponse,
   ParsedCV,
   ProfileDraft,
@@ -21,6 +23,31 @@ export const digestQueryOptions = queryOptions({
   // A 401 means "sign in", not "retry" — the auth gate handles it.
   retry: false,
 })
+
+// ---------- Signal Feed ----------
+
+export async function fetchSignals(query: FeedQuery): Promise<FeedPayload> {
+  const params = new URLSearchParams({
+    limit: String(query.limit),
+    offset: String(query.offset),
+  })
+  // Only send filters that are actually set, so the URL stays readable in the
+  // network tab and an empty search does not become `q=`.
+  if (query.region) params.set('region', query.region)
+  if (query.cycle) params.set('cycle', query.cycle)
+  if (query.q) params.set('q', query.q)
+  return fetchJson<FeedPayload>(`/api/signals?${params}`)
+}
+
+export function signalsQueryOptions(query: FeedQuery) {
+  return queryOptions({
+    queryKey: ['signals', query],
+    queryFn: () => fetchSignals(query),
+    retry: false,
+    // Paging back and forth should not blank the list each time.
+    placeholderData: (prev: FeedPayload | undefined) => prev,
+  })
+}
 
 // ---------- Mode Push ----------
 

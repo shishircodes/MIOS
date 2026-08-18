@@ -110,6 +110,26 @@ export interface MatchResponse {
   signalsConsidered: number
 }
 
+export interface FeedQuery {
+  limit: number
+  offset: number
+  region?: string
+  cycle?: string
+  q?: string
+}
+
+export interface FeedPayload {
+  signals: Signal[]
+  /** Rows matching the current filter — what pagination walks through. */
+  total: number
+  /** Every classified row, ignoring filters. */
+  totalClassified: number
+  /** Every row ever collected, including any not yet classified. */
+  scrapedAllTime: number
+  limit: number
+  offset: number
+}
+
 export interface DigestPayload {
   sourceMode: 'live' | 'synthetic'
   /** Which engine served this — e.g. "Neon PostgreSQL". Absent on older payloads. */

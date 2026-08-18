@@ -607,6 +607,13 @@ input, textarea, select { font-family: inherit; }
 }
 .tech-detail-err { color: var(--muted); overflow-wrap: anywhere; }
 
+/* Pagination footer on the Signal Feed. */
+.pager {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 12px 16px; border-top: 1px solid var(--line-2); background: var(--surface-2);
+}
+.pager-status { font-size: 11.5px; letter-spacing: 0.06em; color: var(--ink-3); }
+
 /* ---------- Loading ---------- */
 .loading {
   display: grid; justify-items: center; gap: 16px;

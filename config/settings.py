@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import os
 import secrets
+import dataclasses
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -13,7 +14,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(REPO_ROOT / ".env")
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, repr=False)
 class Settings:
     gemini_api_key: str
     gemini_model: str
@@ -30,6 +31,7 @@ class Settings:
     adzuna_app_key: str
     adzuna_country: str
     adzuna_queries: tuple[str, ...]
+    news_feeds: tuple[str, ...]
     watchlist_path: Path
     # --- Google Sign-In (OAuth 2.0 / OIDC) ---
     google_client_id: str
@@ -41,6 +43,27 @@ class Settings:
     allowed_google_domain: str
     allowed_emails: tuple[str, ...]
     auth_disabled: bool
+
+    #: Fields whose value must never be printed. The default dataclass repr
+    #: includes every field, so a single unhandled exception — or a failing test,
+    #: which is how this was found — dumps the Gemini key, the Neon password and
+    #: the session-signing secret into the log. CI logs are retained and, on a
+    #: public repo, world-readable.
+    _SECRET_FIELDS = frozenset({
+        "gemini_api_key", "slack_webhook_url", "database_url", "apify_token",
+        "adzuna_app_key", "google_client_secret", "session_secret",
+    })
+
+    def __repr__(self) -> str:
+        shown = []
+        for f in dataclasses.fields(self):
+            value = getattr(self, f.name)
+            if f.name in self._SECRET_FIELDS and value:
+                # Whether a secret is *set* is worth knowing when debugging;
+                # what it is never is.
+                value = "<set>"
+            shown.append(f"{f.name}={value!r}")
+        return f"Settings({', '.join(shown)})"
 
     @property
     def ground_truth_path(self) -> Path:
@@ -105,6 +128,7 @@ def load_settings() -> Settings:
         adzuna_app_key=_get("ADZUNA_APP_KEY"),
         adzuna_country=_get("ADZUNA_COUNTRY", "au"),
         adzuna_queries=_get_list("ADZUNA_QUERIES"),
+        news_feeds=_get_list("NEWS_FEEDS"),
         watchlist_path=REPO_ROOT / "config" / "watchlist.json",
         google_client_id=_get("GOOGLE_CLIENT_ID"),
         google_client_secret=_get("GOOGLE_CLIENT_SECRET"),

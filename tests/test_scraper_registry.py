@@ -10,7 +10,7 @@ import scraper
 from scraper import SOURCE_NAMES, scrape_all
 
 
-def _fake_registry(png=None, seek=None, adzuna=None):
+def _fake_registry(png=None, seek=None, adzuna=None, news=None):
     """A stand-in registry covering every declared source.
 
     It must stay in step with SOURCE_NAMES: scrape_all() defaults to all of them,
@@ -26,6 +26,7 @@ def _fake_registry(png=None, seek=None, adzuna=None):
         "pngworkforce": _fixed(png),
         "seek": _fixed(seek),
         "adzuna": _fixed(adzuna),
+        "newsfeed": _fixed(news),
     }
 
 
@@ -33,14 +34,16 @@ PNG_REC = {"source_url": "https://www.pngworkforce.com/jobs/view/1", "raw_conten
 SEEK_REC = {"source_url": "https://au.seek.com/job/1", "raw_content": "seek job", "source_name": "seek"}
 ADZUNA_REC = {"source_url": "https://www.adzuna.com.au/details/1", "raw_content": "adzuna job",
               "source_name": "adzuna"}
+NEWS_REC = {"source_url": "https://mining.com.au/story-1", "raw_content": "contract award",
+            "source_name": "newsfeed", "source_type": "news"}
 
 
 def test_scrape_all_merges_every_source_by_default():
     with patch.object(scraper, "_registry",
-                      lambda: _fake_registry([PNG_REC], [SEEK_REC], [ADZUNA_REC])):
+                      lambda: _fake_registry([PNG_REC], [SEEK_REC], [ADZUNA_REC], [NEWS_REC])):
         records = scrape_all(limit=10)
-    assert len(records) == 3
-    assert {r["source_name"] for r in records} == {"pngworkforce", "seek", "adzuna"}
+    assert len(records) == 4
+    assert {r["source_name"] for r in records} == {"pngworkforce", "seek", "adzuna", "newsfeed"}
 
 
 def test_scrape_all_can_select_one_source():

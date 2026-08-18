@@ -111,7 +111,7 @@ empty, so it is populated from the first load. For real signals:
 python -m pipeline.live --limit 20 --no-slack
 ```
 
-Scrapes all three sources, classifies with Gemini, and refreshes the digest.
+Scrapes all four sources, classifies with Gemini, and refreshes the digest.
 Takes a couple of minutes.
 
 ---
@@ -136,9 +136,9 @@ Every command in the project, grouped by what you are trying to do.
 
 | Command | What it does |
 |---|---|
-| `python -m pipeline.live` | Full cycle across all three sources, 50 postings each, posts to Slack. |
+| `python -m pipeline.live` | Full cycle across all four sources, 50 records each, posts to Slack. |
 | `python -m pipeline.live --limit 20` | Caps each source at 20 postings. Faster, uses less Gemini quota. |
-| `python -m pipeline.live --source seek` | One source only. Repeatable: `--source seek --source adzuna`. |
+| `python -m pipeline.live --source seek` | One source only. Repeatable: `--source seek --source newsfeed`. |
 | `python -m pipeline.live --no-scrape` | Skips scraping; classifies whatever is already stored but unclassified. |
 | `python -m pipeline.live --no-slack` | Runs everything but does not post the digest. |
 | `python -m pipeline.live --days 14` | Widens the digest window from the default 7 days. |
@@ -310,8 +310,25 @@ completes and always says what it managed to do.
 | PNGworkforce | `scraper/pngworkforce.py` | PNG | HTML listing pages |
 | SEEK | `scraper/seek.py` | AU | HTML cards, ~32 per category path |
 | Adzuna | `scraper/adzuna.py` | AU | **JSON API**, one search per watchlist company |
+| Industry news | `scraper/newsfeed.py` | AU + PNG | **RSS**, one entry per article |
 
-All three share one contract — `parse_listing(html, source_url, base_url)`, pure
+**The news source is the only one that isn't a job board**, and that matters
+more than the effort saved building it. Job ads can only ever produce
+`hiring_velocity`; a contract award, a financing round or a competitor winning
+work is news. Those categories were nearly empty before this source existed.
+
+RSS was chosen over everything else in the data-sources guide because it is a
+published format meant to be polled — no key, no HTML selectors, no terms-of-use
+tension — and the parser is standard library. Adding another publication is one
+line in `FEEDS` or one entry in `NEWS_FEEDS`, not a new module.
+
+> Several publishers listed in that guide sit behind Cloudflare and answer 403
+> to any non-browser client regardless of User-Agent — Australian Mining, Energy
+> Magazine, Infrastructure Magazine and Roads & Infrastructure among them.
+> Getting past that is the browser-automation work this source exists to avoid,
+> so they are not defaults. Check a feed returns 200 before adding it.
+
+All four share one contract — `parse_listing(html, source_url, base_url)`, pure
 and fixture-testable, and `scrape_async(limit, base_url)`, which never raises.
 `scraper/__init__.py` registers them and fans out.
 

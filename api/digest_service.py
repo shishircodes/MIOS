@@ -264,6 +264,41 @@ def _collection_label(start: datetime | None, end: datetime | None) -> str:
     return f"{_fmt_day(start)} – {_fmt_day(end)}"
 
 
+def shape_signal(r: dict[str, Any], index: int) -> dict[str, Any]:
+    """One database row as the dashboard's `Signal`.
+
+    Shared by the digest and the feed. They select different rows and order them
+    differently, but a signal must *describe* itself identically in both — two
+    copies of this would drift the first time either changed.
+    """
+    raw = r.get("raw_content") or ""
+    tier = r.get("watchlist_tier")
+    is_new = bool(r.get("is_new_prospect"))
+    sector_key = r.get("sector") or "other"
+    title, desc = _title_and_desc(raw)
+    return {
+        "id": r.get("signal_id") or f"sig-{index:03d}",
+        # `n` is assigned after selection — both callers reorder afterwards.
+        # The scrapers already know their market — pngworkforce is PNG, seek and
+        # adzuna are AU — so use that as the baseline and let the keywords only
+        # promote a row to PNG. Inferring from text alone put 15 PNGworkforce
+        # jobs under "Australia" purely because their teaser named no PNG
+        # landmark, while still correctly catching a PNG role advertised on SEEK.
+        "region": infer_geography(raw, default=(r.get("geography") or "AU")),
+        "tier": tier,
+        "company": r.get("company_name") or "Unknown",
+        "title": title,
+        "desc": desc,
+        "action": (r.get("analysis_notes") or "").strip() or None,
+        "sector": SECTOR_PRETTY.get(sector_key, sector_key.title()),
+        "source": r.get("source_name") or "pngworkforce",
+        "category": r.get("signal_category") or "hiring_velocity",
+        "cycle": (r.get("review_cycle") or "weekly").upper(),
+        "conf": _confidence(index, tier, is_new),
+        "_rank": rank_signal(r.get("signal_category"), len(raw), tier),
+    }
+
+
 def build_digest_payload(
     db_path: str | Path | None = None,
     days: int = DEFAULT_WINDOW_DAYS,
@@ -325,35 +360,13 @@ def build_digest_payload(
 
     for i, r in enumerate(rows):
         raw = r.get("raw_content") or ""
-        # The scrapers already know their market — pngworkforce is PNG, seek and
-        # adzuna are AU — so use that as the baseline and let the keywords only
-        # promote a row to PNG. Inferring from text alone put 15 PNGworkforce
-        # jobs under "Australia" purely because their teaser named no PNG
-        # landmark, while still correctly catching a PNG role advertised on SEEK.
-        region = infer_geography(raw, default=(r.get("geography") or "AU"))
+        signal = shape_signal(r, i)
+        region, company, sector, desc = (
+            signal["region"], signal["company"], signal["sector"], signal["desc"]
+        )
         tier = r.get("watchlist_tier")
         is_new = bool(r.get("is_new_prospect"))
-        company = r.get("company_name") or "Unknown"
-        sector_key = r.get("sector") or "other"
-        sector = SECTOR_PRETTY.get(sector_key, sector_key.title())
-        title, desc = _title_and_desc(raw)
-
-        signals.append({
-            "id": r.get("signal_id") or f"sig-{i:03d}",
-            # `n` is assigned after selection — reordering happens below.
-            "region": region,
-            "tier": tier,
-            "company": company,
-            "title": title,
-            "desc": desc,
-            "action": (r.get("analysis_notes") or "").strip() or None,
-            "sector": sector,
-            "source": r.get("source_name") or "pngworkforce",
-            "category": r.get("signal_category") or "hiring_velocity",
-            "cycle": (r.get("review_cycle") or "weekly").upper(),
-            "conf": _confidence(i, tier, is_new),
-            "_rank": rank_signal(r.get("signal_category"), len(raw), tier),
-        })
+        signals.append(signal)
 
         if tier and company != "Unknown":
             captured = _parse_ts(r.get("captured_at"))
@@ -464,4 +477,95 @@ def build_digest_payload(
         "signals": shown,
         "velocity": velocity,
         "newNames": list(new_names.values())[:8],
+    }
+
+# --------------------------------------------------------------------------
+# The Signal Feed: everything, paginated
+# --------------------------------------------------------------------------
+
+#: Rows per page. Large enough that paging is rare, small enough that a page
+#: renders instantly.
+DEFAULT_PAGE_SIZE = 50
+MAX_PAGE_SIZE = 200
+
+
+def _matches(signal: dict[str, Any], region: str | None, cycle: str | None,
+             terms: list[str]) -> bool:
+    if region and signal["region"] != region:
+        return False
+    if cycle and signal["cycle"] != cycle:
+        return False
+    if not terms:
+        return True
+    haystack = " ".join(str(signal.get(k) or "") for k in
+                        ("company", "title", "desc", "sector", "region", "source", "tier")).lower()
+    # Every term must appear, so "bhp mining" narrows rather than widening.
+    return all(t in haystack for t in terms)
+
+
+def scraped_all_time(target: str | Path | None = None) -> int:
+    """Every row ever ingested, classified or not — what the scrapers have
+    collected in total, which is what "signals scraped" means to a reader."""
+    resolved = resolve_target(target)
+    if not is_postgres(resolved) and not Path(resolved).exists():
+        return 0
+    try:
+        with connect(resolved) as conn:
+            return int(conn.execute("SELECT count(*) FROM signals").fetchone()[0])
+    except Exception as exc:  # noqa: BLE001
+        log.warning("feed: could not count signals (%s)", exc)
+        return 0
+
+
+def build_feed_payload(
+    db_path: str | Path | None = None,
+    limit: int = DEFAULT_PAGE_SIZE,
+    offset: int = 0,
+    region: str | None = None,
+    cycle: str | None = None,
+    q: str | None = None,
+) -> dict[str, Any]:
+    """One page of the full signal list, newest first.
+
+    Unlike the digest this is not windowed, ranked or capped: the feed is the
+    browse-everything view, and the digest is a selection from it.
+
+    Filtering happens here rather than in the browser because the two must agree
+    — filtering a single page client-side would search 50 of 250 rows and report
+    "3 results" for a term with 40 matches.
+
+    It is applied *after* shaping rather than in SQL because `region` is not a
+    column: PNG roles advertised on an Australian board are promoted by keyword,
+    so a `WHERE geography = ?` would disagree with the region shown on the row.
+    That means every classified row is loaded per request. At a few thousand
+    rows that is milliseconds; if this ever holds a year of daily scrapes, the
+    region should be denormalised into a column and this moved into SQL.
+    """
+    rows = _rows_from_db(db_path)
+    shaped = [shape_signal(r, i) for i, r in enumerate(rows)]
+    for s in shaped:
+        s.pop("_rank", None)
+
+    terms = [t for t in (q or "").strip().lower().split() if t]
+    matched = [s for s in shaped
+               if _matches(s, (region or "").upper() or None, (cycle or "").upper() or None, terms)]
+
+    limit = max(1, min(limit, MAX_PAGE_SIZE))
+    offset = max(0, offset)
+    page = matched[offset:offset + limit]
+    # Numbering is absolute, so row 51 reads "51" on page two rather than "01".
+    for i, s in enumerate(page):
+        s["n"] = f"{offset + i + 1:02d}"
+
+    return {
+        "signals": page,
+        #: Rows matching the current filter — what pagination walks through.
+        "total": len(matched),
+        #: Every classified row, ignoring filters.
+        "totalClassified": len(shaped),
+        #: Every row the scrapers have ever collected, including any not yet
+        #: classified. This is the "all time" figure the feed header shows.
+        "scrapedAllTime": scraped_all_time(db_path),
+        "limit": limit,
+        "offset": offset,
     }

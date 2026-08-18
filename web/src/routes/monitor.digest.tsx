@@ -130,7 +130,6 @@ function WeeklyDigest() {
           <h1>{data.weekLabel}</h1>
         </div>
         <div className="meta">
-          <div>Generated {data.generatedAt}</div>
           <div style={{ marginTop: 6, display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
             <span className={`mode-banner ${data.sourceMode}`}>
               <span className={data.sourceMode === 'live' ? 'dot-ok' : 'dot-warn'} />
