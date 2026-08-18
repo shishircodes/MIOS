@@ -25,7 +25,7 @@ function SourcesScreen() {
         </div>
         <div className="meta">
           <div>{ok}/{sources.length} healthy</div>
-          <div style={{ marginTop: 4 }}>pngworkforce + au.seek.com = live scrapers</div>
+          <div style={{ marginTop: 4 }}>PNGworkforce · SEEK · Adzuna</div>
         </div>
       </div>
 

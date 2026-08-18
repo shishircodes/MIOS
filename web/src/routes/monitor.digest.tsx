@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useMemo, useState } from 'react'
-import { Drawer, Icons, Section, SparkBar, TierChip, Trend } from '~/components/ui'
+import { Drawer, Icons, Loading, Section, SparkBar, TierChip, Trend } from '~/components/ui'
 import { digestQueryOptions } from '~/lib/api'
 import { UnauthenticatedError } from '~/lib/auth'
 import { useAuth } from '~/lib/auth-context'
@@ -65,7 +65,13 @@ function WeeklyDigest() {
   if (isLoading) {
     return (
       <div className="page">
-        <div className="loading-shimmer">Loading digest from the Python backend…</div>
+        <Loading
+          lines={[
+            'Reading this week’s market…',
+            'Sorting signal from noise…',
+            'Lining up the numbers…',
+          ]}
+        />
       </div>
     )
   }
@@ -88,11 +94,18 @@ function WeeklyDigest() {
     return (
       <div className="page">
         <div className="center-empty">
-          Could not reach the backend.<br />
-          <span style={{ color: 'var(--ink-3)' }}>
-            Start it with <code>python -m uvicorn api.server:app --port 8787</code>
-          </span>
-          <div style={{ marginTop: 10, color: 'var(--crimson)' }}>{String(error)}</div>
+          MIOS can’t reach its data service right now.<br />
+          <span style={{ color: 'var(--ink-3)' }}>Try again in a moment.</span>
+          {/* The recovery command is the only thing that helps when this happens
+              locally, but it means nothing to the BD team. Folded away rather
+              than removed, so both readers are served. */}
+          <details className="tech-detail">
+            <summary>Technical details</summary>
+            <p>
+              Start the service with <code>python -m uvicorn api.server:app --port 8787</code>
+            </p>
+            <p className="tech-detail-err">{String(error)}</p>
+          </details>
         </div>
       </div>
     )
@@ -121,9 +134,7 @@ function WeeklyDigest() {
           <div style={{ marginTop: 6, display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
             <span className={`mode-banner ${data.sourceMode}`}>
               <span className={data.sourceMode === 'live' ? 'dot-ok' : 'dot-warn'} />
-              {data.sourceMode === 'live'
-                ? `Live · ${data.backend ?? 'pipeline'}`
-                : 'Synthetic dataset'}
+              {data.sourceMode === 'live' ? 'Live data' : 'Sample data'}
             </span>
           </div>
         </div>
@@ -133,9 +144,8 @@ function WeeklyDigest() {
           signals off as this week's. */}
       {data.windowEmpty && (
         <div className="window-notice">
-          <strong>No signals captured in the last {data.windowDays} days.</strong>{' '}
-          Showing the most recent signals instead — run{' '}
-          <code>python -m pipeline.live</code> for a fresh scrape.
+          <strong>Nothing new in the last {data.windowDays} days.</strong>{' '}
+          Showing the most recent collection instead — {data.weekLabel}.
         </div>
       )}
 
@@ -199,7 +209,7 @@ function WeeklyDigest() {
                   ? <>No signals match “{query}”.{' '}
                       <button className="btn sm" onClick={() => setQuery('')}>Clear filter</button>
                     </>
-                  : 'No classified signals yet.'}
+                  : 'No signals collected yet.'}
               </div>
             )}
             {/* Forty rows is a wall. Showing a readable slice first, with the
@@ -270,8 +280,8 @@ function WeeklyDigest() {
       </div>
 
       <div style={{ textAlign: 'center', padding: '24px 0', fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--muted)', letterSpacing: '0.08em' }}>
-        END OF DIGEST · DATA FROM MIOS PYTHON PIPELINE ({data.sourceMode.toUpperCase()})
-        {data.sourceMode === 'live' && ` · ${data.windowEmpty ? 'LATEST' : `LAST ${data.windowDays}D`}`}
+        END OF DIGEST · {data.sourceMode === 'live' ? 'LIVE DATA' : 'SAMPLE DATA'}
+        {data.sourceMode === 'live' && ` · ${data.windowEmpty ? 'MOST RECENT COLLECTION' : `LAST ${data.windowDays} DAYS`}`}
       </div>
 
       <Drawer open={!!drawer} onClose={() => setDrawer(null)} title={drawer ? `Signal · ${drawer.id.slice(0, 12)}` : ''}>
@@ -352,7 +362,7 @@ function SignalDetail({ s }: { s: Signal }) {
       )}
       {tag('Classified by')}
       <p style={{ fontSize: 12.5, color: 'var(--ink-3)', fontFamily: 'var(--mono)' }}>
-        Signal Analyst (Gemini) · {s.cycle} · watchlist match via rapidfuzz wRatio
+        Reviewed automatically · {s.cycle} review cycle
       </p>
       <div style={{ display: 'flex', gap: 8, marginTop: 24 }}>
         <button className="btn primary">{Icons.push} Push to match</button>

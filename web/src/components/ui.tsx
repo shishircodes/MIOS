@@ -1,5 +1,5 @@
-import type { ReactNode } from 'react'
 import { useEffect, useRef, useState } from 'react'
+import type { ReactNode } from 'react'
 
 // ----- Inline monoline icons -----
 function Icon({ d, size = 14, sw = 1.4 }: { d: string; size?: number; sw?: number }) {
@@ -166,5 +166,36 @@ export function Drawer({ open, onClose, title, children }: { open: boolean; onCl
         <div className="drawer-body">{shown.children}</div>
       </div>
     </>
+  )
+}
+
+/**
+ * Loading state: five bars rising and falling, plus a line of text.
+ *
+ * Bars rather than a spinner because the app is already full of them — the
+ * sparklines in Hiring Velocity and the magnitude bars in the rail — so the
+ * wait looks like the product is drawing something rather than stalling.
+ *
+ * `lines` rotates when loading outlasts one message. Most loads finish on the
+ * first, so it reads as a single sentence rather than a slideshow.
+ */
+export function Loading({ lines }: { lines: string[] }) {
+  const [i, setI] = useState(0)
+
+  useEffect(() => {
+    if (lines.length < 2) return
+    const id = setInterval(() => setI((v) => (v + 1) % lines.length), 2400)
+    return () => clearInterval(id)
+  }, [lines.length])
+
+  return (
+    // One live region announcing the text. The bars are decoration and would
+    // otherwise be read as five empty elements.
+    <div className="loading" role="status" aria-live="polite">
+      <div className="loading-bars" aria-hidden="true">
+        <span /><span /><span /><span /><span />
+      </div>
+      <p className="loading-text">{lines[i] ?? lines[0]}</p>
+    </div>
   )
 }

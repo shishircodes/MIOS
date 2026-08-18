@@ -12,7 +12,7 @@ import {
 import type { ReactNode } from 'react'
 import { useEffect, useRef, useState } from 'react'
 import { NotFound } from '~/components/NotFound'
-import { Icons } from '~/components/ui'
+import { Icons, Loading } from '~/components/ui'
 import { AuthProvider, useAuth } from '~/lib/auth-context'
 import appCss from '~/styles/app.css?url'
 
@@ -113,7 +113,11 @@ function AuthGate({ children }: { children: ReactNode }) {
   }, [resolved, signedIn, onSignIn, pathname, search, navigate])
 
   if (!resolved) {
-    return <div className="signin-checking">Checking session…</div>
+    return (
+      <div className="signin-checking">
+        <Loading lines={['Checking you in…']} />
+      </div>
+    )
   }
   // /signin renders bare — no sidebar, no topbar.
   if (onSignIn) {
@@ -121,7 +125,11 @@ function AuthGate({ children }: { children: ReactNode }) {
   }
   if (!signedIn) {
     // Redirecting; render nothing rather than a flash of dashboard chrome.
-    return <div className="signin-checking">Redirecting to sign in…</div>
+    return (
+      <div className="signin-checking">
+        <Loading lines={['Taking you to sign in…']} />
+      </div>
+    )
   }
   return <Shell>{children}</Shell>
 }
@@ -295,16 +303,16 @@ function Shell({ children }: { children: ReactNode }) {
         <div className="footer">
           <span
             className="rail-dot dot-ok"
-            title="Python backend online"
-            aria-label="Python backend online"
+            title="Connected"
+            aria-label="Connected"
             role="img"
           />
-          <div>MIOS v0.2.0 · build 14</div>
+          <div>MIOS v0.2.0</div>
           <div style={{ marginTop: 4 }}>
             <span className="dot-ok" />
-            <span style={{ marginLeft: 6 }}>Python backend online</span>
+            <span style={{ marginLeft: 6 }}>Connected</span>
           </div>
-          <div style={{ marginTop: 8, color: 'var(--ink-3)' }}>Sun batch: 22:00 AEST</div>
+          <div style={{ marginTop: 8, color: 'var(--ink-3)' }}>Updates Sunday, 22:00 AEST</div>
         </div>
       </nav>
 

@@ -457,7 +457,7 @@ def build_digest_payload(
         "generatedAt": datetime.now(timezone.utc).strftime("%a %d %b %Y · %H:%M UTC"),
         "kpis": {
             "rolesThisWeek": {"val": classified, "delta": f"AU {geos.get('AU', 0)} / PNG {geos.get('PNG', 0)}", "dir": "up"},
-            "newSignals": {"val": classified, "delta": "classified", "dir": "up"},
+            "newSignals": {"val": classified, "delta": "reviewed", "dir": "up"},
             "newNames": {"val": len(new_names), "delta": f"{len(new_names)} to review", "dir": "flat"},
             "pushQueries": {"val": 0, "delta": "—", "dir": "flat"},
         },

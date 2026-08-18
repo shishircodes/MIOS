@@ -586,7 +586,60 @@ input, textarea, select { font-family: inherit; }
 .mode-banner { display: inline-flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.06em; text-transform: uppercase; padding: 3px 9px; border: 1px solid var(--line-2); }
 .mode-banner.live { background: var(--moss-bg); color: var(--moss); border-color: rgba(15,110,61,0.3); }
 .mode-banner.synthetic { background: var(--amber-bg); color: var(--amber-ink); border-color: var(--amber-line); }
-.loading-shimmer { padding: 60px; text-align: center; color: var(--muted); font-family: var(--mono); font-size: 13px; letter-spacing: 0.06em; }
+/* Collapsed technical detail. The plain message is for the BD team; the command
+   underneath is for whoever runs the service. Both need to exist, only one
+   needs to be visible by default. */
+.tech-detail { margin-top: 10px; text-align: left; }
+.tech-detail > summary {
+  cursor: pointer; list-style: none;
+  font-family: var(--mono); font-size: 11px; letter-spacing: 0.07em;
+  text-transform: uppercase; color: var(--ink-3); padding: 3px 0;
+}
+.tech-detail > summary::-webkit-details-marker { display: none; }
+.tech-detail > summary::before { content: '+ '; }
+.tech-detail[open] > summary::before { content: '– '; }
+.tech-detail > summary:hover { color: var(--teal-3); }
+.tech-detail > summary:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+.tech-detail p { margin: 6px 0 0; font-size: 12.5px; line-height: 1.5; color: var(--ink-3); }
+.tech-detail code {
+  font-family: var(--mono); font-size: 12px; background: var(--surface-2);
+  border: 1px solid var(--line-2); padding: 1px 5px; overflow-wrap: anywhere;
+}
+.tech-detail-err { color: var(--muted); overflow-wrap: anywhere; }
+
+/* ---------- Loading ---------- */
+.loading {
+  display: grid; justify-items: center; gap: 16px;
+  padding: 64px 20px; text-align: center;
+}
+.loading-bars { display: flex; align-items: flex-end; gap: 5px; height: 30px; }
+.loading-bars span {
+  width: 6px; height: 30%; background: var(--teal);
+  animation: loading-bar 1.15s ease-in-out infinite;
+}
+.loading-bars span:nth-child(2) { animation-delay: 0.12s; background: var(--teal-2); }
+.loading-bars span:nth-child(3) { animation-delay: 0.24s; background: var(--primary); }
+.loading-bars span:nth-child(4) { animation-delay: 0.36s; background: var(--teal-2); }
+.loading-bars span:nth-child(5) { animation-delay: 0.48s; }
+@keyframes loading-bar {
+  0%, 100% { height: 25%; }
+  50%      { height: 100%; }
+}
+.loading-text {
+  margin: 0; font-family: var(--mono); font-size: 12.5px;
+  letter-spacing: 0.08em; color: var(--ink-3);
+}
+
+/* Motion is the whole idea here, so with it suppressed the bars hold a static
+   staggered shape — still reads as "working", just not moving. */
+@media (prefers-reduced-motion: reduce) {
+  .loading-bars span { animation: none; }
+  .loading-bars span:nth-child(1) { height: 40%; }
+  .loading-bars span:nth-child(2) { height: 75%; }
+  .loading-bars span:nth-child(3) { height: 100%; }
+  .loading-bars span:nth-child(4) { height: 60%; }
+  .loading-bars span:nth-child(5) { height: 30%; }
+}
 
 /* ---------- Sign-in ---------- */
 .signin {

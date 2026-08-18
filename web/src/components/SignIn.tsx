@@ -15,8 +15,7 @@ function GoogleMark() {
 }
 
 const ERRORS: Record<string, string> = {
-  not_configured:
-    'Google Sign-In is not configured on the server. Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in .env.',
+  not_configured: 'Sign-in is not set up yet. Please contact whoever administers MIOS.',
   oauth_failed: 'Google sign-in did not complete. Please try again.',
   not_authorised: 'That account is not permitted to access MIOS.',
 }
@@ -114,20 +113,32 @@ export function SignIn({ next, error: errCode, detail }: SignInProps) {
 
         {apiDown && (
           <div className="signin-alert">
-            <strong>Cannot reach the MIOS API.</strong>
+            <strong>MIOS is not responding.</strong>
             <div className="signin-alert-detail">
-              Start it with <code>python -m uvicorn api.server:app --port 8787</code>
-              {apiError && <div style={{ marginTop: 6 }}>{apiError}</div>}
+              Sign-in will work again once the service is back. Try again shortly.
+              <details className="tech-detail">
+                <summary>Technical details</summary>
+                <p>
+                  Start the service with <code>python -m uvicorn api.server:app --port 8787</code>
+                </p>
+                {apiError && <p className="tech-detail-err">{apiError}</p>}
+              </details>
             </div>
           </div>
         )}
 
         {!apiDown && session && !session.oauthConfigured && (
           <div className="signin-alert">
-            <strong>Google Sign-In is not configured on the server.</strong>
+            <strong>Sign-in is not set up yet.</strong>
             <div className="signin-alert-detail">
-              Add <code>GOOGLE_CLIENT_ID</code> and <code>GOOGLE_CLIENT_SECRET</code> to{' '}
-              <code>.env</code>, then restart the API.
+              Ask whoever administers MIOS to finish connecting Google Sign-In.
+              <details className="tech-detail">
+                <summary>Technical details</summary>
+                <p>
+                  Add <code>GOOGLE_CLIENT_ID</code> and <code>GOOGLE_CLIENT_SECRET</code> to{' '}
+                  <code>.env</code>, then restart the service.
+                </p>
+              </details>
             </div>
           </div>
         )}

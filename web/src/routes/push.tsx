@@ -513,7 +513,7 @@ function PushScreen() {
           <div className="center-empty">
             No companies matched.
             {matchMeta?.considered === 0
-              ? ' There are no classified signals in the window — run the pipeline first.'
+              ? ' No market activity has been collected yet for this period.'
               : ' Try widening the sector or region, or clearing the current title.'}
           </div>
         )}

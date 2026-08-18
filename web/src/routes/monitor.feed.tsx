@@ -46,7 +46,7 @@ function SignalFeed() {
           <h1>All signals — live</h1>
         </div>
         <div className="meta">
-          <div>{isLoading ? 'Loading…' : `${signals.length} classified signals`}</div>
+          <div>{isLoading ? 'Gathering signals…' : `${signals.length} signals`}</div>
           <div style={{ marginTop: 4 }}>
             <span className="chip"><span className="dot-ok" style={{ marginRight: 4 }} /> PIPELINE OK</span>
           </div>
