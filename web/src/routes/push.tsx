@@ -15,6 +15,7 @@ import { useAuth } from '~/lib/auth-context'
 import type { Confidence, Match, ParsedCV, ProfileDraft, StoredProfile } from '~/lib/types'
 
 export const Route = createFileRoute('/push')({
+  head: () => ({ meta: [{ title: 'Push · MIOS' }] }),
   component: PushScreen,
 })
 

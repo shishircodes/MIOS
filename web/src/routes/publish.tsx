@@ -2,6 +2,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import { Icons } from '~/components/ui'
 
 export const Route = createFileRoute('/publish')({
+  head: () => ({ meta: [{ title: 'Publish · MIOS' }] }),
   component: PublishScreen,
 })
 
