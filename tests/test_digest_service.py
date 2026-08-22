@@ -488,3 +488,54 @@ def test_velocity_rows_always_declare_their_basis(db):
     for r in build_digest_payload(db, days=7)["velocity"]:
         for key in ("co", "wk", "avg", "change", "basis", "trend", "sector", "tier"):
             assert key in r, f"the velocity table reads {key}"
+def test_competitors_are_excluded_from_new_names(db, monkeypatch):
+    monkeypatch.setattr(
+        "api.digest_service._competitor_names",
+        lambda _path: {
+            "peopleconnexion",
+            "kiwi niugini recruitment",
+        },
+    )
+
+    captured = datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+    with connect(db) as conn:
+        for signal_id, company in [
+            ("competitor-1", "PeopleConnexion"),
+            ("competitor-2", "Kiwi Niugini Recruitment"),
+            ("prospect-1", "Example Mining Services"),
+        ]:
+            conn.execute(
+                "INSERT INTO signals (signal_id, source_type, source_name, source_url, "
+                "captured_at, geography, sector, company_name, watchlist_tier, "
+                "signal_category, review_cycle, raw_content, analysis_notes, "
+                "is_new_prospect, classified_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    signal_id,
+                    "job_board",
+                    "seek",
+                    f"https://x/{signal_id}",
+                    captured,
+                    "AU",
+                    "mining",
+                    company,
+                    None,
+                    "hiring_velocity",
+                    "weekly",
+                    f"{company} is hiring",
+                    "note",
+                    1,
+                    captured,
+                ),
+            )
+
+    payload = build_digest_payload(db, days=7)
+
+    names = {
+        item["co"].strip().casefold()
+        for item in payload["newNames"]
+    }
+
+    assert "peopleconnexion" not in names
+    assert "kiwi niugini recruitment" not in names
+    assert "example mining services" in names

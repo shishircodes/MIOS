@@ -37,6 +37,7 @@ from api.digest_service import (
     build_feed_payload,
 )
 from api.push_api import router as push_router
+from api.watchlist_api import router as watchlist_router
 from config.settings import configure_logging, settings
 from loader.db import backend_label
 
@@ -86,6 +87,7 @@ app.add_middleware(
 
 app.include_router(auth_router)
 app.include_router(push_router)
+app.include_router(watchlist_router)
 
 
 def _warn_on_insecure_config() -> None:

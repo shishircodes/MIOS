@@ -317,6 +317,9 @@ def build_digest_payload(
     rather than passing stale rows off as this week's.
     """
     tiers = _watchlist_tiers(settings.watchlist_path)
+    competitors = _competitor_names(
+        Path(__file__).resolve().parents[1] / "config" / "competitors.json"
+    )
     since = datetime.now(timezone.utc) - timedelta(days=days)
 
     rows = _rows_from_db(db_path, since=since)
@@ -376,7 +379,14 @@ def build_digest_payload(
                 velocity_counter[company] += 1
                 velocity_meta.setdefault(company, {"sector": sector, "tier": tier})
 
-        if is_new and company != "Unknown" and company not in new_names:
+        company_key = company.strip().casefold()
+
+        if (
+            is_new
+            and company != "Unknown"
+            and company_key not in competitors
+            and company not in new_names
+        ):
             new_names[company] = {
                 "co": company,
                 "signal": desc[:120],
@@ -385,6 +395,7 @@ def build_digest_payload(
                 "reco": f"Add to Tier {('B' if tier is None else tier)}",
                 "status": "review",
             }
+
 
     # The baseline is measured, not assumed. This used to be `round(n * 0.7)`,
     # which made every company appear to be hiring ~43% above its own average —
@@ -568,4 +579,17 @@ def build_feed_payload(
         "scrapedAllTime": scraped_all_time(db_path),
         "limit": limit,
         "offset": offset,
+    }
+
+
+def _competitor_names(path: Path) -> set[str]:
+    if not path.exists():
+        return set()
+
+    entries = json.loads(path.read_text(encoding="utf-8"))
+
+    return {
+        str(name).strip().casefold()
+        for name in entries
+        if str(name).strip()
     }
