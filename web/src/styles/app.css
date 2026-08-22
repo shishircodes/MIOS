@@ -385,7 +385,7 @@ input, textarea, select { font-family: inherit; }
 
 /* Mobile dashboard layout */
 @media (max-width: 768px) {
-html,
+
 body {
 width: 100%;
 max-width: 100%;
