@@ -8,7 +8,6 @@ from fastapi import APIRouter, Depends
 from api.auth import require_user
 from loader.db import connect
 
-
 router = APIRouter(prefix="/api", tags=["watchlist"])
 
 
@@ -17,7 +16,7 @@ def get_watchlist(
     user: dict[str, Any] = Depends(require_user),
 ) -> dict:
     with connect() as conn:
-        cursor = conn.execute(
+        rows = conn.execute(
             """
             SELECT company_name, tier, sector, notes, aliases
             FROM watchlist
@@ -30,18 +29,16 @@ def get_watchlist(
                 END,
                 company_name
             """
-        )
-
-        rows = cursor.fetchall()
+        ).fetchall()
 
         companies = []
 
         for row in rows:
-            aliases = row[4]
+            aliases_raw = row["aliases"]
 
-            if aliases:
+            if aliases_raw:
                 try:
-                    aliases = json.loads(aliases)
+                    aliases = json.loads(aliases_raw)
                 except (json.JSONDecodeError, TypeError):
                     aliases = []
             else:
@@ -49,10 +46,10 @@ def get_watchlist(
 
             companies.append(
                 {
-                    "company_name": row[0],
-                    "tier": row[1],
-                    "sector": row[2],
-                    "notes": row[3],
+                    "company_name": row["company_name"],
+                    "tier": row["tier"],
+                    "sector": row["sector"],
+                    "notes": row["notes"],
                     "aliases": aliases,
                 }
             )
@@ -61,4 +58,3 @@ def get_watchlist(
             "total": len(companies),
             "companies": companies,
         }
-        

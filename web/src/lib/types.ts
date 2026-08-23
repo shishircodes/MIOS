@@ -50,6 +50,21 @@ export interface NewName {
   status: string
 }
 
+// ---------- Watchlist ----------
+
+export type WatchlistCompany = {
+  company_name: string
+  tier: 'A' | 'B' | 'C'
+  sector: string | null
+  notes: string | null
+  aliases: string[]
+}
+
+export type WatchlistResponse = {
+  total: number
+  companies: WatchlistCompany[]
+}
+
 // ---------- Mode Push (api/push_api.py) ----------
 
 export type Confidence = 'high' | 'medium' | 'low'

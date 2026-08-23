@@ -488,13 +488,23 @@ def test_velocity_rows_always_declare_their_basis(db):
     for r in build_digest_payload(db, days=7)["velocity"]:
         for key in ("co", "wk", "avg", "change", "basis", "trend", "sector", "tier"):
             assert key in r, f"the velocity table reads {key}"
-def test_competitors_are_excluded_from_new_names(db, monkeypatch):
+
+
+def test_competitors_are_excluded_from_new_names(db, tmp_path, monkeypatch):
+    competitor_file = tmp_path / "competitors.json"
+    competitor_file.write_text(
+        json.dumps(
+            [
+                "PeopleConnexion",
+                "Kiwi Niugini Recruitment",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
     monkeypatch.setattr(
-        "api.digest_service._competitor_names",
-        lambda _path: {
-            "peopleconnexion",
-            "kiwi niugini recruitment",
-        },
+        "api.digest_service.COMPETITORS_PATH",
+        competitor_file,
     )
 
     captured = datetime.now(timezone.utc).isoformat(timespec="seconds")
