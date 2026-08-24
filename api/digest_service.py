@@ -22,7 +22,11 @@ from delivery.digest import infer_geography, interleave, interleave_regions, ran
 from loader.db import connect, is_postgres, resolve_target
 
 log = logging.getLogger(__name__)
+
+#: Resolved from this file rather than the working directory, so the digest
+#: behaves the same run from the repo root, from cron, or inside the container.
 COMPETITORS_PATH = Path(__file__).resolve().parents[1] / "config" / "competitors.json"
+
 SECTOR_PRETTY = {
     "mining": "Mining",
     "oil_gas": "Oil & Gas",
@@ -108,9 +112,6 @@ def _rows_from_synthetic(path: Path) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for line in path.read_text(encoding="utf-8").splitlines():
         if not line.strip():
-
-
-
             continue
         g = json.loads(line)
         out.append({
@@ -134,7 +135,19 @@ def _watchlist_tiers(path: Path) -> dict[str, str]:
         return {}
     entries = json.loads(path.read_text(encoding="utf-8"))
     return {e["company_name"]: e["tier"] for e in entries}
+
+
 def _competitor_names(path: Path) -> set[str]:
+    """Company names that must never be offered as prospects.
+
+    Competing recruitment agencies post jobs, so they look like employers to the
+    classifier — and it is not consistent about it: PeopleConnexion was flagged
+    as a new prospect seven times in one run and not at all in the next. A
+    static list does not depend on which way the model leans that week.
+
+    Matched on a casefolded exact name, so it never swallows a real client whose
+    name merely contains an agency's.
+    """
     if not path.exists():
         return set()
     entries = json.loads(path.read_text(encoding="utf-8"))
