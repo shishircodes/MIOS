@@ -178,9 +178,12 @@ class Connection:
     raises `UniqueViolation` for duplicate keys on either backend.
     """
 
-    def __init__(self, raw: Any, backend: str):
+    def __init__(self, raw: Any, backend: str, *, managed: bool = False):
         self._raw = raw
         self.backend = backend
+        #: True when the surrounding `connect()` block owns the transaction.
+        #: See `commit` and `rollback` below.
+        self._managed = managed
 
     @property
     def raw(self) -> Any:
@@ -237,9 +240,33 @@ class Connection:
         self._raw.executescript(sql)
 
     def commit(self) -> None:
+        """Commit, unless the surrounding `connect()` block already owns that.
+
+        This class exists to hide the differences between sqlite3 and psycopg,
+        and this is one of them. Inside a managed transaction psycopg *raises*
+        on an explicit commit, while SQLite quietly accepts it — so the same
+        `conn.commit()` passed locally and failed against Postgres in CI. The
+        work still lands: the block commits on a clean exit.
+        """
+        if self._managed:
+            return
         self._raw.commit()
 
     def rollback(self) -> None:
+        """Discard the work so far.
+
+        Deliberately *not* a no-op inside a managed transaction, the way
+        `commit` is. Silently ignoring a commit is safe — the work is committed
+        a moment later either way — but silently ignoring a rollback would keep
+        exactly the data the caller asked to throw away. Raise instead, so the
+        caller either opens a read-only block or lets the exception unwind and
+        take the transaction with it.
+        """
+        if self._managed:
+            raise RuntimeError(
+                "rollback() inside a managed connect() block. Raise an exception "
+                "to abort the transaction, or open the block with readonly=True."
+            )
         self._raw.rollback()
 
 
@@ -356,7 +383,7 @@ def connect(target: str | Path | None = None, *, readonly: bool = False) -> Iter
                 # Commits on a clean exit, rolls back on an exception — the same
                 # contract this function has always had.
                 with conn.transaction():
-                    yield Connection(conn, "postgres")
+                    yield Connection(conn, "postgres", managed=True)
         return
 
     path = Path(resolved)

@@ -182,17 +182,21 @@ def ingest(records: Iterable[dict], target: str | Path | None = None) -> int:
             if not raw:
                 skipped += 1
                 continue
+            # One value, used for both columns. Defaulting them separately let
+            # a record with no geography land as geography=PNG, region=AU — the
+            # two disagreeing about the same row.
+            geography = rec.get("geography") or "PNG"
             row = (
                 rec.get("signal_id") or str(uuid.uuid4()),
                 rec.get("source_type", "job_board"),
                 rec.get("source_name", "pngworkforce"),
                 rec.get("source_url"),
                 rec.get("captured_at") or _now_iso(),
-                rec.get("geography", "PNG"),
+                geography,
                 # Resolved once here rather than on every read. `geography` is
                 # what the scraper assumed from its own source; a PNG role
                 # advertised on an Australian board is only visible in the text.
-                infer_geography(raw, default=rec.get("geography") or "AU"),
+                infer_geography(raw, default=geography),
                 rec.get("sector"),
                 rec.get("company_name"),
                 rec.get("watchlist_tier"),

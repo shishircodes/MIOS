@@ -121,3 +121,66 @@ def test_the_column_migration_is_idempotent(tmp_path):
     for _ in range(3):
         init_db(db, watchlist_path=wl)  # must not raise "duplicate column"
 
+
+
+# ---------- region, resolved at ingest ----------
+
+
+def _row(db: Path, url: str) -> sqlite3.Row:
+    with sqlite3.connect(db) as c:
+        c.row_factory = sqlite3.Row
+        return c.execute(
+            "SELECT geography, region FROM signals WHERE source_url = ?", (url,)
+        ).fetchone()
+
+
+def test_geography_and_region_share_one_default(db, watchlist):
+    """Regression: they were defaulted separately, so a record carrying no
+    geography landed as geography=PNG and region=AU — the same row disagreeing
+    with itself, and the feed filing it under the wrong market."""
+    init_db(db, watchlist_path=watchlist)
+    ingest([{"source_url": "https://x/1", "raw_content": "A role, location unstated"}], db)
+
+    row = _row(db, "https://x/1")
+    assert row["geography"] == row["region"]
+
+
+def test_the_text_can_promote_the_region_but_not_the_geography(db, watchlist):
+    """`geography` is what the source claimed; `region` is what the signal is
+    actually about. A PNG role on an Australian board is the whole difference
+    between the two columns."""
+    init_db(db, watchlist_path=watchlist)
+    ingest([{"source_url": "https://x/png", "geography": "AU",
+             "raw_content": "Project Engineer, Port Moresby, Papua New Guinea"}], db)
+
+    row = _row(db, "https://x/png")
+    assert row["geography"] == "AU", "the board is still an Australian one"
+    assert row["region"] == "PNG", "but the role is not"
+
+
+def test_the_backfill_only_touches_rows_that_have_no_region(db, watchlist):
+    """It runs on every init_db. Re-deriving rows that already have an answer
+    would silently rewrite history every deploy."""
+    from loader.ingest import backfill_regions
+
+    init_db(db, watchlist_path=watchlist)
+    ingest([{"source_url": "https://x/1", "geography": "AU", "raw_content": "Perth role"}], db)
+
+    with sqlite3.connect(db) as c:
+        c.execute("UPDATE signals SET region = 'MANUAL' WHERE source_url = 'https://x/1'")
+
+    assert backfill_regions(db) == 0, "a row with a region was rewritten"
+    assert _row(db, "https://x/1")["region"] == "MANUAL"
+
+
+def test_the_backfill_fills_a_row_that_predates_the_column(db, watchlist):
+    from loader.ingest import backfill_regions
+
+    init_db(db, watchlist_path=watchlist)
+    ingest([{"source_url": "https://x/png", "geography": "AU",
+             "raw_content": "Role in Papua New Guinea"}], db)
+    with sqlite3.connect(db) as c:
+        c.execute("UPDATE signals SET region = NULL")
+
+    assert backfill_regions(db) == 1
+    assert _row(db, "https://x/png")["region"] == "PNG"

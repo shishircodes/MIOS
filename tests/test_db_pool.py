@@ -105,3 +105,67 @@ def test_closing_the_pool_is_safe_when_there_is_not_one(db):
     close_pool()
     # And the module still works afterwards.
     assert _count(db) == 0
+
+
+# ---------- the wrapper must not leak engine differences ----------
+#
+# Regression: `conn.commit()` inside a `connect()` block passed on SQLite and
+# raised `ProgrammingError` on Postgres, because psycopg forbids an explicit
+# commit inside a managed transaction and sqlite3 quietly allows it. Four tests
+# that only run against a real Postgres caught it; nothing else did.
+#
+# The managed path only exists for Postgres, so these drive the wrapper directly
+# rather than going through `connect()`.
+
+
+def _managed(tmp_path):
+    import sqlite3
+
+    from loader.db import Connection
+
+    raw = sqlite3.connect(tmp_path / "w.db")
+    return Connection(raw, "sqlite", managed=True), raw
+
+
+def test_commit_inside_a_managed_block_is_a_no_op(tmp_path):
+    """Safe to ignore: the surrounding block commits a moment later, so the
+    work still lands either way."""
+    conn, raw = _managed(tmp_path)
+    raw.execute("CREATE TABLE t (id INTEGER)")
+    conn.execute("INSERT INTO t VALUES (1)")
+    conn.commit()  # would raise against psycopg without the guard
+    assert raw.execute("SELECT count(*) FROM t").fetchone()[0] == 1
+
+
+def test_rollback_inside_a_managed_block_refuses(tmp_path):
+    """Not a no-op, unlike commit. Silently ignoring a rollback would keep
+    exactly the rows the caller asked to discard."""
+    conn, _ = _managed(tmp_path)
+    with pytest.raises(RuntimeError, match="readonly=True"):
+        conn.rollback()
+
+
+def test_an_unmanaged_connection_still_commits_and_rolls_back(tmp_path):
+    import sqlite3
+
+    from loader.db import Connection
+
+    raw = sqlite3.connect(tmp_path / "u.db")
+    conn = Connection(raw, "sqlite")
+    raw.execute("CREATE TABLE t (id INTEGER)")
+    conn.execute("INSERT INTO t VALUES (1)")
+    conn.commit()
+    conn.execute("INSERT INTO t VALUES (2)")
+    conn.rollback()
+    assert raw.execute("SELECT count(*) FROM t").fetchone()[0] == 1
+
+
+def test_a_read_only_block_is_never_managed(db):
+    """check.py rolls back to recover from a failed probe and carry on. That
+    only works if a read-only block leaves the transaction alone."""
+    with connect(db, readonly=True) as conn:
+        try:
+            conn.execute("SELECT * FROM _no_such_table").fetchone()
+        except Exception:
+            conn.rollback()
+        assert conn.execute("SELECT 1").fetchone()[0] == 1
