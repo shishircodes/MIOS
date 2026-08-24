@@ -8,6 +8,8 @@ import type {
   MatchResponse,
   ParsedCV,
   ProfileDraft,
+  Report,
+  ReportSummary,
   StoredProfile,
   WatchlistResponse,
 } from './types'
@@ -63,11 +65,9 @@ export const watchlistQueryOptions = queryOptions({
   retry: false,
 })
 
-// ---------- Mode Push ----------
-
 /**
- * The API answers a rejected CV with a written explanation ("that PDF is a
- * scan", "re-save as .docx"). fetchJson collapses every non-401 into a status
+ * Several endpoints answer a rejected request with a written explanation — an
+ * unreadable CV, a report that cannot be approved yet. fetchJson collapses every non-401 into a status
  * code, which would throw that away — so this reads `detail` and surfaces it.
  */
 async function postOrExplain<T>(path: string, init: RequestInit): Promise<T> {
@@ -85,6 +85,70 @@ async function postOrExplain<T>(path: string, init: RequestInit): Promise<T> {
   }
   return (await res.json()) as T
 }
+
+// ---------- Mode Publish ----------
+
+export const reportsQueryOptions = queryOptions({
+  queryKey: ['publish', 'reports'],
+  queryFn: () =>
+    fetchJson<{ reports: ReportSummary[]; currentQuarter: string }>('/api/publish/reports'),
+  retry: false,
+})
+
+export const quartersQueryOptions = queryOptions({
+  queryKey: ['publish', 'quarters'],
+  queryFn: () =>
+    fetchJson<{ quarters: string[]; currentQuarter: string }>('/api/publish/quarters'),
+  retry: false,
+})
+
+export function reportQueryOptions(reportId: string | null) {
+  return queryOptions({
+    queryKey: ['publish', 'report', reportId],
+    queryFn: () => fetchJson<Report>(`/api/publish/reports/${reportId}`),
+    enabled: Boolean(reportId),
+    retry: false,
+  })
+}
+
+export async function generateReport(quarter: string): Promise<Report> {
+  return postOrExplain<Report>('/api/publish/reports', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ quarter }),
+  })
+}
+
+export async function editSection(sectionId: string, body: string): Promise<Report> {
+  return postOrExplain<Report>(`/api/publish/sections/${sectionId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ body }),
+  })
+}
+
+export async function setSectionApproval(sectionId: string, approved: boolean): Promise<Report> {
+  return postOrExplain<Report>(`/api/publish/sections/${sectionId}/approve`, {
+    method: approved ? 'POST' : 'DELETE',
+  })
+}
+
+export async function approveReport(reportId: string): Promise<Report> {
+  return postOrExplain<Report>(`/api/publish/reports/${reportId}/approve`, { method: 'POST' })
+}
+
+export async function deleteReport(reportId: string): Promise<void> {
+  await postOrExplain(`/api/publish/reports/${reportId}`, { method: 'DELETE' })
+}
+
+/** Export opens in a new tab rather than fetching: the response carries a
+ *  Content-Disposition the browser should honour, and the session cookie rides
+ *  along on a normal navigation. */
+export function exportReportUrl(reportId: string, format: 'md' | 'html'): string {
+  return `${API_BASE}/api/publish/reports/${reportId}/export?format=${format}`
+}
+
+// ---------- Mode Push ----------
 
 /** Upload a CV and get a draft back. Nothing is stored until saveProfile. */
 export async function parseCV(file: File): Promise<ParsedCV> {

@@ -41,7 +41,7 @@ build-backend = "setuptools.build_meta"
 where = ["."]
 include = [
     "config*", "scraper*", "loader*", "agents*", "delivery*", "evaluation*",
-    "api*", "pipeline*", "push*",
+    "api*", "pipeline*", "push*", "publish*",
 ]
 
 [tool.pytest.ini_options]

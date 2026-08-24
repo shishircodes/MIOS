@@ -159,6 +159,10 @@ are deduplicated on `source_url`, so re-running does not create duplicates.
 | `python -m loader.rematch --dry-run` | Reports which signals would change watchlist tier under the current matching rules. |
 | `python -m loader.rematch` | Recomputes `watchlist_tier` and `is_new_prospect` on stored signals. **No Gemini calls** — the watchlist match was always a string comparison, so changing the rules or the watchlist does not require reclassifying. |
 
+> Mode Publish added the `reports` and `report_sections` tables. Run
+> `loader.check --init` against Neon before deploying it — nothing applies a
+> schema change to production on your behalf.
+
 ### Evaluation
 
 | Command | What it does |
@@ -207,6 +211,17 @@ Signals are classified into six categories — `hiring_velocity`, `project`,
 `leadership`, `financial`, `competitive`, `market_intel` — and matched against a
 20-company watchlist of Easy Skill's actual clients. The output is a dashboard
 and a Slack digest.
+
+**Mode Publish** turns the same intelligence outward. It assembles a quarterly
+client-facing report — hiring trends across both markets — with every figure
+counted from the signals collected in that quarter. Gemini then rewrites the wording — one call for the whole
+report, on the same daily budget the classifier uses — but never the figures:
+every number in its output is checked against the computed text, and a section
+that introduces one is discarded. If the quota is gone the computed wording
+ships and the report says so. A reviewer then works through it section by
+section, and the report cannot be signed off until each one is approved. **MIOS has no endpoint that distributes anything**: §8.3 of the
+project spec requires that gate to be architecturally enforced, so export hands
+the document to a person and distribution happens outside the system.
 
 **Mode Push** runs on demand. A consultant's contract ends in 30 days; the
 business development team submits their profile and MIOS replies with a ranked

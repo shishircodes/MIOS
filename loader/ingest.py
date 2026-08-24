@@ -18,12 +18,54 @@ from loader.db import SCHEMA_PATH, connect, describe
 log = logging.getLogger(__name__)
 
 
+#: Columns added to tables that already shipped. `CREATE TABLE IF NOT EXISTS`
+#: does nothing at all when the table exists, so a column added to schema.sql
+#: after the first deploy never reaches an existing database — it fails at
+#: query time with "column does not exist", which is how this was found.
+#:
+#: Postgres has `ADD COLUMN IF NOT EXISTS`; SQLite does not, so the columns are
+#: checked before being added rather than relying on either dialect.
+ADDED_COLUMNS: tuple[tuple[str, str, str], ...] = (
+    ("reports", "prose_source", "TEXT NOT NULL DEFAULT 'computed'"),
+    ("reports", "prose_note", "TEXT"),
+    ("report_sections", "computed_body", "TEXT"),
+)
+
+
+def _existing_columns(conn, table: str) -> set[str]:
+    if conn.is_postgres:
+        rows = conn.execute(
+            "SELECT column_name FROM information_schema.columns WHERE table_name = ?",
+            (table,),
+        ).fetchall()
+        return {str(r[0]) for r in rows}
+    rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
+    return {str(r[1]) for r in rows}
+
+
+def _apply_column_additions(conn) -> None:
+    """Add any column in ADDED_COLUMNS that the database is missing. Idempotent."""
+    by_table: dict[str, set[str]] = {}
+    for table, column, decl in ADDED_COLUMNS:
+        if table not in by_table:
+            try:
+                by_table[table] = _existing_columns(conn, table)
+            except Exception as exc:  # noqa: BLE001 - table may not exist yet
+                log.debug("init_db: cannot inspect %s (%s)", table, exc)
+                by_table[table] = set()
+        if not by_table[table] or column in by_table[table]:
+            continue
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
+        log.info("init_db: added %s.%s", table, column)
+
+
 def init_db(target: str | Path | None = None, watchlist_path: str | Path | None = None) -> None:
     """Create tables and seed the watchlist. Idempotent."""
     watchlist_path = Path(watchlist_path) if watchlist_path else settings.watchlist_path
     schema_sql = SCHEMA_PATH.read_text(encoding="utf-8")
     with connect(target) as conn:
         conn.executescript(schema_sql)
+        _apply_column_additions(conn)
         _seed_watchlist(conn, watchlist_path)
     log.info("init_db complete: %s", describe(target))
 

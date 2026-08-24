@@ -65,6 +65,55 @@ export type WatchlistResponse = {
   companies: WatchlistCompany[]
 }
 
+// ---------- Mode Publish (api/publish_api.py) ----------
+
+export interface ReportSection {
+  id: string
+  position: number
+  heading: string
+  body: string
+  /** 'generated' is computed from signals; 'manual' must be written by a human. */
+  source: 'generated' | 'manual'
+  approved: boolean
+  approvedAt: string | null
+  approvedBy: string | null
+  editedAt: string | null
+  /** True once a human has changed what the generator wrote. */
+  edited: boolean
+  empty: boolean
+  /** The deterministic prose this section was computed from, before any rewrite. */
+  computedBody: string
+  /** True when Gemini reworded this section rather than shipping the computed text. */
+  rewritten: boolean
+}
+
+export interface ReportSummary {
+  id: string
+  quarter: string
+  title: string
+  status: 'draft' | 'approved'
+  generatedAt: string
+  signalsAnalysed: number
+  approvedAt: string | null
+  approvedBy: string | null
+  sectionsApproved: number
+  sectionsTotal: number
+  /** Whether a language model wrote the wording. Figures are computed either way. */
+  proseSource: 'computed' | 'gemini'
+}
+
+export interface Report extends ReportSummary {
+  windowFrom: string | null
+  windowTo: string | null
+  sections: ReportSection[]
+  /** Why the computed wording was kept, when it was — quota, key, or a rewrite
+   *  that introduced figures the data does not support. */
+  proseNote: string | null
+  /** Headings still blocking sign-off, named so the reviewer need not hunt. */
+  outstanding: string[]
+  canApprove: boolean
+}
+
 // ---------- Mode Push (api/push_api.py) ----------
 
 export type Confidence = 'high' | 'medium' | 'low'
