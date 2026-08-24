@@ -30,6 +30,9 @@ COPY pipeline ./pipeline
 # out does not fail the build — it fails when uvicorn starts, which surfaces as
 # an unhealthy container rather than anything mentioning a missing module.
 COPY push ./push
+# Mode Publish. Same rule as push/ above: a package missing here builds fine and
+# fails when uvicorn imports the app.
+COPY publish ./publish
 
 RUN pip install --no-cache-dir ".[api]"
 

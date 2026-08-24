@@ -81,3 +81,43 @@ def test_wipe_signals(db, watchlist):
     wipe_signals(db)
     assert _count(db, "signals") == 0
     assert _count(db, "watchlist") == 2  # watchlist preserved
+
+
+def test_columns_added_after_first_deploy_reach_an_existing_database(tmp_path):
+    """Regression: `CREATE TABLE IF NOT EXISTS` does nothing when the table is
+    already there, so a column added to schema.sql later never appeared on a
+    database created before it. It failed at query time with "column does not
+    exist" — on production, not in any test."""
+    import json
+
+    from loader.db import connect
+    from loader.ingest import ADDED_COLUMNS, _existing_columns, init_db
+
+    wl = tmp_path / "wl.json"
+    wl.write_text(json.dumps([]))
+    db = tmp_path / "m.db"
+    init_db(db, watchlist_path=wl)
+
+    # Simulate a database created before the column existed.
+    table, column, _decl = ADDED_COLUMNS[0]
+    with connect(db) as conn:
+        conn.execute(f"ALTER TABLE {table} DROP COLUMN {column}")
+        assert column not in _existing_columns(conn, table)
+
+    init_db(db, watchlist_path=wl)
+
+    with connect(db) as conn:
+        assert column in _existing_columns(conn, table), "the migration did not run"
+
+
+def test_the_column_migration_is_idempotent(tmp_path):
+    import json
+
+    from loader.ingest import init_db
+
+    wl = tmp_path / "wl.json"
+    wl.write_text(json.dumps([]))
+    db = tmp_path / "m2.db"
+    for _ in range(3):
+        init_db(db, watchlist_path=wl)  # must not raise "duplicate column"
+

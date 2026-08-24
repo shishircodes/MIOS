@@ -614,6 +614,78 @@ input, textarea, select { font-family: inherit; }
 }
 .pager-status { font-size: 11.5px; letter-spacing: 0.06em; color: var(--ink-3); }
 
+.prose-source {
+  margin: -8px 0 14px; font-family: var(--mono); font-size: 11px;
+  letter-spacing: 0.05em; color: var(--ink-3);
+}
+
+/* ---------- Mode Publish: the document shell ----------
+   Contents, the document, and the review rail. The middle column scrolls on its
+   own so the contents list and the approve button stay reachable in a long
+   report — the reviewer works section by section and should never have to
+   scroll back up to act on what they just read. */
+.doc-shell {
+  display: grid;
+  grid-template-columns: 210px minmax(0, 1fr) 260px;
+  border: 1px solid var(--line-2);
+  background: var(--surface);
+  overflow: hidden;
+}
+@media (max-width: 1150px) {
+  .doc-shell { grid-template-columns: minmax(0, 1fr); }
+  .doc-toc, .doc-rail { border: none !important; border-top: 1px solid var(--line-2) !important; }
+  .doc-body { max-height: none !important; }
+}
+
+.doc-label {
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.10em;
+  text-transform: uppercase; color: var(--ink-3); margin-bottom: 10px;
+}
+
+.doc-toc { border-right: 1px solid var(--line-2); padding: 16px 12px; background: var(--surface-2); }
+.doc-toc ol { list-style: none; padding: 0; margin: 0; }
+.doc-toc li {
+  display: flex; align-items: baseline; gap: 7px;
+  padding: 6px 6px; font-size: 12.5px; color: var(--ink-2);
+  border-left: 2px solid transparent;
+}
+.doc-toc li.done { border-left-color: var(--teal); color: var(--ink); }
+.doc-toc .num { font-size: 10px; color: var(--muted); flex: none; }
+.doc-toc .toc-heading { flex: 1; min-width: 0; }
+.doc-toc .toc-state { color: var(--teal-3); font-size: 12px; flex: none; }
+
+.doc-body {
+  padding: 38px 52px; background: var(--surface); line-height: 1.65;
+  overflow-y: auto; max-height: 760px;
+}
+.doc-body > h1 {
+  font-family: var(--display); font-weight: 700; font-size: 27px;
+  letter-spacing: -0.02em; margin: 0 0 4px;
+}
+.doc-section { margin-top: 26px; padding-top: 14px; border-top: 1px solid var(--line); }
+.doc-section-h { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.doc-section-h h2 {
+  font-family: var(--display); font-weight: 600; font-size: 17px; margin: 0;
+}
+.doc-section-tools { display: flex; gap: 6px; flex: none; }
+.doc-section p { margin: 10px 0; }
+.doc-empty { color: var(--muted); font-style: italic; }
+.doc-section-actions { display: flex; gap: 8px; margin-top: 10px; }
+.doc-section .textarea { margin-top: 10px; min-height: 190px; font-size: 14px; line-height: 1.6; }
+
+.doc-rail { border-left: 1px solid var(--line-2); padding: 16px 14px; background: var(--surface-2); }
+.report-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.report-list button {
+  width: 100%; display: flex; justify-content: space-between; gap: 8px;
+  padding: 6px 8px; border: 1px solid transparent; background: none;
+  font-family: var(--sans); font-size: 12.5px; color: var(--ink-2); cursor: pointer;
+  text-align: left;
+}
+.report-list button:hover { background: var(--teal-bg); color: var(--teal-3); }
+.report-list button.active { background: var(--teal-2); color: var(--on-teal); }
+.report-list button.active .muted { color: rgba(255,255,255,0.85); }
+.report-list button:focus-visible { outline: 2px solid var(--teal); outline-offset: -2px; }
+
 /* ---------- Loading ---------- */
 .loading {
   display: grid; justify-items: center; gap: 16px;

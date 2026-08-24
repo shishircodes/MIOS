@@ -16,6 +16,9 @@ Endpoints:
     GET  /api/digest   -> structured weekly digest  [AUTH REQUIRED]
     GET  /api/signals  -> the full signal list, paginated  [AUTH REQUIRED]
 
+Mode Publish adds /api/publish/* (see api/publish_api.py). It has no endpoint
+that distributes externally, by design — see that module's docstring.
+
 Mode Push adds /api/push/* (see api/push_api.py), all auth-required.
 """
 from __future__ import annotations
@@ -36,6 +39,7 @@ from api.digest_service import (
     build_digest_payload,
     build_feed_payload,
 )
+from api.publish_api import router as publish_router
 from api.push_api import router as push_router
 from api.watchlist_api import router as watchlist_router
 from config.settings import configure_logging, settings
@@ -81,12 +85,13 @@ app.add_middleware(
     allow_credentials=True,
     # DELETE is here for /api/push/profiles/{id}: these rows describe real
     # people, so removing one has to be possible from the UI.
-    allow_methods=["GET", "POST", "DELETE"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE"],
     allow_headers=["*"],
 )
 
 app.include_router(auth_router)
 app.include_router(push_router)
+app.include_router(publish_router)
 app.include_router(watchlist_router)
 
 
