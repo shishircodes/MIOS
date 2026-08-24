@@ -151,6 +151,7 @@ def signals(
     offset: int = Query(0, ge=0),
     region: str | None = Query(None, description="AU or PNG; omit for all"),
     cycle: str | None = Query(None, description="WEEKLY, MONTHLY or QUARTERLY"),
+    source: str | None = Query(None, description="collector source; omit for all"),
     q: str | None = Query(None, description="free-text search across the row"),
     user: dict[str, Any] = Depends(require_user),
 ) -> dict:
@@ -161,7 +162,7 @@ def signals(
     whole list, newest first, with no cap.
     """
     payload = build_feed_payload(
-        limit=limit, offset=offset, region=region, cycle=cycle, q=q
+        limit=limit, offset=offset, region=region, cycle=cycle, source=source, q=q
     )
     log.info("api: /api/signals served to %s (%d-%d of %d)",
              user["email"], offset, offset + len(payload["signals"]), payload["total"])

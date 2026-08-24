@@ -522,10 +522,12 @@ MAX_PAGE_SIZE = 200
 
 
 def _matches(signal: dict[str, Any], region: str | None, cycle: str | None,
-             terms: list[str]) -> bool:
+             source: str | None, terms: list[str]) -> bool:
     if region and signal["region"] != region:
         return False
     if cycle and signal["cycle"] != cycle:
+        return False
+    if source and signal["source"].casefold() != source.casefold():
         return False
     if not terms:
         return True
@@ -555,6 +557,7 @@ def build_feed_payload(
     offset: int = 0,
     region: str | None = None,
     cycle: str | None = None,
+    source: str | None = None,
     q: str | None = None,
 ) -> dict[str, Any]:
     """One page of the full signal list, newest first.
@@ -580,7 +583,9 @@ def build_feed_payload(
 
     terms = [t for t in (q or "").strip().lower().split() if t]
     matched = [s for s in shaped
-               if _matches(s, (region or "").upper() or None, (cycle or "").upper() or None, terms)]
+               if _matches(s, (region or "").upper() or None,
+                           (cycle or "").upper() or None,
+                           (source or "").strip() or None, terms)]
 
     limit = max(1, min(limit, MAX_PAGE_SIZE))
     offset = max(0, offset)
