@@ -41,6 +41,7 @@ from authlib.integrations.starlette_client import OAuth, OAuthError
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import RedirectResponse
 
+from api import access
 from config.settings import settings
 
 log = logging.getLogger(__name__)
@@ -115,9 +116,10 @@ def authorize_claims(claims: dict[str, Any]) -> dict[str, Any]:
 
     Policy, in order:
       1. The email must be present and Google-verified.
-      2. An explicit ALLOWED_EMAILS entry always passes (dev accounts).
-      3. Otherwise, if ALLOWED_GOOGLE_DOMAIN is set, the `hd` claim must match.
-      4. If neither is configured, any verified Google account is allowed — we
+      2. A row in `app_users` always passes, at whatever role it names.
+      3. An explicit ALLOWED_EMAILS entry always passes (dev accounts).
+      4. Otherwise, if ALLOWED_GOOGLE_DOMAIN is set, the `hd` claim must match.
+      5. If neither is configured, any verified Google account is allowed — we
          log a warning because that is almost never what you want in production.
     """
     email = (claims.get("email") or "").strip().lower()
@@ -130,8 +132,16 @@ def authorize_claims(claims: dict[str, Any]) -> dict[str, Any]:
     domain = settings.allowed_google_domain.strip().lower()
     hd = (claims.get("hd") or "").strip().lower()
 
-    if email in allowed_emails:
-        pass  # explicit allowlist wins
+    # A row in app_users admits someone at any address — that is how a
+    # contractor or a founder on a personal account gets in without widening
+    # the domain rule for everyone. Checked first so an explicit grant is never
+    # overridden by the domain policy.
+    granted = access.get_user(email)
+
+    if granted:
+        pass
+    elif email in allowed_emails:
+        pass  # explicit env allowlist wins
     elif domain:
         if hd != domain:
             # Personal gmail accounts have no `hd` at all, hence the friendlier message.
@@ -145,12 +155,18 @@ def authorize_claims(claims: dict[str, Any]) -> dict[str, Any]:
             "any Google account can sign in to MIOS"
         )
 
+    role = (granted or {}).get("role") or access.role_for(email, hd) or access.ROLE_MEMBER
+    access.touch_last_seen(email)
+
     return {
         "sub": claims.get("sub"),
         "email": email,
         "name": claims.get("name") or email.split("@")[0],
         "picture": claims.get("picture"),
         "domain": hd or None,
+        #: 'admin' or 'member'. Carried in the session so the UI can hide what
+        #: the API would refuse anyway — the API check is the real one.
+        "role": role,
     }
 
 
@@ -184,6 +200,10 @@ def current_user(request: Request) -> dict[str, Any] | None:
             "picture": None,
             "domain": None,
             "authDisabled": True,
+            # The bypass has no real identity to look up, so it is treated as an
+            # admin — same rule as require_admin, in one place, so the nav never
+            # hides a section the API would have served.
+            "role": access.ROLE_ADMIN,
         }
     user = request.session.get(SESSION_USER_KEY)
     return user if isinstance(user, dict) else None
@@ -197,6 +217,28 @@ def require_user(request: Request) -> dict[str, Any]:
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Sign in with your Easy Skill Google account to access MIOS.",
             headers={"WWW-Authenticate": "Bearer"},
+        )
+    return user
+
+
+def require_admin(request: Request) -> dict[str, Any]:
+    """FastAPI dependency: 403 unless the session belongs to an administrator.
+
+    Separate from `require_user` so the distinction is visible at every call
+    site. Hiding the Admin section in the browser is presentation; this is the
+    part that actually stops a member reading source health or usage cost by
+    typing the URL.
+    """
+    user = require_user(request)
+    if settings.auth_disabled:
+        # The dev bypass has no real identity, so it cannot be an admin by
+        # lookup. Treating it as one keeps the offline dashboard usable, and it
+        # already announces itself in a banner on every page.
+        return {**user, "role": access.ROLE_ADMIN}
+    if not access.is_admin(user["email"]):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="That section is for administrators only.",
         )
     return user
 
@@ -224,11 +266,12 @@ async def login(request: Request, next: str | None = None):
     request.session[SESSION_NEXT_KEY] = safe_next_path(next)
 
     kwargs: dict[str, Any] = {}
-    if settings.allowed_google_domain and not settings.allowed_emails:
+    if settings.allowed_google_domain and not access.has_external_grants():
         # UX hint only: filters Google's account chooser to the Workspace domain.
         # The real check is the verified `hd` claim in authorize_claims().
         #
-        # Deliberately suppressed when ALLOWED_EMAILS is set: those accounts are
+        # Deliberately suppressed when any non-domain account is admitted —
+        # whether by ALLOWED_EMAILS or by a row in app_users. Those accounts are
         # admitted precisely *because* they're outside the domain, so filtering
         # the chooser would hide the very accounts we mean to let in.
         kwargs["hd"] = settings.allowed_google_domain
@@ -289,8 +332,11 @@ async def me(request: Request) -> dict[str, Any]:
         "domain": settings.allowed_google_domain or None,
         # Whether *some* accounts outside the domain are permitted — not which
         # ones. Lets the sign-in screen avoid claiming "domain accounts only"
-        # when that isn't true.
-        "hasAllowlist": bool(settings.allowed_emails),
+        # when that isn't true. Counts named rows as well as ALLOWED_EMAILS.
+        "hasExceptions": access.has_external_grants(),
+        #: Drives which nav groups render. The API enforces the same rule.
+        "role": (user or {}).get("role") or None,
+        "isAdmin": bool(user) and (user.get("role") == access.ROLE_ADMIN),
         "loginUrl": f"{_api_base(request)}/auth/login",
     }
 

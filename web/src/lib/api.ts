@@ -2,6 +2,7 @@ import { queryOptions } from '@tanstack/react-query'
 import { API_BASE } from './config'
 import { fetchJson } from './auth'
 import type {
+  AccessPayload,
   DigestPayload,
   FeedPayload,
   FeedQuery,
@@ -10,6 +11,7 @@ import type {
   ProfileDraft,
   Report,
   ReportSummary,
+  SourcesPayload,
   StoredProfile,
   WatchlistResponse,
 } from './types'
@@ -195,4 +197,38 @@ export async function matchDraft(draft: ProfileDraft): Promise<MatchResponse> {
 
 export async function deleteProfile(profileId: string): Promise<void> {
   await postOrExplain(`/api/push/profiles/${profileId}`, { method: 'DELETE' })
+}
+
+// ---------- Admin ----------
+//
+// These 403 for a member. The UI hides the section, but that is presentation —
+// the server is what actually refuses.
+
+export const accessQueryOptions = queryOptions({
+  queryKey: ['admin', 'access'],
+  queryFn: () => fetchJson<AccessPayload>('/api/admin/access'),
+  retry: false,
+})
+
+export const sourceHealthQueryOptions = queryOptions({
+  queryKey: ['admin', 'sources'],
+  queryFn: () => fetchJson<SourcesPayload>('/api/admin/sources'),
+  retry: false,
+})
+
+export async function grantAccess(
+  email: string,
+  role: 'admin' | 'member',
+): Promise<AccessPayload> {
+  return postOrExplain<AccessPayload>('/api/admin/access', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, role }),
+  })
+}
+
+export async function revokeAccess(email: string): Promise<AccessPayload> {
+  return postOrExplain<AccessPayload>(`/api/admin/access/${encodeURIComponent(email)}`, {
+    method: 'DELETE',
+  })
 }

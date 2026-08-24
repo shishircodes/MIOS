@@ -39,6 +39,8 @@ export const Icons: Record<string, ReactNode> = {
   filter: <Icon d="M3 5h18l-7 9v6l-4-2v-4z" />,
   sort: <Icon d="M7 4v16M3 16l4 4 4-4M17 20V4M13 8l4-4 4 4" />,
   archive: <Icon d="M3 4h18v4H3zM5 8v12h14V8M10 12h4" />,
+  people: <Icon d="M9 11a4 4 0 100-8 4 4 0 000 8zM2 21v-2a5 5 0 015-5h4a5 5 0 015 5v2M17 3.5a4 4 0 010 7.75M22 21v-2a5 5 0 00-3.5-4.75" />,
+  lock: <Icon d="M5 11h14v10H5zM8 11V7a4 4 0 018 0v4M12 15v2" />,
 }
 
 // ----- Trend arrow -----

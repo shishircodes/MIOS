@@ -132,3 +132,27 @@ CREATE TABLE IF NOT EXISTS report_sections (
 
 CREATE INDEX IF NOT EXISTS idx_reports_quarter   ON reports(quarter);
 CREATE INDEX IF NOT EXISTS idx_sections_report   ON report_sections(report_id, position);
+
+-- Role-based access.
+--
+-- Two roles. `admin` reaches the Admin section — source health, usage and cost,
+-- and this table itself. `member` gets the intelligence pages and nothing else.
+--
+-- The table is also an allowlist: a row here admits someone whose email is
+-- outside the Easy Skill Workspace domain, which is how a contractor or a
+-- founder on a personal address gets in without widening the domain rule for
+-- everyone. It does NOT replace ALLOWED_EMAILS — that env var still works, and
+-- the admin screen lists what it contains so nobody forgets it is there.
+CREATE TABLE IF NOT EXISTS app_users (
+    -- Lower-cased. Google emails are case-insensitive and storing both cases
+    -- would let the same person exist twice with different roles.
+    email      TEXT PRIMARY KEY,
+    role       TEXT NOT NULL DEFAULT 'member',
+    -- Who granted this, and when. An access list nobody can audit is not one.
+    added_by   TEXT,
+    added_at   TEXT NOT NULL,
+    note       TEXT,
+    last_seen  TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_app_users_role ON app_users(role);

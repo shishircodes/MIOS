@@ -1,10 +1,15 @@
 import { createFileRoute } from '@tanstack/react-router'
+import { AdminOnly } from '~/components/AdminOnly'
 import { BarBlock, Section } from '~/components/ui'
 import { tokens } from '~/data/mock'
 
 export const Route = createFileRoute('/tokens')({
   head: () => ({ meta: [{ title: 'Tokens · MIOS' }] }),
-  component: TokensScreen,
+  component: () => (
+    <AdminOnly>
+      <TokensScreen />
+    </AdminOnly>
+  ),
 })
 
 function TokensScreen() {

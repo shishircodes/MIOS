@@ -1,47 +1,130 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { Section } from '~/components/ui'
-import { sources } from '~/data/mock'
+import { useQuery } from '@tanstack/react-query'
+import { AdminOnly } from '~/components/AdminOnly'
+import { Loading, Section } from '~/components/ui'
+import { sourceHealthQueryOptions } from '~/lib/api'
+import type { SourceHealth, SourceStatus } from '~/lib/types'
 
 export const Route = createFileRoute('/sources')({
   head: () => ({ meta: [{ title: 'Sources · MIOS' }] }),
-  component: SourcesScreen,
+  component: () => (
+    <AdminOnly>
+      <SourcesScreen />
+    </AdminOnly>
+  ),
 })
 
-function dot(sla: string) {
-  if (sla === 'OK') return <span className="dot-ok" />
-  if (sla === 'WARN') return <span className="dot-warn" />
-  if (sla === 'OFF') return <span className="dot-err" />
-  return <span className="dot-err" />
+/** Status is carried by a word as well as a colour — colour alone would fail
+ *  WCAG 1.4.1 for anyone who cannot distinguish green from amber. */
+const STATUS: Record<SourceStatus, { label: string; cls: string; help: string }> = {
+  ok: { label: 'Collecting', cls: 'ok', help: 'Ran recently and returned records.' },
+  stale: { label: 'Stale', cls: 'warn', help: 'Has not collected anything lately.' },
+  never_run: { label: 'No data yet', cls: 'warn', help: 'Configured, but has never returned a record.' },
+  not_configured: { label: 'Not configured', cls: 'off', help: 'Missing credentials, so it is skipped.' },
+  retired: { label: 'Retired', cls: 'off', help: 'No longer collected; past records are kept.' },
+}
+
+function ago(iso: string | null): string {
+  if (!iso) return 'never'
+  const days = Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000)
+  if (days <= 0) return 'today'
+  if (days === 1) return 'yesterday'
+  return `${days} days ago`
+}
+
+function SourceRow({ s, limit }: { s: SourceHealth; limit: number }) {
+  const st = STATUS[s.status] ?? STATUS.retired
+  // A run that came back exactly at the cap was almost certainly truncated —
+  // worth flagging, because the number is a limit, not a measurement.
+  const capped = s.lastRunRecords >= limit
+
+  return (
+    <div className="src-row">
+      <div className="name">
+        <span className={`dot-${st.cls}`} aria-hidden="true" />
+        <span style={{ marginLeft: 8 }}>{s.label}</span>
+      </div>
+      <div className="muted">
+        {s.kind} · {s.market}
+        {s.note && <div className="src-note">{s.note}</div>}
+      </div>
+      <div>
+        <span className={`status-chip ${st.cls}`} title={st.help}>{st.label}</span>
+      </div>
+      <div className="num">
+        <strong>{s.lastRunRecords.toLocaleString()}</strong>
+        {capped && <div className="src-note">at the {limit} cap</div>}
+      </div>
+      <div className="num">{s.last7Days.toLocaleString()}</div>
+      <div className="num">{s.totalRecords.toLocaleString()}</div>
+      <div className="muted mono" style={{ fontSize: 11 }}>{ago(s.lastSeen)}</div>
+    </div>
+  )
 }
 
 function SourcesScreen() {
-  const ok = sources.filter((s) => s.sla === 'OK').length
+  const { data, isPending, error } = useQuery(sourceHealthQueryOptions)
+
+  if (isPending) return <div className="page"><Loading lines={['Checking each source', 'Counting what came back']} /></div>
+  if (error) return <div className="page"><div className="notice err">Could not load source health. {error.message}</div></div>
+
+  const healthy = data.sources.filter((s) => s.status === 'ok').length
+  const live = data.sources.filter((s) => s.status !== 'retired')
+  const pending = data.sources.reduce((n, s) => n + s.pending, 0)
+
   return (
     <div className="page">
       <div className="page-header">
         <div>
-          <div className="kicker">Admin · Source Health</div>
+          <div className="kicker">Admin · Source health</div>
           <h1>Data sources</h1>
         </div>
         <div className="meta">
-          <div>{ok}/{sources.length} healthy</div>
-          <div style={{ marginTop: 4 }}>PNGworkforce · SEEK · Adzuna</div>
+          <div><strong>{healthy}</strong> of {live.length} collecting</div>
+          <div style={{ marginTop: 4 }}>{data.totalRecords.toLocaleString()} records all time</div>
         </div>
       </div>
 
-      <Section title="Connectors" tools={<span>{sources.length} SOURCES</span>}>
-        <div className="src-row" style={{ fontFamily: 'var(--mono)', fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)' }}>
-          <div>Source</div><div>Type / region</div><div className="num">Records</div><div className="num">Uptime</div><div>Last run</div>
+      <Section title="Collectors" tools={<span>{live.length} SOURCES</span>}>
+        <div className="src-row src-head">
+          <div>Source</div>
+          <div>Type / market</div>
+          <div>Status</div>
+          <div className="num">Last run</div>
+          <div className="num">7 days</div>
+          <div className="num">All time</div>
+          <div>Last seen</div>
         </div>
-        {sources.map((s) => (
-          <div className="src-row" key={s.name}>
-            <div className="name">{dot(s.sla)} <span style={{ marginLeft: 8 }}>{s.name}</span></div>
-            <div className="muted">{s.type} · {s.region}</div>
-            <div className="num"><strong>{s.records}</strong></div>
-            <div className="num">{s.uptime}</div>
-            <div className="muted mono" style={{ fontSize: 11 }}>{s.last}</div>
-          </div>
+        {data.sources.map((s) => (
+          <SourceRow key={s.name} s={s} limit={data.perSourceLimit} />
         ))}
+      </Section>
+
+      <Section title="How to read this">
+        <div className="prose-note">
+          <p>
+            Every figure here is counted from the collected records themselves, not
+            from a separate log — so it cannot drift out of step with what is
+            actually in the database.
+          </p>
+          <p>
+            <strong>Last run</strong> is how many records a source returned the last
+            day it collected. Each source stops at {data.perSourceLimit} records per
+            run, so a run sitting exactly on that number was probably cut short
+            rather than finished.
+          </p>
+          <p>
+            A source is marked <strong>stale</strong> once {data.staleAfterDays} days
+            pass with nothing collected — longer than the weekly cycle, so a normal
+            week never trips it.
+          </p>
+          {pending > 0 && (
+            <p>
+              {pending.toLocaleString()} records are waiting to be classified. They
+              are collected and stored; they just have not been read yet.
+            </p>
+          )}
+        </div>
       </Section>
     </div>
   )

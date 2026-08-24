@@ -16,6 +16,9 @@ Endpoints:
     GET  /api/digest   -> structured weekly digest  [AUTH REQUIRED]
     GET  /api/signals  -> the full signal list, paginated  [AUTH REQUIRED]
 
+The Admin section lives at /api/admin/* and is gated by `require_admin`, not
+just `require_user` — a member gets 403 there even with a valid session.
+
 Mode Publish adds /api/publish/* (see api/publish_api.py). It has no endpoint
 that distributes externally, by design — see that module's docstring.
 
@@ -31,6 +34,7 @@ from fastapi import Depends, FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
+from api import access
 from api.auth import check_google_client_id, require_user, router as auth_router
 from api.digest_service import (
     DEFAULT_PAGE_SIZE,
@@ -39,6 +43,7 @@ from api.digest_service import (
     build_digest_payload,
     build_feed_payload,
 )
+from api.admin_api import router as admin_router
 from api.publish_api import router as publish_router
 from api.push_api import router as push_router
 from api.watchlist_api import router as watchlist_router
@@ -53,6 +58,9 @@ log = logging.getLogger("api.server")
 async def lifespan(_app: FastAPI):
     # Defined below; resolved at call time, not at definition time.
     _warn_on_insecure_config()
+    # No-op once an admin exists. Without it a fresh database has no admin and
+    # no way to create one from inside the app.
+    access.ensure_bootstrap_admin()
     yield
 
 
@@ -92,6 +100,7 @@ app.add_middleware(
 app.include_router(auth_router)
 app.include_router(push_router)
 app.include_router(publish_router)
+app.include_router(admin_router)
 app.include_router(watchlist_router)
 
 

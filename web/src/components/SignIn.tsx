@@ -155,7 +155,7 @@ export function SignIn({ next, error: errCode, detail }: SignInProps) {
         {session?.domain && (
           <p className="signin-note">
             {/* Don't claim "only" when an allowlist admits other accounts too. */}
-            {session.domain} accounts{session.hasAllowlist ? ' and approved exceptions' : ' only'}
+            {session.domain} accounts{session.hasExceptions ? ' and approved exceptions' : ' only'}
           </p>
         )}
       </div>

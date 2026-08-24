@@ -159,9 +159,9 @@ are deduplicated on `source_url`, so re-running does not create duplicates.
 | `python -m loader.rematch --dry-run` | Reports which signals would change watchlist tier under the current matching rules. |
 | `python -m loader.rematch` | Recomputes `watchlist_tier` and `is_new_prospect` on stored signals. **No Gemini calls** — the watchlist match was always a string comparison, so changing the rules or the watchlist does not require reclassifying. |
 
-> Mode Publish added the `reports` and `report_sections` tables. Run
-> `loader.check --init` against Neon before deploying it — nothing applies a
-> schema change to production on your behalf.
+> Mode Publish added the `reports` and `report_sections` tables, and roles added
+> `app_users`. Run `loader.check --init` against Neon before deploying either —
+> nothing applies a schema change to production on your behalf.
 
 ### Evaluation
 
@@ -433,7 +433,9 @@ Timestamps stay ISO-8601 `TEXT` rather than `timestamptz`: the strings sort
 chronologically, which is all the code needs, and it keeps one schema instead of
 two.
 
-Three tables: `signals`, `watchlist`, and `candidate_profiles` (Mode Push).
+Seven tables: `signals`, `watchlist`, `kv_store`, `candidate_profiles` (Mode
+Push), `reports` and `report_sections` (Mode Publish), and `app_users` (who
+may sign in, and with what role).
 
 > **Schema changes need `python -m loader.check --init` run against Neon.** The
 > PR preview workflow applies it automatically to preview branches, but nothing
@@ -506,8 +508,43 @@ Appending it again produces Google's opaque `invalid_client` error.
 | `API_BASE_URL` / `WEB_APP_URL` | Where the API and dashboard live |
 | `OAUTH_REDIRECT_URI` | Defaults to `<API_BASE_URL>/auth/callback`; must match the console exactly |
 | `ALLOWED_GOOGLE_DOMAIN` | Workspace domain checked against the verified `hd` claim |
-| `ALLOWED_EMAILS` | Comma-separated allowlist bypassing the domain check, for dev accounts |
+| `ALLOWED_EMAILS` | Comma-separated allowlist bypassing the domain check. Optional — the People & access screen does the same job without a restart — but still honoured, and listed there so it is not an invisible door |
 | `AUTH_DISABLED` | Development bypass. Never in a deployed environment |
+
+### Roles
+
+Two roles. **Member** gets the intelligence pages; **administrator** also gets
+the Admin section — source health, model spend, and the access list itself.
+
+There are three ways in, and they differ in kind:
+
+| Route | Grants | Managed from |
+|---|---|---|
+| `ALLOWED_GOOGLE_DOMAIN` | member | Server configuration. Admits everyone at the Workspace domain, and can never grant admin |
+| `app_users` table | member **or** admin | The **Admin → People & access** screen. Works for any address, at any domain — this is how somebody outside Easy Skill gets in without widening the domain rule |
+| `ALLOWED_EMAILS` | member | Server configuration plus a restart. Left in place deliberately: removing it would lock out whoever it names on the next deploy |
+
+The People & access screen shows one list of everyone who can sign in, whichever
+route let them in — an access route nobody can see is a route nobody revokes.
+Rows from `ALLOWED_EMAILS` carry a lock instead of a Remove button, since closing
+that door takes a configuration change and a restart. The domain rule admits
+people who never appear as rows at all, so it is stated under the list.
+
+`revgames7@gmail.com` is seeded as the first administrator on an empty database,
+so a fresh deploy is never a locked room with the key inside. Seeding only fires
+when there is no administrator at all, so it cannot undo a deliberate demotion.
+The last remaining administrator cannot be demoted or removed.
+
+Hiding the Admin nav group is presentation. Every `/api/admin/*` endpoint checks
+the role server-side and answers a member with `403`.
+
+`ALLOWED_EMAILS` may be left empty. Two things key off "can anyone outside the
+domain sign in?" — the `hd` hint that filters Google's account chooser, and the
+line on the sign-in screen — and both ask `access.has_external_grants()`, which
+counts named rows as well as the environment variable. Reading the variable
+directly would make an empty one mean "domain accounts only", hiding named
+outsiders from the chooser and telling them on the sign-in page that they cannot
+get in.
 
 > **Sign-out caveat.** Because the session is a stateless signed cookie, sign-out
 > is a client-side delete — there is no server-side record to revoke. A cookie
@@ -694,7 +731,7 @@ containers work before pushing.
 │   └── adzuna.py             ← Adzuna JSON API, one query per client (AU)
 ├── loader/
 │   ├── db.py                 ← Neon PostgreSQL / SQLite adapter
-│   ├── schema.sql            ← signals + watchlist + candidate_profiles DDL
+│   ├── schema.sql            ← all seven tables, one file, both engines
 │   ├── ingest.py             ← UUID + dedupe-on-source_url ingestion
 │   ├── check.py              ← connectivity probe / schema init
 │   ├── migrate.py            ← SQLite → Neon copy
@@ -709,8 +746,11 @@ containers work before pushing.
 │   └── store.py              ← profile persistence + signal queries
 ├── api/
 │   ├── server.py             ← FastAPI app; data endpoints require auth
-│   ├── auth.py               ← Google Sign-In (OAuth2/OIDC) + require_user
+│   ├── auth.py               ← Google Sign-In (OAuth2/OIDC) + require_user/require_admin
+│   ├── access.py             ← roles, the three sign-in routes, last-admin guards
+│   ├── admin_api.py          ← /api/admin/* — access list and source health
 │   ├── digest_service.py     ← dashboard payload, windowing, velocity baseline
+│   ├── publish_api.py        ← /api/publish/* — quarterly reports and review
 │   └── push_api.py           ← /api/push/* — CV intake and matching
 ├── delivery/
 │   ├── digest.py             ← Slack mrkdwn weekly digest + ranking helpers
@@ -720,7 +760,8 @@ containers work before pushing.
 ├── pipeline/
 │   └── live.py               ← the production cycle
 ├── web/                      ← TanStack Start + React 19 dashboard
-│   └── src/routes/           ← digest, feed, push, watchlist, sources, tokens
+│   └── src/routes/           ← digest, feed, push, publish, watchlist, sources,
+│                                access, tokens
 ├── data/
 │   └── synthetic_postings.jsonl  ← 80 hand-authored labelled postings
 ├── tests/                    ← pytest; Gemini mocked, scrapers fixture-driven

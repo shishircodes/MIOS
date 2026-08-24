@@ -281,9 +281,13 @@ def test_there_is_no_endpoint_that_distributes_externally():
     from api.server import app
 
     forbidden = ("send", "distribute", "hubspot", "email", "publish-to", "broadcast")
+    # Scoped to the report routes. The rule is about Mode Publish distributing a
+    # report, not about the word appearing anywhere in the API — the admin
+    # access routes are keyed by email address and would match "email".
     offenders = [
         r.path for r in app.routes
-        if any(word in str(getattr(r, "path", "")).lower() for word in forbidden)
+        if str(getattr(r, "path", "")).startswith("/api/publish")
+        and any(word in str(r.path).lower() for word in forbidden)
     ]
     assert offenders == [], f"external-send endpoint(s) added: {offenders}"
 

@@ -53,8 +53,13 @@ const NAV = [
   },
   {
     group: 'ADMIN',
+    // Hidden from members. This is presentation only — every /api/admin/*
+    // endpoint re-checks the role, so a member who types the URL still gets
+    // nothing back.
+    adminOnly: true,
     items: [
-      { to: '/sources', label: 'Sources health', icon: 'src', badge: '12' },
+      { to: '/sources', label: 'Sources health', icon: 'src', badge: '' },
+      { to: '/access', label: 'People & access', icon: 'people', badge: '' },
       { to: '/tokens', label: 'Tokens & cost', icon: 'tokens', badge: '' },
     ],
   },
@@ -68,6 +73,7 @@ const CRUMBS: Record<string, string[]> = {
   '/watchlist': ['Reference', 'Watchlist'],
   '/dashboard': ['Reference', 'Dashboard'],
   '/sources': ['Admin', 'Source health'],
+  '/access': ['Admin', 'People & access'],
   '/tokens': ['Admin', 'Tokens & cost'],
 }
 
@@ -210,6 +216,7 @@ function Shell({ children }: { children: ReactNode }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname })
   const crumbs = CRUMBS[pathname] ?? ['Mode Monitor', 'Weekly Digest']
   const { session } = useAuth()
+  const isAdmin = Boolean(session?.isAdmin)
   const { data: watchlistData } = useQuery(watchlistQueryOptions)
 
   // Expanded is the default, and the server always renders that. The stored
@@ -277,7 +284,7 @@ function Shell({ children }: { children: ReactNode }) {
       </div>
 
       <nav className="sidebar" id="sidebar-nav" aria-label="Main">
-        {NAV.map((g) => (
+        {NAV.filter((g) => !('adminOnly' in g && g.adminOnly) || isAdmin).map((g) => (
           <div className="nav-group" key={g.group}>
             {/* Collapsed, the text is hidden by CSS and the element becomes a
                 rule between groups — so the sections stay visually separated

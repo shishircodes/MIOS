@@ -59,6 +59,31 @@ def _apply_column_additions(conn) -> None:
         log.info("init_db: added %s.%s", table, column)
 
 
+def _seed_bootstrap_admin(conn) -> None:
+    """Give the access list a first administrator when it has none.
+
+    Imported lazily: loader must not depend on the api package, or the pipeline
+    would drag FastAPI in just to write a signal.
+    """
+    try:
+        from api.access import BOOTSTRAP_ADMIN, ROLE_ADMIN
+
+        row = conn.execute(
+            "SELECT count(*) FROM app_users WHERE role = ?", (ROLE_ADMIN,)
+        ).fetchone()
+        if int(row[0]) > 0:
+            return
+        conn.execute(
+            "INSERT INTO app_users (email, role, added_by, added_at, note) "
+            "VALUES (?,?,?,?,?) ON CONFLICT (email) DO UPDATE SET role = ?",
+            (BOOTSTRAP_ADMIN, ROLE_ADMIN, "system", _now_iso(),
+             "Seeded automatically as the first administrator", ROLE_ADMIN),
+        )
+        log.info("init_db: seeded %s as the bootstrap administrator", BOOTSTRAP_ADMIN)
+    except Exception as exc:  # noqa: BLE001 - never block init on this
+        log.warning("init_db: could not seed the bootstrap admin (%s)", exc)
+
+
 def init_db(target: str | Path | None = None, watchlist_path: str | Path | None = None) -> None:
     """Create tables and seed the watchlist. Idempotent."""
     watchlist_path = Path(watchlist_path) if watchlist_path else settings.watchlist_path
@@ -67,6 +92,7 @@ def init_db(target: str | Path | None = None, watchlist_path: str | Path | None 
         conn.executescript(schema_sql)
         _apply_column_additions(conn)
         _seed_watchlist(conn, watchlist_path)
+        _seed_bootstrap_admin(conn)
     log.info("init_db complete: %s", describe(target))
 
 

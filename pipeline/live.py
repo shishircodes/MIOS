@@ -33,10 +33,15 @@ from scraper import SOURCE_NAMES, scrape_all
 
 log = logging.getLogger(__name__)
 
+#: Records to take from each source per run. Per-source rather than a total
+#: budget, so one prolific board cannot crowd out a quiet one. The admin screen
+#: quotes this figure, so it lives here rather than being repeated.
+DEFAULT_SCRAPE_LIMIT = 50
+
 
 def run_live_cycle(
     *,
-    scrape_limit: int = 50,
+    scrape_limit: int = DEFAULT_SCRAPE_LIMIT,
     digest_window_days: int = 7,
     base_url: str | None = None,
     sources: list[str] | None = None,
@@ -116,7 +121,8 @@ def run_live_cycle(
 
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description="MIOS live production cycle")
-    p.add_argument("--limit", type=int, default=50, help="per-source scrape limit (default 50)")
+    p.add_argument("--limit", type=int, default=DEFAULT_SCRAPE_LIMIT,
+                   help=f"per-source scrape limit (default {DEFAULT_SCRAPE_LIMIT})")
     p.add_argument(
         "--source", action="append", choices=list(SOURCE_NAMES), default=None,
         help="scrape only this source (repeatable; default: all)",

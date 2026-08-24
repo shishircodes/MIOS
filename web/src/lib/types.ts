@@ -218,3 +218,53 @@ export interface DigestPayload {
   velocity: VelocityRow[]
   newNames: NewName[]
 }
+
+// ---------- Admin ----------
+
+/** A person who can sign in. `source` says whether this screen can change it:
+ *  'database' rows are editable, 'environment' grants come from ALLOWED_EMAILS
+ *  and need a config change plus a restart. */
+export interface AccessUser {
+  email: string
+  role: 'admin' | 'member'
+  addedBy: string | null
+  addedAt: string | null
+  note: string | null
+  lastSeen: string | null
+  source: 'database' | 'environment'
+}
+
+export interface AccessPayload {
+  users: AccessUser[]
+  envGrants: AccessUser[]
+  /** Workspace domain admitted wholesale as members, if configured. */
+  domain: string | null
+  roles: string[]
+  you: string
+  /** Set after a revoke that did not actually close every door. */
+  warning?: string | null
+}
+
+export type SourceStatus = 'ok' | 'stale' | 'never_run' | 'not_configured' | 'retired'
+
+export interface SourceHealth {
+  name: string
+  label: string
+  market: string
+  kind: string
+  status: SourceStatus
+  note: string | null
+  lastSeen: string | null
+  totalRecords: number
+  last7Days: number
+  lastRunRecords: number
+  pending: number
+  runDays: number
+}
+
+export interface SourcesPayload {
+  sources: SourceHealth[]
+  staleAfterDays: number
+  perSourceLimit: number
+  totalRecords: number
+}

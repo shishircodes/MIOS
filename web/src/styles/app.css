@@ -975,3 +975,86 @@ max-width: 100%;
 overflow-x: auto;
 }
 }
+/* ---------- Admin: source health & access ----------
+   Status is never carried by colour alone (WCAG 1.4.1): every chip and dot is
+   accompanied by a word. The chip borders sit at 3:1 against their fill so the
+   boundary itself passes 1.4.11. */
+.status-chip {
+  display: inline-block; font-family: var(--mono); font-size: 11px;
+  letter-spacing: 0.06em; text-transform: uppercase; padding: 3px 8px;
+  border: 1px solid var(--line-2); white-space: nowrap;
+}
+.status-chip.ok   { background: var(--moss-bg);  color: var(--moss);      border-color: rgba(15,110,61,0.35); }
+.status-chip.warn { background: var(--amber-bg); color: var(--amber-ink); border-color: var(--amber-line); }
+.status-chip.off  { background: var(--paper-2);  color: var(--ink-3);     border-color: var(--line-3); }
+
+/* Six columns now: the mock had no status or per-run figure. */
+.src-row { grid-template-columns: 150px 1fr 116px 96px 76px 88px 96px; }
+.src-head {
+  font-family: var(--mono); font-size: 10.5px; text-transform: uppercase;
+  letter-spacing: 0.08em; color: var(--muted); background: var(--paper-2);
+}
+.src-note { font-size: 11.5px; color: var(--muted); margin-top: 2px; line-height: 1.35; }
+.src-row .num .src-note { text-align: right; }
+
+/* Four columns, not six: "added by" and "added" read as one fact, and the
+   last sign-in belongs under the address rather than in a column of its own. */
+.person-row {
+  display: grid; grid-template-columns: 1fr 170px 240px 110px;
+  gap: 14px; padding: 10px 16px; border-bottom: 1px solid var(--line);
+  align-items: center; font-size: 13.5px;
+}
+.person-head {
+  font-family: var(--mono); font-size: 10.5px; text-transform: uppercase;
+  letter-spacing: 0.08em; color: var(--muted); background: var(--paper-2);
+}
+.person-row .name { font-weight: 500; word-break: break-all; }
+.row-sub { font-size: 11.5px; font-weight: 400; color: var(--muted); margin-top: 2px; }
+.row-how { font-size: 12.5px; line-height: 1.4; }
+.row-action { display: flex; justify-content: flex-end; align-items: center; }
+.add-actions { gap: 6px; }
+
+/* The inline add row, revealed by the header button. */
+.add-row { background: var(--teal-bg); border-bottom: 1px solid var(--teal-line); }
+.add-row .input, .add-row .select { padding: 6px 9px; font-size: 13px; }
+
+/* A lock rather than a disabled Remove: the action is not unavailable right
+   now, it lives in the server configuration. */
+.lock { display: inline-flex; color: var(--muted); padding: 4px; }
+.lock .ico { display: block; }
+
+.you-chip {
+  margin-left: 8px; font-family: var(--mono); font-size: 10.5px;
+  text-transform: uppercase; letter-spacing: 0.06em; padding: 2px 6px;
+  background: var(--teal-bg); color: var(--teal-3); border: 1px solid var(--teal);
+}
+.role-select { padding: 5px 8px; font-size: 13px; width: 100%; }
+
+/* The domain rule: one line plus an expandable, because it is read far less
+   often than the list it sits under. */
+.rule-note { padding: 14px 16px; border: 1px solid var(--line-2); }
+.rule-note > p { font-size: 13.5px; line-height: 1.55; color: var(--ink-3); margin: 0; }
+
+.prose-note { padding: 4px 16px 16px; max-width: 68ch; }
+.prose-note p { font-size: 13.5px; line-height: 1.6; color: var(--ink-3); margin: 0 0 10px; }
+.prose-note p:last-child { margin-bottom: 0; }
+
+.notice {
+  padding: 10px 14px; margin-bottom: 16px; font-size: 13.5px;
+  border: 1px solid var(--line-2); border-left-width: 3px;
+}
+.notice.ok  { background: var(--moss-bg);  color: var(--moss);   border-left-color: var(--moss); }
+.notice.err { background: var(--crimson-bg); color: var(--crimson); border-left-color: var(--crimson); }
+
+/* Shown when a member reaches an Admin URL directly. */
+.empty-state { text-align: center; padding: 72px 24px; max-width: 46ch; margin: 0 auto; }
+.empty-state .ico { display: inline-block; color: var(--muted); }
+.empty-state h2 { font-size: 18px; margin: 12px 0 8px; }
+.empty-state p { font-size: 14px; line-height: 1.6; color: var(--ink-3); margin: 0; }
+
+/* Text for screen readers only. Clipped rather than display:none, which would
+   remove it from the accessibility tree along with the visual layout. */
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0;
+}
