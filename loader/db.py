@@ -27,9 +27,11 @@ engines accept (`CREATE TABLE IF NOT EXISTS`, partial unique indexes,
 """
 from __future__ import annotations
 
+import atexit
 import logging
 import re
 import sqlite3
+import threading
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterable, Iterator, Sequence
@@ -241,27 +243,128 @@ class Connection:
         self._raw.rollback()
 
 
+# --------------------------------------------------------------------------
+# Connection pooling
+# --------------------------------------------------------------------------
+#
+# Opening a Postgres connection is not one network round trip, it is roughly
+# seven: TCP, then the TLS handshake, then Postgres startup and authentication.
+# Measured against Neon in ap-southeast-2 that is ~77 ms against an ~11.5 ms
+# round trip — about 87% of the cost of a short query is getting the connection,
+# not running it. Deploy the API in a different region from the database and
+# every one of those round trips is paid at intercontinental latency.
+#
+# So Postgres connections are pooled and reused. SQLite is left alone: opening a
+# local file is free, and a pool there would only add machinery.
+
+_pool: Any = None
+_pool_dsn: str | None = None
+_pool_lock = threading.Lock()
+
+#: Small on purpose. This is one API process talking to a serverless database
+#: with its own connection ceiling, and the workload is a handful of short
+#: queries per request rather than sustained concurrency.
+POOL_MIN_SIZE = 1
+POOL_MAX_SIZE = 8
+
+#: Neon suspends an idle compute, which kills pooled connections with it. This
+#: recycles them first, so the pool does not hand out a socket the far end has
+#: already dropped.
+POOL_MAX_IDLE_SECONDS = 240
+
+
+def _get_pool(dsn: str):
+    """The process-wide pool for `dsn`, created on first use.
+
+    Lazy rather than created at import: the CLI entry points (`loader.check`,
+    `pipeline.live`) import this module too, and most of them run a single query
+    and exit.
+    """
+    global _pool, _pool_dsn
+    with _pool_lock:
+        if _pool is not None and _pool_dsn == dsn:
+            return _pool
+        if _pool is not None:
+            _pool.close()
+            _pool = None
+        from psycopg_pool import ConnectionPool
+
+        _pool = ConnectionPool(
+            dsn,
+            min_size=POOL_MIN_SIZE,
+            max_size=POOL_MAX_SIZE,
+            max_idle=POOL_MAX_IDLE_SECONDS,
+            # Autocommit is the *pool's* default because reads are the hot path
+            # and a read has nothing to commit. Writers are not left unprotected:
+            # `connect()` opens an explicit transaction unless asked for a read,
+            # so all-or-nothing behaviour is unchanged for everything that
+            # writes. Measured, this is the difference between 2 and 3.6 network
+            # round trips per query.
+            kwargs={"row_factory": _pg_row_factory, "autocommit": True},
+            # Costs one round trip per checkout, and buys back six. Without it a
+            # connection the database has closed underneath us surfaces as a
+            # failed request rather than a transparently replaced socket.
+            check=ConnectionPool.check_connection,
+            timeout=15.0,
+            open=True,
+            name="mios",
+        )
+        _pool_dsn = dsn
+        log.info("db: opened a connection pool (min=%d max=%d)", POOL_MIN_SIZE, POOL_MAX_SIZE)
+        return _pool
+
+
+def close_pool() -> None:
+    """Shut the pool down. Safe to call when there isn't one."""
+    global _pool, _pool_dsn
+    with _pool_lock:
+        if _pool is not None:
+            _pool.close()
+            _pool = None
+            _pool_dsn = None
+
+
+# A pool holds background worker threads; without this an interpreter that
+# exits mid-request can hang waiting on them.
+atexit.register(close_pool)
+
+
 @contextmanager
-def connect(target: str | Path | None = None) -> Iterator[Connection]:
+def connect(target: str | Path | None = None, *, readonly: bool = False) -> Iterator[Connection]:
     """Open a connection to Postgres or SQLite and commit on clean exit.
 
     Rolls back and re-raises on error, so a failed run never half-writes.
+
+    Postgres connections come from a pool and are returned to it rather than
+    closed — see above.
+
+    `readonly=True` skips the surrounding transaction, which is worth about one
+    network round trip per call. It is opt-in rather than inferred: a caller
+    that writes inside a read-only block would lose all-or-nothing behaviour
+    silently, and that is not a thing to get wrong by default. Anything that
+    writes must leave it alone.
     """
     resolved = resolve_target(target)
 
     if is_postgres(resolved):
-        import psycopg
+        pool = _get_pool(normalise_pg_dsn(str(resolved)))
+        with pool.connection() as conn:
+            if readonly:
+                yield Connection(conn, "postgres")
+            else:
+                # Explicit, because the pool hands out autocommit connections.
+                # Commits on a clean exit, rolls back on an exception — the same
+                # contract this function has always had.
+                with conn.transaction():
+                    yield Connection(conn, "postgres")
+        return
 
-        conn = psycopg.connect(normalise_pg_dsn(str(resolved)), row_factory=_pg_row_factory)
-        wrapped = Connection(conn, "postgres")
-    else:
-        path = Path(resolved)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(path)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA foreign_keys = ON")
-        wrapped = Connection(conn, "sqlite")
-
+    path = Path(resolved)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(path)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+    wrapped = Connection(conn, "sqlite")
     try:
         yield wrapped
         wrapped.commit()

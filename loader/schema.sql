@@ -24,11 +24,20 @@ CREATE TABLE IF NOT EXISTS signals (
     raw_content        TEXT NOT NULL,
     analysis_notes     TEXT,
     is_new_prospect    INTEGER DEFAULT 0,
-    classified_at      TEXT
+    classified_at      TEXT,
+    -- The market the signal actually belongs to, resolved at ingest.
+    -- `geography` is what the scraper assumed from its own source; this is that
+    -- corrected by the PNG keywords, which is what the dashboard displays. It
+    -- is stored rather than derived so the feed can filter and paginate in SQL
+    -- instead of loading every row and doing it in Python.
+    region             TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_signals_company  ON signals(company_name);
 CREATE INDEX IF NOT EXISTS idx_signals_captured ON signals(captured_at);
+-- Indexes covering `region` are created after the column migration in
+-- loader/ingest.py, not here: this script also runs against databases that
+-- predate the column, where CREATE TABLE IF NOT EXISTS adds nothing.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_signals_source_url ON signals(source_url) WHERE source_url IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS watchlist (

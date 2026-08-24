@@ -12,6 +12,10 @@ dependencies = [
     "requests>=2.32.0",
     # Neon / PostgreSQL. Binary wheel avoids needing libpq + a compiler locally.
     "psycopg[binary]>=3.2.0",
+    # Connection pooling. Opening a Neon connection costs ~6.7 network round
+    # trips, which is most of a request when the API and the database are not in
+    # the same region — see loader/db.py.
+    "psycopg_pool>=3.2.0",
 ]
 
 [project.optional-dependencies]

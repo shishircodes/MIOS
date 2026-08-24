@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Iterable
 
 from config.settings import settings
+from delivery.digest import infer_geography
 from loader.db import SCHEMA_PATH, connect, describe
 
 log = logging.getLogger(__name__)
@@ -29,7 +30,26 @@ ADDED_COLUMNS: tuple[tuple[str, str, str], ...] = (
     ("reports", "prose_source", "TEXT NOT NULL DEFAULT 'computed'"),
     ("reports", "prose_note", "TEXT"),
     ("report_sections", "computed_body", "TEXT"),
+    ("signals", "region", "TEXT"),
 )
+
+#: Indexes that depend on a migrated column, so they cannot live in schema.sql —
+#: that script runs before the columns are added.
+ADDED_INDEXES: tuple[tuple[str, str], ...] = (
+    ("idx_signals_region", "CREATE INDEX IF NOT EXISTS idx_signals_region ON signals(region)"),
+    ("idx_signals_feed",
+     "CREATE INDEX IF NOT EXISTS idx_signals_feed ON signals(classified_at, captured_at)"),
+)
+
+
+def _apply_indexes(conn) -> None:
+    """Create the post-migration indexes. Idempotent, and never fatal — a
+    missing index is slow, not broken."""
+    for name, sql in ADDED_INDEXES:
+        try:
+            conn.execute(sql)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("init_db: could not create %s (%s)", name, exc)
 
 
 def _existing_columns(conn, table: str) -> set[str]:
@@ -57,6 +77,30 @@ def _apply_column_additions(conn) -> None:
             continue
         conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
         log.info("init_db: added %s.%s", table, column)
+
+
+def backfill_regions(target=None, batch: int = 500) -> int:
+    """Fill `region` on rows ingested before the column existed.
+
+    Runs from `init_db`, so `loader.check --init` is all a deployment needs.
+    Idempotent — it only ever touches rows where the column is still null.
+    """
+    from delivery.digest import infer_geography as _infer
+
+    filled = 0
+    with connect(target) as conn:
+        rows = conn.execute(
+            "SELECT signal_id, raw_content, geography FROM signals WHERE region IS NULL"
+        ).fetchall()
+        for r in rows:
+            conn.execute(
+                "UPDATE signals SET region = ? WHERE signal_id = ?",
+                (_infer(r["raw_content"] or "", default=r["geography"] or "AU"), r["signal_id"]),
+            )
+            filled += 1
+    if filled:
+        log.info("init_db: backfilled region on %d signal(s)", filled)
+    return filled
 
 
 def _seed_bootstrap_admin(conn) -> None:
@@ -91,8 +135,11 @@ def init_db(target: str | Path | None = None, watchlist_path: str | Path | None 
     with connect(target) as conn:
         conn.executescript(schema_sql)
         _apply_column_additions(conn)
+        _apply_indexes(conn)
         _seed_watchlist(conn, watchlist_path)
         _seed_bootstrap_admin(conn)
+    # Outside the block above: it needs the column the migration just added.
+    backfill_regions(target)
     log.info("init_db complete: %s", describe(target))
 
 
@@ -142,6 +189,10 @@ def ingest(records: Iterable[dict], target: str | Path | None = None) -> int:
                 rec.get("source_url"),
                 rec.get("captured_at") or _now_iso(),
                 rec.get("geography", "PNG"),
+                # Resolved once here rather than on every read. `geography` is
+                # what the scraper assumed from its own source; a PNG role
+                # advertised on an Australian board is only visible in the text.
+                infer_geography(raw, default=rec.get("geography") or "AU"),
                 rec.get("sector"),
                 rec.get("company_name"),
                 rec.get("watchlist_tier"),
@@ -161,9 +212,10 @@ def ingest(records: Iterable[dict], target: str | Path | None = None) -> int:
             cur = conn.execute(
                 """INSERT INTO signals (
                     signal_id, source_type, source_name, source_url, captured_at,
-                    geography, sector, company_name, watchlist_tier, signal_category,
-                    review_cycle, raw_content, analysis_notes, is_new_prospect, classified_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    geography, region, sector, company_name, watchlist_tier,
+                    signal_category, review_cycle, raw_content, analysis_notes,
+                    is_new_prospect, classified_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT DO NOTHING
                 RETURNING signal_id""",
                 row,

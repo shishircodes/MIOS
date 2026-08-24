@@ -142,7 +142,7 @@ def source_health(user: dict[str, Any] = Depends(require_admin)) -> dict[str, An
 
     stats: dict[str, dict[str, Any]] = {}
     try:
-        with connect() as conn:
+        with connect(readonly=True) as conn:
             rows = conn.execute(
                 "SELECT source_name, count(*) AS total, "
                 "max(captured_at) AS last_seen, "

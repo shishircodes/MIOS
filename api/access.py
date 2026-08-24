@@ -24,6 +24,7 @@ nobody is an admin, and there is no way to make one from inside the app.
 from __future__ import annotations
 
 import logging
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
@@ -79,7 +80,7 @@ def get_user(email: str, target: str | Path | None = None) -> dict[str, Any] | N
     if not email:
         return None
     try:
-        with connect(target) as conn:
+        with connect(target, readonly=True) as conn:
             row = conn.execute(
                 "SELECT email, role, added_by, added_at, note, last_seen "
                 "FROM app_users WHERE email = ?", (email,)
@@ -93,7 +94,7 @@ def get_user(email: str, target: str | Path | None = None) -> dict[str, Any] | N
 def list_users(target: str | Path | None = None) -> list[dict[str, Any]]:
     """Admins first, then members, alphabetically within each."""
     try:
-        with connect(target) as conn:
+        with connect(target, readonly=True) as conn:
             rows = conn.execute(
                 "SELECT email, role, added_by, added_at, note, last_seen "
                 "FROM app_users ORDER BY CASE role WHEN 'admin' THEN 0 ELSE 1 END, email"
@@ -123,6 +124,18 @@ def env_grants() -> list[dict[str, Any]]:
     } for e in settings.allowed_emails if normalise(e)]
 
 
+#: `/api/me` runs on every page load, and the answer changes only when somebody
+#: is added or removed — which happens through this module, so the cache can be
+#: dropped precisely then rather than guessed at with a timeout.
+_external_cache: dict[str, int] = {}
+_external_lock = threading.Lock()
+
+
+def _invalidate_external_cache() -> None:
+    with _external_lock:
+        _external_cache.clear()
+
+
 def count_external_grants(domain: str, target: str | Path | None = None) -> int:
     """Named accounts sitting outside the Workspace domain.
 
@@ -132,16 +145,27 @@ def count_external_grants(domain: str, target: str | Path | None = None) -> int:
     domain = (domain or "").strip().lower()
     if not domain:
         return 0
+
+    key = f"{domain}|{target or ''}"
+    with _external_lock:
+        if key in _external_cache:
+            return _external_cache[key]
+
     try:
-        with connect(target) as conn:
+        with connect(target, readonly=True) as conn:
             row = conn.execute(
                 "SELECT count(*) FROM app_users WHERE email NOT LIKE ?",
                 ("%@" + domain,),
             ).fetchone()
-        return int(row[0])
+        n = int(row[0])
     except Exception as exc:  # noqa: BLE001 - table may not exist yet
         log.warning("access: could not count external grants (%s)", exc)
+        # Not cached: a failed read is a transient state, not an answer.
         return 0
+
+    with _external_lock:
+        _external_cache[key] = n
+    return n
 
 
 def has_external_grants(
@@ -201,7 +225,7 @@ def is_admin(email: str, target: str | Path | None = None) -> bool:
 
 def count_admins(target: str | Path | None = None) -> int:
     try:
-        with connect(target) as conn:
+        with connect(target, readonly=True) as conn:
             row = conn.execute(
                 "SELECT count(*) FROM app_users WHERE role = ?", (ROLE_ADMIN,)
             ).fetchone()
@@ -232,6 +256,7 @@ def ensure_bootstrap_admin(target: str | Path | None = None) -> None:
                 (BOOTSTRAP_ADMIN, ROLE_ADMIN, "system", _now(),
                  "Seeded automatically as the first administrator", ROLE_ADMIN),
             )
+        _invalidate_external_cache()
         log.info("access: seeded %s as the bootstrap administrator", BOOTSTRAP_ADMIN)
     except Exception as exc:  # noqa: BLE001 - never block startup on this
         log.warning("access: could not seed the bootstrap admin (%s)", exc)
@@ -269,6 +294,7 @@ def upsert_user(
             "ON CONFLICT (email) DO UPDATE SET role = ?, note = ?",
             (email, role, added_by, _now(), note, role, note),
         )
+    _invalidate_external_cache()
     log.info("access: %s set %s to %s", added_by, email, role)
     return get_user(email, target)  # type: ignore[return-value]
 
@@ -286,6 +312,7 @@ def remove_user(email: str, *, removed_by: str,
         )
     with connect(target) as conn:
         conn.execute("DELETE FROM app_users WHERE email = ?", (email,))
+    _invalidate_external_cache()
     log.info("access: %s removed %s", removed_by, email)
     return True
 
