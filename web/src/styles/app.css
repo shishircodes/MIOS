@@ -489,7 +489,11 @@ input, textarea, select { font-family: inherit; }
 }
 .vel-head .wk { font-size: 17px; font-weight: 600; color: var(--ink); flex: none; }
 .vel-rail { height: 5px; background: var(--paper-2); }
-.vel-rail > span { display: block; height: 100%; background: var(--teal); }
+.vel-rail > span {
+  display: block; height: 100%; background: var(--teal);
+  /* Grown with scaleX by lib/motion.ts, so it must anchor at the left edge. */
+  transform-origin: left center;
+}
 .vel-meta {
   display: flex; align-items: center; gap: 7px;
   font-family: var(--mono); font-size: 11px; color: var(--ink-3); letter-spacing: 0.03em;
@@ -1057,4 +1061,156 @@ overflow-x: auto;
 .sr-only {
   position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
   overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0;
+}
+
+/* Neutral connection dot, for while the first request is still in flight. */
+.dot-muted {
+  display: inline-block; width: 7px; height: 7px;
+  background: var(--muted); vertical-align: middle;
+}
+
+/* ---------- Weekly digest: what was collected ----------
+   Replaces a four-tile KPI strip. The tiles each demanded a headline number and
+   a delta whether or not one existed, which is how two of them ended up showing
+   the same variable and a third an arrow with nothing behind it. */
+.collection {
+  display: grid;
+  grid-template-columns: minmax(210px, 0.9fr) minmax(280px, 1.4fr) minmax(190px, 0.85fr);
+  gap: 28px; align-items: start;
+  border: 1px solid var(--line-2);
+  /* A hairline of the accent along the top, so the band reads as a masthead for
+     the page rather than another card. */
+  border-top: 3px solid var(--teal-2);
+  padding: 18px 20px; margin-bottom: 18px;
+  background:
+    linear-gradient(180deg, var(--teal-bg) 0%, rgba(255,255,255,0) 46%),
+    var(--surface);
+}
+
+.collection-figure { display: flex; align-items: baseline; gap: 9px; margin-top: 8px; }
+.collection-figure strong {
+  font-family: var(--display); font-size: 40px; line-height: 0.9;
+  letter-spacing: -0.02em; color: var(--ink);
+  /* Reserve the width of the final value so the count-up cannot reflow the
+     line beside it on every frame. */
+  min-width: 2ch; display: inline-block;
+}
+.collection-figure span { font-size: 13px; color: var(--ink-3); }
+.collection-kinds { margin-top: 10px; font-size: 12.5px; color: var(--muted); }
+.collection-kinds .tnum { color: var(--ink-3); font-weight: 600; }
+
+/* ----- Region split ----- */
+.collection-split { padding-top: 2px; }
+
+.split-labels { display: flex; margin-bottom: 7px; }
+.split-labels > span {
+  display: flex; flex-direction: column; gap: 1px;
+  min-width: 0; padding-right: 10px;
+  /* Aligns each label with the segment it describes. */
+  border-left: 2px solid transparent;
+}
+.split-labels > span:first-child { border-left-color: var(--teal-2); padding-left: 8px; }
+.split-labels > span:last-child { border-left-color: var(--navy); padding-left: 8px; }
+.split-labels em {
+  font-style: normal; font-family: var(--mono); font-size: 10px;
+  letter-spacing: 0.09em; text-transform: uppercase; color: var(--muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.split-labels b { font-size: 17px; line-height: 1.1; color: var(--ink); }
+.split-labels i { font-style: normal; font-size: 11px; color: var(--muted); }
+
+.split-bar { display: flex; height: 30px; width: 100%; background: var(--paper-2); }
+.split-bar .seg { position: relative; overflow: hidden; }
+.split-bar .seg + .seg { border-left: 2px solid var(--surface); }
+.split-bar .fill {
+  position: absolute; inset: 0;
+  transform-origin: left center;
+  /* Only ever driven by scaleX — see lib/motion.ts. */
+}
+.split-bar .seg.au .fill {
+  background: linear-gradient(105deg, var(--teal-3) 0%, var(--teal-2) 62%, #12A3A1 100%);
+}
+.split-bar .seg.png .fill {
+  background: var(--navy);
+}
+/* Diagonal hatching on the second segment. It carries the same information as
+   the colour difference, which matters because the two fills are only ~2.2:1
+   apart — the pattern, not the hue, is what separates them. */
+.split-bar .seg.png .fill::after {
+  content: ''; position: absolute; inset: 0;
+  background: repeating-linear-gradient(
+    115deg,
+    rgba(255,255,255,0.16) 0 2px,
+    rgba(255,255,255,0) 2px 7px
+  );
+}
+
+/* ----- The two derived figures ----- */
+.collection-facts { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.collection-facts li {
+  display: grid; grid-template-columns: auto 1fr; gap: 10px; align-items: baseline;
+  padding-left: 10px; border-left: 2px solid var(--line-2);
+}
+.collection-facts b {
+  font-family: var(--display); font-size: 20px; line-height: 1;
+  color: var(--ink); min-width: 2ch;
+}
+.collection-facts span { font-size: 12.5px; color: var(--ink-3); line-height: 1.35; }
+
+@media (max-width: 1000px) {
+  .collection { grid-template-columns: 1fr; gap: 18px; }
+  .collection-figure strong { font-size: 34px; }
+}
+
+/* Motion is opt-out at the source too (lib/motion.ts short-circuits), but the
+   bar is sized by scaleX, so its resting state must be correct without JS. */
+@media (prefers-reduced-motion: reduce) {
+  .split-bar .fill { transform: none !important; }
+}
+
+/* Neutral connection dot, for while the first request is still in flight. */
+.dot-muted {
+  display: inline-block; width: 7px; height: 7px;
+  background: var(--muted); vertical-align: middle;
+}
+
+/* ---------- Weekly digest: what was collected ----------
+   Replaces a four-tile KPI strip. The tiles each demanded a headline number and
+   a delta whether or not one existed, which is how two of them ended up showing
+   the same variable and a third an arrow with nothing behind it. */
+.collection {
+  display: grid; grid-template-columns: minmax(220px, 1fr) minmax(240px, 1.2fr) minmax(200px, 1fr);
+  gap: 24px; align-items: start;
+  border: 1px solid var(--line-2); padding: 16px 18px; margin-bottom: 18px;
+  background: var(--surface);
+}
+.collection-figure { display: flex; align-items: baseline; gap: 8px; margin-top: 6px; }
+.collection-figure strong { font-family: var(--display); font-size: 30px; line-height: 1; }
+.collection-figure span { font-size: 13px; color: var(--ink-3); }
+.collection-kinds { margin-top: 8px; font-size: 12.5px; color: var(--muted); }
+.collection-kinds .tnum { color: var(--ink-3); font-weight: 500; }
+
+.collection-split { padding-top: 2px; }
+.split-bar { display: flex; height: 12px; width: 100%; background: var(--paper-2); }
+.split-bar .seg.au { background: var(--teal-2); }
+.split-bar .seg.png { background: var(--navy); }
+/* The two fills are only ~2.2:1 apart, so the join would be hard to place by
+   colour alone. The hairline makes the boundary structural instead; the legend
+   below carries both figures in words, so nothing here depends on colour. */
+.split-bar .seg + .seg { border-left: 2px solid var(--surface); }
+.split-legend {
+  display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 9px;
+  font-size: 12.5px; color: var(--ink-3);
+}
+.split-legend b { margin-left: 4px; color: var(--ink); }
+.swatch { display: inline-block; width: 9px; height: 9px; margin-right: 6px; }
+.swatch.au { background: var(--teal-2); }
+.swatch.png { background: var(--navy); }
+
+.collection-facts { list-style: none; margin: 0; padding: 0; display: grid; gap: 7px; }
+.collection-facts li { font-size: 13px; color: var(--ink-3); line-height: 1.4; }
+.collection-facts b { font-family: var(--mono); color: var(--ink); margin-right: 3px; }
+
+@media (max-width: 900px) {
+  .collection { grid-template-columns: 1fr; gap: 16px; }
 }

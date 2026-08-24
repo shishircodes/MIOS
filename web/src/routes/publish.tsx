@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Icons, Loading, Section } from '~/components/ui'
 import {
   approveReport,
@@ -15,6 +15,7 @@ import {
 } from '~/lib/api'
 import { UnauthenticatedError } from '~/lib/auth'
 import { useAuth } from '~/lib/auth-context'
+import { useReveal } from '~/lib/motion'
 import type { Report, ReportSection } from '~/lib/types'
 
 export const Route = createFileRoute('/publish')({
@@ -31,9 +32,17 @@ function PublishScreen() {
   const [editing, setEditing] = useState<string | null>(null)
   const [draftBody, setDraftBody] = useState('')
 
+  const scope = useRef<HTMLDivElement>(null)
   const list = useQuery(reportsQueryOptions)
   const quarters = useQuery(quartersQueryOptions)
   const report = useQuery(reportQueryOptions(selected))
+
+  // Keyed on which report is open, so switching quarters replays the reveal —
+  // but editing or approving a section does not restage the whole document
+  // underneath the cursor, which would be actively annoying mid-review.
+  useReveal(scope, '.doc-section', { key: selected ?? 'none', delay: 0.08, stagger: 0.06 })
+  useReveal(scope, '.doc-toc li', { key: selected ?? 'none', delay: 0.05, stagger: 0.03, y: 6 })
+  useReveal(scope, '.report-list li', { key: list.data?.reports.length ?? 0, delay: 0.1, y: 6, max: 10 })
 
   // Open the newest report on arrival, so the page is never an empty shell when
   // there is something to read.
@@ -102,7 +111,7 @@ function PublishScreen() {
   const locked = doc?.status === 'approved'
 
   return (
-    <div className="page">
+    <div className="page" ref={scope}>
       <div className="page-header">
         <div>
           <div className="kicker">Mode Publish · Quarterly Market Report</div>

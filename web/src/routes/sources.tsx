@@ -1,8 +1,10 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
+import { useRef } from 'react'
 import { AdminOnly } from '~/components/AdminOnly'
 import { Loading, Section } from '~/components/ui'
 import { sourceHealthQueryOptions } from '~/lib/api'
+import { useFigure, useReveal } from '~/lib/motion'
 import type { SourceHealth, SourceStatus } from '~/lib/types'
 
 export const Route = createFileRoute('/sources')({
@@ -65,6 +67,13 @@ function SourceRow({ s, limit }: { s: SourceHealth; limit: number }) {
 function SourcesScreen() {
   const { data, isPending, error } = useQuery(sourceHealthQueryOptions)
 
+  // Before the early returns below: hooks cannot be called conditionally, so
+  // these tolerate `data` being undefined while the query is in flight.
+  const scope = useRef<HTMLDivElement>(null)
+  const healthyRef = useFigure(data?.sources.filter((s) => s.status === 'ok').length ?? 0)
+  const totalRef = useFigure(data?.totalRecords ?? 0, { delay: 0.1 })
+  useReveal(scope, '.src-row', { key: data?.sources.length ?? 0, delay: 0.12, max: 10 })
+
   if (isPending) return <div className="page"><Loading lines={['Checking each source', 'Counting what came back']} /></div>
   if (error) return <div className="page"><div className="notice err">Could not load source health. {error.message}</div></div>
 
@@ -72,16 +81,21 @@ function SourcesScreen() {
   const live = data.sources.filter((s) => s.status !== 'retired')
   const pending = data.sources.reduce((n, s) => n + s.pending, 0)
 
+
   return (
-    <div className="page">
+    <div className="page" ref={scope}>
       <div className="page-header">
         <div>
           <div className="kicker">Admin · Source health</div>
           <h1>Data sources</h1>
         </div>
         <div className="meta">
-          <div><strong>{healthy}</strong> of {live.length} collecting</div>
-          <div style={{ marginTop: 4 }}>{data.totalRecords.toLocaleString()} records all time</div>
+          <div>
+            <strong ref={healthyRef}>{healthy}</strong> of {live.length} collecting
+          </div>
+          <div style={{ marginTop: 4 }}>
+            <span ref={totalRef}>{data.totalRecords.toLocaleString()}</span> records all time
+          </div>
         </div>
       </div>
 

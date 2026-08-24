@@ -1,8 +1,9 @@
 import { useQuery } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Icons, Loading, Section, TierChip } from '~/components/ui'
 import { signalsQueryOptions } from '~/lib/api'
+import { useFigure, useReveal } from '~/lib/motion'
 
 export const Route = createFileRoute('/monitor/feed')({
   head: () => ({ meta: [{ title: 'Signal Feed · MIOS' }] }),
@@ -50,6 +51,15 @@ function SignalFeed() {
     }),
   )
 
+  // Before any early return. Re-keyed on the page and filters, so paging
+  // replays the reveal; the hook caps how many rows actually animate.
+  const scope = useRef<HTMLDivElement>(null)
+  const scrapedRef = useFigure(data?.scrapedAllTime ?? 0)
+  useReveal(scope, '.signal', {
+    key: `${page}-${region}-${cycle}-${debouncedQuery}`,
+    delay: 0.08,
+  })
+
   const signals = data?.signals ?? []
   const total = data?.total ?? 0
   const anyFilterActive = region !== 'ALL' || cycle !== 'ALL' || query.trim() !== ''
@@ -60,7 +70,7 @@ function SignalFeed() {
   const reset = () => { setRegion('ALL'); setCycle('ALL'); setQuery('') }
 
   return (
-    <div className="page">
+    <div className="page" ref={scope}>
       <div className="page-header">
         <div>
           <div className="kicker">Mode Monitor · Signal Feed</div>
@@ -71,7 +81,7 @@ function SignalFeed() {
               ever collected?" is a different question from "what am I looking
               at?", and the latter is answered above the list. */}
           <div>
-            <strong className="tnum" style={{ fontSize: 18, color: 'var(--ink)' }}>
+            <strong className="tnum" style={{ fontSize: 18, color: 'var(--ink)' }} ref={scrapedRef}>
               {(data?.scrapedAllTime ?? 0).toLocaleString()}
             </strong>{' '}
             signals collected all time

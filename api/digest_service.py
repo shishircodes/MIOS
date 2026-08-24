@@ -62,6 +62,9 @@ def _confidence(row_index: int, tier: str | None, is_new: bool) -> int:
 SELECT_SIGNALS = (
     "SELECT signal_id, company_name, sector, signal_category, review_cycle, "
     "watchlist_tier, is_new_prospect, raw_content, analysis_notes, source_name, "
+    # Distinguishes a job posting from a news article. Without it the digest
+    # counted both as "roles detected", which a Mining.com.au article is not.
+    "source_type, "
     # `geography` is what the scraper recorded about its own market. Without it
     # the region falls back to keyword inference alone, which filed PNGworkforce
     # jobs under Australia whenever their teaser named no PNG landmark.
@@ -125,6 +128,7 @@ def _rows_from_synthetic(path: Path) -> list[dict[str, Any]]:
             "raw_content": g.get("raw_text", ""),
             "analysis_notes": None,
             "source_name": "synthetic",
+            "source_type": "job_board",
             "_watchlist_match": g.get("ground_truth_watchlist_match"),
         })
     return out
@@ -316,6 +320,7 @@ def shape_signal(r: dict[str, Any], index: int) -> dict[str, Any]:
         "action": (r.get("analysis_notes") or "").strip() or None,
         "sector": SECTOR_PRETTY.get(sector_key, sector_key.title()),
         "source": r.get("source_name") or "pngworkforce",
+        "sourceType": r.get("source_type") or "job_board",
         "category": r.get("signal_category") or "hiring_velocity",
         "cycle": (r.get("review_cycle") or "weekly").upper(),
         "conf": _confidence(index, tier, is_new),
@@ -483,6 +488,7 @@ def build_digest_payload(
 
     classified = len(signals)
     geos = Counter(s["region"] for s in signals)
+    kinds = Counter(s["sourceType"] for s in signals)
     week_label = _collection_label(collected_from, collected_to)
 
     return {
@@ -500,11 +506,24 @@ def build_digest_payload(
         "week": (collected_to or datetime.now(timezone.utc)).strftime("WEEK %d %b %Y").upper(),
         "weekLabel": week_label,
         "generatedAt": datetime.now(timezone.utc).strftime("%a %d %b %Y · %H:%M UTC"),
-        "kpis": {
-            "rolesThisWeek": {"val": classified, "delta": f"AU {geos.get('AU', 0)} / PNG {geos.get('PNG', 0)}", "dir": "up"},
-            "newSignals": {"val": classified, "delta": "reviewed", "dir": "up"},
-            "newNames": {"val": len(new_names), "delta": f"{len(new_names)} to review", "dir": "flat"},
-            "pushQueries": {"val": 0, "delta": "—", "dir": "flat"},
+        #: What this week's collection actually consisted of.
+        #:
+        #: This replaced four KPI tiles that did not survive checking. Two of
+        #: them showed the same variable under different labels; one of those
+        #: also contradicted the "Key Signals" section below it, which lists 40.
+        #: A fourth reported Mode Push activity as a hardcoded zero. The figures
+        #: here are all counted, and they are nested rather than independent —
+        #: collected, of which shown, plus the new names found among them.
+        "collection": {
+            "collected": classified,
+            #: A news article is not a role. Splitting them keeps the headline
+            #: figure honest about what was actually gathered.
+            "jobs": kinds.get("job_board", 0),
+            "news": kinds.get("news", 0),
+            "shown": len(shown),
+            "newNames": len(new_names),
+            "sources": len({s["source"] for s in signals}),
+            "regions": {"AU": geos.get("AU", 0), "PNG": geos.get("PNG", 0)},
         },
         "signals": shown,
         "velocity": velocity,

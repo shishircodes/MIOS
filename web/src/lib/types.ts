@@ -1,12 +1,18 @@
 // Types mirror the JSON shape produced by api/digest_service.py (the Python backend).
 
-export type Dir = 'up' | 'down' | 'flat'
 export type Tier = 'A' | 'B' | 'C' | null
 
-export interface Kpi {
-  val: number
-  delta: string
-  dir: Dir
+/** What the week's collection consisted of. Nested rather than independent:
+ *  `collected` is the whole, `shown` is the ranked subset listed below it, and
+ *  `newNames` are the unfamiliar companies found among them. */
+export interface Collection {
+  collected: number
+  jobs: number
+  news: number
+  shown: number
+  newNames: number
+  sources: number
+  regions: { AU: number; PNG: number }
 }
 
 export interface Signal {
@@ -208,12 +214,7 @@ export interface DigestPayload {
   week: string
   weekLabel: string
   generatedAt: string
-  kpis: {
-    rolesThisWeek: Kpi
-    newSignals: Kpi
-    newNames: Kpi
-    pushQueries: Kpi
-  }
+  collection: Collection
   signals: Signal[]
   velocity: VelocityRow[]
   newNames: NewName[]
