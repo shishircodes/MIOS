@@ -26,6 +26,8 @@ export interface Signal {
   action: string | null
   sector: string
   source: string
+  /** Original posting URL when available; null when missing or not http(s). */
+  sourceUrl: string | null
   cycle: string
   conf: number
 }
