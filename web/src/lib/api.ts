@@ -32,13 +32,11 @@ export async function fetchSignals(query: FeedQuery): Promise<FeedPayload> {
     limit: String(query.limit),
     offset: String(query.offset),
   })
-
   // Only send filters that are actually set, so the URL stays readable in the
   // network tab and an empty search does not become `q=`.
   if (query.region) params.set('region', query.region)
   if (query.cycle) params.set('cycle', query.cycle)
   if (query.q) params.set('q', query.q)
-
   return fetchJson<FeedPayload>(`/api/signals?${params}`)
 }
 
@@ -61,7 +59,7 @@ export async function fetchWatchlist(): Promise<WatchlistResponse> {
 export const watchlistQueryOptions = queryOptions({
   queryKey: ['watchlist'],
   queryFn: fetchWatchlist,
-  // A 401 means "sign in", not "retry".
+  // A 401 means "sign in", not "retry" — the auth gate handles it.
   retry: false,
 })
 
@@ -73,25 +71,18 @@ export const watchlistQueryOptions = queryOptions({
  * code, which would throw that away — so this reads `detail` and surfaces it.
  */
 async function postOrExplain<T>(path: string, init: RequestInit): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
-    ...init,
-    credentials: 'include',
-  })
-
+  const res = await fetch(`${API_BASE}${path}`, { ...init, credentials: 'include' })
   if (res.status === 401) {
     const { UnauthenticatedError } = await import('./auth')
     throw new UnauthenticatedError()
   }
-
   if (!res.ok) {
     const detail = await res
       .json()
       .then((b) => (b as { detail?: string }).detail)
       .catch(() => null)
-
     throw new Error(detail || `Backend returned ${res.status}`)
   }
-
   return (await res.json()) as T
 }
 
@@ -99,38 +90,23 @@ async function postOrExplain<T>(path: string, init: RequestInit): Promise<T> {
 export async function parseCV(file: File): Promise<ParsedCV> {
   const body = new FormData()
   body.append('file', file)
-
   // No Content-Type header: the browser must set the multipart boundary itself.
-  return postOrExplain<ParsedCV>('/api/push/parse-cv', {
-    method: 'POST',
-    body,
-  })
+  return postOrExplain<ParsedCV>('/api/push/parse-cv', { method: 'POST', body })
 }
 
 export async function saveProfile(
   draft: ProfileDraft,
-  intake: {
-    intakeSource: 'cv_upload' | 'manual_form'
-    sourceFilename?: string | null
-  },
+  intake: { intakeSource: 'cv_upload' | 'manual_form'; sourceFilename?: string | null },
 ): Promise<StoredProfile> {
   return postOrExplain<StoredProfile>('/api/push/profiles', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      ...draft,
-      ...intake,
-    }),
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...draft, ...intake }),
   })
 }
 
 export async function fetchProfiles(): Promise<StoredProfile[]> {
-  const body = await fetchJson<{ profiles: StoredProfile[] }>(
-    '/api/push/profiles',
-  )
-
+  const body = await fetchJson<{ profiles: StoredProfile[] }>('/api/push/profiles')
   return body.profiles
 }
 
@@ -140,34 +116,19 @@ export const profilesQueryOptions = queryOptions({
   retry: false,
 })
 
-export async function fetchMatches(
-  profileId: string,
-): Promise<MatchResponse> {
-  return fetchJson<MatchResponse>(
-    `/api/push/profiles/${profileId}/matches`,
-  )
+export async function fetchMatches(profileId: string): Promise<MatchResponse> {
+  return fetchJson<MatchResponse>(`/api/push/profiles/${profileId}/matches`)
 }
 
 /** Rank companies for a draft without storing the person. */
-export async function matchDraft(
-  draft: ProfileDraft,
-): Promise<MatchResponse> {
+export async function matchDraft(draft: ProfileDraft): Promise<MatchResponse> {
   return postOrExplain<MatchResponse>('/api/push/match', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(draft),
   })
 }
 
-export async function deleteProfile(
-  profileId: string,
-): Promise<void> {
-  await postOrExplain(
-    `/api/push/profiles/${profileId}`,
-    {
-      method: 'DELETE',
-    },
-  )
+export async function deleteProfile(profileId: string): Promise<void> {
+  await postOrExplain(`/api/push/profiles/${profileId}`, { method: 'DELETE' })
 }

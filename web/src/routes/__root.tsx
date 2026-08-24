@@ -1,5 +1,4 @@
 import type { QueryClient } from '@tanstack/react-query'
-import { watchlistQueryOptions } from '~/lib/api'
 import { QueryClientProvider, QueryClient as QC, useQuery } from '@tanstack/react-query'
 import {
   HeadContent,
@@ -14,6 +13,7 @@ import type { ReactNode } from 'react'
 import { useEffect, useRef, useState } from 'react'
 import { NotFound } from '~/components/NotFound'
 import { Icons, Loading } from '~/components/ui'
+import { watchlistQueryOptions } from '~/lib/api'
 import { AuthProvider, useAuth } from '~/lib/auth-context'
 import appCss from '~/styles/app.css?url'
 
