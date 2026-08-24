@@ -266,7 +266,10 @@ async def login(request: Request, next: str | None = None):
     request.session[SESSION_NEXT_KEY] = safe_next_path(next)
 
     kwargs: dict[str, Any] = {}
-    if settings.allowed_google_domain and not access.has_external_grants():
+    external = access.has_external_grants(
+        domain=settings.allowed_google_domain, allowed_emails=settings.allowed_emails
+    )
+    if settings.allowed_google_domain and not external:
         # UX hint only: filters Google's account chooser to the Workspace domain.
         # The real check is the verified `hd` claim in authorize_claims().
         #
@@ -333,7 +336,10 @@ async def me(request: Request) -> dict[str, Any]:
         # Whether *some* accounts outside the domain are permitted — not which
         # ones. Lets the sign-in screen avoid claiming "domain accounts only"
         # when that isn't true. Counts named rows as well as ALLOWED_EMAILS.
-        "hasExceptions": access.has_external_grants(),
+        "hasExceptions": access.has_external_grants(
+            domain=settings.allowed_google_domain,
+            allowed_emails=settings.allowed_emails,
+        ),
         #: Drives which nav groups render. The API enforces the same rule.
         "role": (user or {}).get("role") or None,
         "isAdmin": bool(user) and (user.get("role") == access.ROLE_ADMIN),

@@ -26,7 +26,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 from config.settings import settings
 from loader.db import connect
@@ -123,7 +123,33 @@ def env_grants() -> list[dict[str, Any]]:
     } for e in settings.allowed_emails if normalise(e)]
 
 
-def has_external_grants(target: str | Path | None = None) -> bool:
+def count_external_grants(domain: str, target: str | Path | None = None) -> int:
+    """Named accounts sitting outside the Workspace domain.
+
+    A count rather than a listing: this runs on the sign-in redirect, and the
+    only thing either caller needs is whether the number is zero.
+    """
+    domain = (domain or "").strip().lower()
+    if not domain:
+        return 0
+    try:
+        with connect(target) as conn:
+            row = conn.execute(
+                "SELECT count(*) FROM app_users WHERE email NOT LIKE ?",
+                ("%@" + domain,),
+            ).fetchone()
+        return int(row[0])
+    except Exception as exc:  # noqa: BLE001 - table may not exist yet
+        log.warning("access: could not count external grants (%s)", exc)
+        return 0
+
+
+def has_external_grants(
+    *,
+    domain: str,
+    allowed_emails: Iterable[str],
+    target: str | Path | None = None,
+) -> bool:
     """True when somebody outside the Workspace domain can sign in.
 
     Two callers need this and both used to ask `bool(settings.allowed_emails)`,
@@ -131,18 +157,18 @@ def has_external_grants(target: str | Path | None = None) -> bool:
     non-domain account. The `app_users` table is now another, so leaving
     ALLOWED_EMAILS empty no longer means "domain accounts only".
 
-    Only meaningful when a domain rule exists; both callers already check that.
+    The policy is passed in rather than read from `settings` here: the callers
+    live in `api.auth` and hold their own reference to it, and a function that
+    silently consulted a *different* settings object than its caller would be
+    both untestable and wrong the moment the two diverged.
+
+    A database that cannot be read reports no exceptions. That is the safe
+    direction — both callers use this for presentation, and a table-granted
+    sign-in would be failing anyway if this query is failing.
     """
-    if settings.allowed_emails:
+    if any(allowed_emails):
         return True
-    domain = settings.allowed_google_domain.strip().lower()
-    if not domain:
-        return False
-    suffix = "@" + domain
-    # A database that cannot be read reports no exceptions. That is the safe
-    # direction: both callers use this for presentation, and a table-granted
-    # sign-in would be failing anyway if this query is failing.
-    return any(not u["email"].endswith(suffix) for u in list_users(target))
+    return count_external_grants(domain, target) > 0
 
 
 def role_for(email: str, hd: str | None = None,

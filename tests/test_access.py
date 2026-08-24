@@ -265,45 +265,58 @@ def test_the_dev_bypass_is_an_admin_consistently(monkeypatch):
 # empty made both of them wrong.
 
 
-def test_an_env_allowlist_counts_as_an_exception(db, policy):
-    policy(domain="easyskill.com", emails=("legacy@gmail.com",))
-    assert access.has_external_grants(db) is True
+def _external(db, *, domain="easyskill.com", emails=()):
+    return access.has_external_grants(domain=domain, allowed_emails=emails, target=db)
 
 
-def test_a_named_outsider_counts_even_with_an_empty_allowlist(db, policy):
+def test_an_env_allowlist_counts_as_an_exception(db):
+    assert _external(db, emails=("legacy@gmail.com",)) is True
+
+
+def test_a_named_outsider_counts_even_with_an_empty_allowlist(db):
     """The regression: ALLOWED_EMAILS is empty, but a contractor was granted a
     row. Reporting 'no exceptions' would hide them from the account chooser and
     tell them on the sign-in page that they cannot get in."""
-    policy(domain="easyskill.com", emails=())
     access.upsert_user("contractor@gmail.com", "member", added_by="boss", target=db)
-    assert access.has_external_grants(db) is True
+    assert _external(db) is True
 
 
-def test_staff_rows_are_not_exceptions(db, policy):
+def test_staff_rows_are_not_exceptions(db):
     """Naming somebody at the Workspace domain — to make them an admin, say —
     grants nothing the domain rule did not already grant, so the chooser should
     still be filtered."""
-    policy(domain="easyskill.com", emails=())
     access.upsert_user("boss@easyskill.com", "admin", added_by="system", target=db)
-    assert access.has_external_grants(db) is False
+    assert _external(db) is False
 
 
-def test_no_exceptions_when_nothing_but_the_domain_is_configured(db, policy):
-    policy(domain="easyskill.com", emails=())
-    assert access.has_external_grants(db) is False
+def test_no_exceptions_when_nothing_but_the_domain_is_configured(db):
+    assert _external(db) is False
 
 
-def test_an_unreadable_database_reports_no_exceptions(db, policy, monkeypatch):
+def test_the_allowlist_short_circuits_before_the_database(db, monkeypatch):
+    """This runs on the sign-in redirect. When the environment already answers
+    the question there is no reason to touch the database at all."""
+    def _boom(*_a, **_k):
+        raise AssertionError("queried the database unnecessarily")
+
+    monkeypatch.setattr(access, "count_external_grants", _boom)
+    assert _external(db, emails=("legacy@gmail.com",)) is True
+
+
+def test_an_unreadable_database_reports_no_exceptions(db, monkeypatch):
     """Presentation only, and a table-granted sign-in would be failing anyway if
     this query is failing. Better than raising on the sign-in screen."""
-    policy(domain="easyskill.com", emails=())
-    monkeypatch.setattr(access, "list_users", lambda t=None: [])
-    assert access.has_external_grants(db) is False
+    def _broken(*_a, **_k):
+        raise RuntimeError("connection refused")
+
+    monkeypatch.setattr(access, "connect", _broken)
+    assert _external(db) is False
 
 
-def test_the_account_chooser_is_not_filtered_when_an_outsider_is_named(db, policy):
-    """api/auth.py only sets the `hd` hint when there are no exceptions —
-    filtering the chooser would hide the very accounts we mean to let in."""
-    policy(domain="easyskill.com", emails=())
+def test_the_policy_comes_from_the_caller_not_a_second_settings_object(db):
+    """api.auth holds its own reference to settings. Reading `settings` inside
+    access.py instead meant an override applied by the caller never arrived —
+    which is exactly how this went wrong the first time."""
     access.upsert_user("contractor@gmail.com", "member", added_by="boss", target=db)
-    assert access.has_external_grants(db) is True, "so `hd` must not be sent"
+    assert _external(db, domain="other.example") is True, "unrelated domain: everyone is external"
+    assert _external(db, domain="gmail.com") is False, "same domain: nobody is"

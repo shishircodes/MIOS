@@ -170,11 +170,30 @@ def test_wrong_shape_is_caught():
 # ---------- account-chooser hint ----------
 
 
-def _login_query(monkeypatch, **overrides):
-    """Follow /auth/login one hop and return the Google authorization params."""
+def _login_query(monkeypatch, tmp_path, *, granted=(), **overrides):
+    """Follow /auth/login one hop and return the Google authorization params.
+
+    `granted` seeds the app_users table. The hint now depends on it — a named
+    outsider suppresses `hd` just as ALLOWED_EMAILS does — so the table is
+    pointed at a temp file rather than left to whatever the developer's or CI's
+    database happens to hold.
+    """
     from urllib.parse import parse_qs, urlparse
 
+    import api.access as access_mod
     import api.auth as auth_mod
+    from loader.db import connect
+    from loader.ingest import init_db
+
+    db = tmp_path / "login.db"
+    wl = tmp_path / "wl.json"
+    wl.write_text("[]")
+    init_db(db, watchlist_path=wl)
+    with connect(db) as conn:
+        conn.execute("DELETE FROM app_users")
+    monkeypatch.setattr(access_mod, "connect", lambda target=None: connect(db))
+    for email in granted:
+        access_mod.upsert_user(email, "member", added_by="test", target=db)
 
     patched = dataclasses.replace(
         real_settings,
@@ -196,19 +215,47 @@ def _login_query(monkeypatch, **overrides):
     return parse_qs(urlparse(res.headers["location"]).query)
 
 
-def test_login_sends_hd_hint_when_domain_is_the_only_rule(monkeypatch):
-    q = _login_query(monkeypatch, allowed_google_domain="easyskill.com", allowed_emails=())
+def test_login_sends_hd_hint_when_domain_is_the_only_rule(monkeypatch, tmp_path):
+    q = _login_query(
+        monkeypatch, tmp_path,
+        allowed_google_domain="easyskill.com", allowed_emails=(),
+    )
     assert q["hd"] == ["easyskill.com"]
 
 
-def test_login_omits_hd_hint_when_emails_are_allowlisted(monkeypatch):
+def test_login_omits_hd_hint_when_emails_are_allowlisted(monkeypatch, tmp_path):
     """Otherwise Google's chooser filters out the very account we allowlisted."""
     q = _login_query(
-        monkeypatch,
+        monkeypatch, tmp_path,
         allowed_google_domain="easyskill.com",
         allowed_emails=("dev@gmail.com",),
     )
     assert "hd" not in q
+
+
+def test_login_omits_hd_hint_when_an_outsider_is_named_in_the_table(monkeypatch, tmp_path):
+    """The same reason, by the other route. ALLOWED_EMAILS is empty here, so
+    reading it alone would filter the chooser and hide the contractor's account
+    from the very person we granted access to."""
+    q = _login_query(
+        monkeypatch, tmp_path,
+        granted=("contractor@gmail.com",),
+        allowed_google_domain="easyskill.com",
+        allowed_emails=(),
+    )
+    assert "hd" not in q
+
+
+def test_login_still_sends_hd_hint_when_only_staff_are_named(monkeypatch, tmp_path):
+    """Naming a colleague to make them an admin grants nothing the domain rule
+    did not already grant, so the chooser should still be filtered."""
+    q = _login_query(
+        monkeypatch, tmp_path,
+        granted=("boss@easyskill.com",),
+        allowed_google_domain="easyskill.com",
+        allowed_emails=(),
+    )
+    assert q["hd"] == ["easyskill.com"]
 
 
 # ---------- endpoint gating ----------
