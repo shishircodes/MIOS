@@ -32,8 +32,8 @@ def db(tmp_path, monkeypatch):
     # Both modules resolve the database through loader.db.connect, so pointing
     # the default target at the temp file covers the endpoints too.
     monkeypatch.setenv("DB_PATH", str(path))
-    monkeypatch.setattr("api.admin_api.connect", lambda t=None: connect(path))
-    monkeypatch.setattr("api.access.connect", lambda t=None: connect(path))
+    monkeypatch.setattr("api.admin_api.connect", lambda t=None, **kw: connect(path, **kw))
+    monkeypatch.setattr("api.access.connect", lambda t=None, **kw: connect(path, **kw))
     # init_db seeds the bootstrap admin; these tests build the exact access
     # situation under test, so they start from an empty list.
     with connect(path) as conn:

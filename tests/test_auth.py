@@ -185,13 +185,14 @@ def _login_query(monkeypatch, tmp_path, *, granted=(), **overrides):
     from loader.db import connect
     from loader.ingest import init_db
 
+    access_mod._invalidate_external_cache()
     db = tmp_path / "login.db"
     wl = tmp_path / "wl.json"
     wl.write_text("[]")
     init_db(db, watchlist_path=wl)
     with connect(db) as conn:
         conn.execute("DELETE FROM app_users")
-    monkeypatch.setattr(access_mod, "connect", lambda target=None: connect(db))
+    monkeypatch.setattr(access_mod, "connect", lambda target=None, **kw: connect(db, **kw))
     for email in granted:
         access_mod.upsert_user(email, "member", added_by="test", target=db)
 

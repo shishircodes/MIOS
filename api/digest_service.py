@@ -68,7 +68,7 @@ SELECT_SIGNALS = (
     # `geography` is what the scraper recorded about its own market. Without it
     # the region falls back to keyword inference alone, which filed PNGworkforce
     # jobs under Australia whenever their teaser named no PNG landmark.
-    "geography, captured_at "
+    "geography, region, captured_at "
     "FROM signals WHERE classified_at IS NOT NULL "
 )
 
@@ -90,7 +90,7 @@ def _rows_from_db(
     if not is_postgres(resolved) and not Path(resolved).exists():
         return []
     try:
-        with connect(resolved) as conn:
+        with connect(resolved, readonly=True) as conn:
             if since is not None:
                 rows = conn.execute(
                     SELECT_SIGNALS + "AND captured_at >= ? ORDER BY captured_at DESC",
@@ -239,7 +239,7 @@ def _history_windows(
 
     oldest = window_start - timedelta(days=days * windows)
     try:
-        with connect(resolved) as conn:
+        with connect(resolved, readonly=True) as conn:
             rows = conn.execute(
                 "SELECT company_name, watchlist_tier, captured_at FROM signals "
                 "WHERE classified_at IS NOT NULL "
@@ -312,7 +312,9 @@ def shape_signal(r: dict[str, Any], index: int) -> dict[str, Any]:
         # promote a row to PNG. Inferring from text alone put 15 PNGworkforce
         # jobs under "Australia" purely because their teaser named no PNG
         # landmark, while still correctly catching a PNG role advertised on SEEK.
-        "region": infer_geography(raw, default=(r.get("geography") or "AU")),
+        # Resolved at ingest and stored. The fallback covers rows written
+        # before the column existed and the synthetic dataset, which has none.
+        "region": r.get("region") or infer_geography(raw, default=(r.get("geography") or "AU")),
         "tier": tier,
         "company": r.get("company_name") or "Unknown",
         "title": title,
@@ -568,6 +570,58 @@ def scraped_all_time(target: str | Path | None = None) -> int:
         return 0
 
 
+#: Search terms are matched against the same text the row displays. `desc` is
+#: raw_content truncated to 237 characters and `title` is cut from the first 80,
+#: so the first 240 characters cover both exactly — searching the whole column
+#: would quietly match text the reader cannot see on the row.
+_SEARCHABLE_PREFIX = 240
+
+def _sector_as_displayed() -> str:
+    """SQL that renders `sector` the way the row does.
+
+    The column stores `oil_gas`; the row shows "Oil & Gas". Searching the column
+    would fail the reader who types what is in front of them, and a per-term
+    lookup cannot help because the label is two words. So the mapping is done in
+    the query, from the same dict the renderer uses.
+    """
+    whens = " ".join(
+        f"WHEN '{key}' THEN '{label.lower()}'" for key, label in SECTOR_PRETTY.items()
+    )
+    return f"CASE sector {whens} ELSE lower(coalesce(sector,'')) END"
+
+
+def _feed_where(region: str | None, cycle: str | None,
+                terms: list[str]) -> tuple[str, list[Any]]:
+    """The filter, as SQL. Returns a WHERE fragment and its parameters."""
+    clauses: list[str] = ["classified_at IS NOT NULL"]
+    params: list[Any] = []
+
+    if region:
+        clauses.append("upper(coalesce(region, geography, 'AU')) = ?")
+        params.append(region)
+    if cycle:
+        clauses.append("upper(coalesce(review_cycle, 'weekly')) = ?")
+        params.append(cycle)
+
+    for term in terms:
+        # Every term must appear somewhere in the row, so "bhp mining" narrows
+        # rather than widening — the same rule the browser filter uses.
+        # The same fields, in the same order, as the row the reader is looking
+        # at: company, title, description, sector, region, source, tier.
+        haystack = (
+            "(lower(coalesce(company_name,'')) || ' ' "
+            f"|| lower(substr(coalesce(raw_content,''), 1, {_SEARCHABLE_PREFIX})) || ' ' "
+            f"|| {_sector_as_displayed()} || ' ' "
+            "|| lower(coalesce(region, geography, '')) || ' ' "
+            "|| lower(coalesce(source_name,'')) || ' ' "
+            "|| lower(coalesce(watchlist_tier,'')))"
+        )
+        clauses.append(f"{haystack} LIKE ?")
+        params.append(f"%{term}%")
+
+    return " AND ".join(clauses), params
+
+
 def build_feed_payload(
     db_path: str | Path | None = None,
     limit: int = DEFAULT_PAGE_SIZE,
@@ -585,25 +639,50 @@ def build_feed_payload(
     — filtering a single page client-side would search 50 of 250 rows and report
     "3 results" for a term with 40 matches.
 
-    It is applied *after* shaping rather than in SQL because `region` is not a
-    column: PNG roles advertised on an Australian board are promoted by keyword,
-    so a `WHERE geography = ?` would disagree with the region shown on the row.
-    That means every classified row is loaded per request. At a few thousand
-    rows that is milliseconds; if this ever holds a year of daily scrapes, the
-    region should be denormalised into a column and this moved into SQL.
+    All of it is done in SQL. It used to be done in Python, which meant loading
+    every classified row on every request — 134 KB of posting text to return
+    50 rows, growing by a scrape a week forever. That was only affordable while
+    the database was a few milliseconds away.
     """
-    rows = _rows_from_db(db_path)
-    shaped = [shape_signal(r, i) for i, r in enumerate(rows)]
-    for s in shaped:
-        s.pop("_rank", None)
-
-    terms = [t for t in (q or "").strip().lower().split() if t]
-    matched = [s for s in shaped
-               if _matches(s, (region or "").upper() or None, (cycle or "").upper() or None, terms)]
+    resolved = resolve_target(db_path)
+    if not is_postgres(resolved) and not Path(resolved).exists():
+        return {"signals": [], "total": 0, "totalClassified": 0,
+                "scrapedAllTime": 0, "limit": limit, "offset": offset}
 
     limit = max(1, min(limit, MAX_PAGE_SIZE))
     offset = max(0, offset)
-    page = matched[offset:offset + limit]
+    terms = [t for t in (q or "").strip().lower().split() if t]
+    where, params = _feed_where((region or "").upper() or None,
+                                (cycle or "").upper() or None, terms)
+
+    try:
+        # One connection for all four queries. Each `with connect()` is a
+        # network round trip of its own, so they share one.
+        with connect(resolved, readonly=True) as conn:
+            rows = conn.execute(
+                f"{SELECT_SIGNALS.replace('WHERE classified_at IS NOT NULL ', 'WHERE ')}{where} "
+                # `signal_id` breaks the tie. A scrape writes dozens of rows in
+                # the same second, so `captured_at` alone is not a total order —
+                # and LIMIT/OFFSET over an unstable sort can show a row twice on
+                # one page and skip it on the next.
+                "ORDER BY captured_at DESC, signal_id DESC LIMIT ? OFFSET ?",
+                (*params, limit, offset),
+            ).fetchall()
+            total = conn.execute(
+                f"SELECT count(*) FROM signals WHERE {where}", tuple(params)
+            ).fetchone()[0]
+            total_classified = conn.execute(
+                "SELECT count(*) FROM signals WHERE classified_at IS NOT NULL"
+            ).fetchone()[0]
+            scraped = conn.execute("SELECT count(*) FROM signals").fetchone()[0]
+    except Exception as exc:  # noqa: BLE001 - missing table, unreachable Neon
+        log.warning("feed: could not read signals (%s)", exc)
+        return {"signals": [], "total": 0, "totalClassified": 0,
+                "scrapedAllTime": 0, "limit": limit, "offset": offset}
+
+    page = [shape_signal(dict(r), i) for i, r in enumerate(rows)]
+    for s in page:
+        s.pop("_rank", None)
     # Numbering is absolute, so row 51 reads "51" on page two rather than "01".
     for i, s in enumerate(page):
         s["n"] = f"{offset + i + 1:02d}"
@@ -611,12 +690,12 @@ def build_feed_payload(
     return {
         "signals": page,
         #: Rows matching the current filter — what pagination walks through.
-        "total": len(matched),
+        "total": int(total),
         #: Every classified row, ignoring filters.
-        "totalClassified": len(shaped),
+        "totalClassified": int(total_classified),
         #: Every row the scrapers have ever collected, including any not yet
         #: classified. This is the "all time" figure the feed header shows.
-        "scrapedAllTime": scraped_all_time(db_path),
+        "scrapedAllTime": int(scraped),
         "limit": limit,
         "offset": offset,
     }

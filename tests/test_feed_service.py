@@ -12,6 +12,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from api.digest_service import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, build_feed_payload
+from delivery.digest import infer_geography
 from loader.db import connect
 from loader.ingest import init_db
 
@@ -38,10 +39,13 @@ def _add(db, signal_id, *, days_ago=1, company="BHP", geo="AU", cycle="weekly",
     with connect(db) as conn:
         conn.execute(
             "INSERT INTO signals (signal_id, source_type, source_name, source_url, "
-            "captured_at, geography, sector, company_name, watchlist_tier, "
+            "captured_at, geography, region, sector, company_name, watchlist_tier, "
             "signal_category, review_cycle, raw_content, analysis_notes, "
-            "is_new_prospect, classified_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "is_new_prospect, classified_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            # `region` is resolved the same way loader.ingest resolves it, so
+            # these rows look like rows the pipeline actually wrote.
             (signal_id, "job_board", "seek", f"https://x/{signal_id}", captured, geo,
+             infer_geography(raw if raw is not None else "", default=geo),
              "mining", company, "A", "hiring_velocity", cycle,
              raw or f"{company} is hiring a Maintenance Planner", "note", 0,
              captured if classified else None),
@@ -225,3 +229,95 @@ def test_missing_database_returns_an_empty_page_rather_than_failing(tmp_path):
     assert p["signals"] == []
     assert p["total"] == 0
     assert p["scrapedAllTime"] == 0
+
+
+# ---------- pagination is done in SQL now ----------
+#
+# The feed used to load every classified row and filter in Python. These pin the
+# behaviour that had to survive moving it into the database.
+
+
+def test_paging_never_repeats_or_drops_a_row(db):
+    """`captured_at` is not unique — one scrape writes dozens of rows in the
+    same second. LIMIT/OFFSET over a non-total order can show a row on two
+    pages and none on the third, so the query orders by a tiebreaker too."""
+    same_second = 3.0
+    for i in range(25):
+        _add(db, f"s{i:02d}", days_ago=same_second, company=f"Co {i}")
+
+    seen: list[str] = []
+    for offset in range(0, 25, 5):
+        seen += [s["id"] for s in build_feed_payload(db, limit=5, offset=offset)["signals"]]
+
+    assert len(seen) == 25
+    assert len(set(seen)) == 25, "a row appeared on two pages, or none"
+
+
+def test_a_page_costs_the_same_whatever_the_table_holds(db):
+    """The row count returned must not grow with the table. This is the whole
+    reason the filtering moved into SQL — the old version loaded everything."""
+    for i in range(120):
+        _add(db, f"s{i:03d}", days_ago=1 + i * 0.001, company=f"Co {i}")
+
+    p = build_feed_payload(db, limit=20, offset=0)
+    assert len(p["signals"]) == 20, "a page is a page, not the whole table"
+    assert p["total"] == 120, "but the count still describes everything matching"
+
+
+def test_the_total_counts_matches_not_the_page(db):
+    for i in range(30):
+        _add(db, f"s{i:02d}", days_ago=1 + i * 0.001, cycle="weekly" if i < 12 else "monthly")
+
+    p = build_feed_payload(db, limit=5, offset=0, cycle="WEEKLY")
+    assert len(p["signals"]) == 5
+    assert p["total"] == 12
+    assert p["totalClassified"] == 30, "unfiltered classified rows"
+
+
+def test_search_covers_only_the_text_the_row_displays(db):
+    """`desc` is raw_content cut to 237 characters. Searching the whole column
+    would match text the reader cannot see on the row and cannot explain."""
+    tail = "x" * 300 + " unicorn"
+    _add(db, "long", raw=f"BHP is hiring a Planner | {tail}")
+
+    assert build_feed_payload(db, q="planner")["total"] == 1
+    assert build_feed_payload(db, q="unicorn")["total"] == 0, "matched hidden text"
+
+
+def test_every_search_term_must_appear(db):
+    _add(db, "a", company="BHP", raw="BHP needs a Rigger")
+    _add(db, "b", company="Newmont", raw="Newmont needs a Planner")
+
+    assert build_feed_payload(db, q="bhp")["total"] == 1
+    assert build_feed_payload(db, q="bhp rigger")["total"] == 1
+    assert build_feed_payload(db, q="bhp planner")["total"] == 0, "terms must narrow, not widen"
+
+
+def test_a_sector_typed_as_it_is_displayed_still_matches(db):
+    """The row shows "Oil & Gas"; the column stores "oil_gas". A reader searches
+    for what they can see, so the query maps the one to the other."""
+    _add(db, "og")
+    with connect(db) as conn:
+        conn.execute("UPDATE signals SET sector = 'oil_gas' WHERE signal_id = 'og'")
+
+    assert build_feed_payload(db, q="oil")["total"] == 1
+    assert build_feed_payload(db, q="oil & gas")["total"] == 1
+    assert build_feed_payload(db, q="mining")["total"] == 0
+
+
+def test_region_and_search_combine(db):
+    _add(db, "au-bhp", geo="AU", company="BHP")
+    _add(db, "png-bhp", geo="PNG", company="BHP",
+         raw="BHP in Papua New Guinea needs a Planner")
+    _add(db, "png-other", geo="PNG", company="Newmont",
+         raw="Newmont in Papua New Guinea needs a Planner")
+
+    p = build_feed_payload(db, region="PNG", q="bhp")
+    assert [s["id"] for s in p["signals"]] == ["png-bhp"]
+
+
+def test_an_offset_past_the_end_is_empty_not_an_error(db):
+    _add(db, "only")
+    p = build_feed_payload(db, limit=50, offset=500)
+    assert p["signals"] == []
+    assert p["total"] == 1, "the count still describes the whole match set"

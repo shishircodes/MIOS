@@ -48,7 +48,7 @@ from api.publish_api import router as publish_router
 from api.push_api import router as push_router
 from api.watchlist_api import router as watchlist_router
 from config.settings import configure_logging, settings
-from loader.db import backend_label
+from loader.db import backend_label, close_pool
 
 configure_logging()
 log = logging.getLogger("api.server")
@@ -62,6 +62,9 @@ async def lifespan(_app: FastAPI):
     # no way to create one from inside the app.
     access.ensure_bootstrap_admin()
     yield
+    # Returns the pooled database connections rather than leaving the far end to
+    # time them out.
+    close_pool()
 
 
 app = FastAPI(title="MIOS API", version="0.2.0", lifespan=lifespan)
