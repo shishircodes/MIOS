@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+import api.digest_service as digest_service
 from delivery.digest import build_digest, infer_geography
 from delivery.slack import post_digest
 from loader.ingest import init_db
@@ -140,6 +141,65 @@ def test_build_digest_new_prospect_table(db):
     assert "Pilbara Minerals" in out
     assert "New Names (Not in Watchlist)" in out
 
+def test_digest_payload_excludes_competitors_from_new_names(db, tmp_path, monkeypatch):
+    # Create a temporary competitor list for this test.
+    competitors_file = tmp_path / "competitors.json"
+    competitors_file.write_text(
+        json.dumps([
+            "PeopleConnexion",
+            "Kiwi Niugini Recruitment",
+        ]),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        digest_service,
+        "COMPETITORS_PATH",
+        competitors_file,
+    )
+
+    # Competitors are marked as new prospects by the classifier.
+    _insert_classified(
+        db,
+        sid="comp1",
+        company="PeopleConnexion",
+        tier=None,
+        sector="other",
+        category="hiring_velocity",
+        new_prospect=True,
+        raw="PeopleConnexion recruiting multiple roles in Australia.",
+    )
+
+    _insert_classified(
+        db,
+        sid="comp2",
+        company="Kiwi Niugini Recruitment",
+        tier=None,
+        sector="other",
+        category="hiring_velocity",
+        new_prospect=True,
+        raw="Kiwi Niugini Recruitment advertising multiple PNG vacancies.",
+    )
+
+    # A genuine new prospect should still appear.
+    _insert_classified(
+        db,
+        sid="real1",
+        company="Pilbara Minerals",
+        tier=None,
+        sector="mining",
+        category="project",
+        new_prospect=True,
+        raw="Pilbara Minerals expanding operations and hiring new staff.",
+    )
+
+    payload = digest_service.build_digest_payload(db)
+
+    new_names = {item["co"] for item in payload["newNames"]}
+
+    assert "PeopleConnexion" not in new_names
+    assert "Kiwi Niugini Recruitment" not in new_names
+    assert "Pilbara Minerals" in new_names
 
 # ---------- slack post ----------
 
