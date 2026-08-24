@@ -488,3 +488,110 @@ def test_velocity_rows_always_declare_their_basis(db):
     for r in build_digest_payload(db, days=7)["velocity"]:
         for key in ("co", "wk", "avg", "change", "basis", "trend", "sector", "tier"):
             assert key in r, f"the velocity table reads {key}"
+
+
+def test_competitors_are_excluded_from_new_names(db, tmp_path, monkeypatch):
+    competitor_file = tmp_path / "competitors.json"
+    competitor_file.write_text(
+        json.dumps(
+            [
+                "PeopleConnexion",
+                "Kiwi Niugini Recruitment",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        "api.digest_service.COMPETITORS_PATH",
+        competitor_file,
+    )
+
+    captured = datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+    with connect(db) as conn:
+        for signal_id, company in [
+            ("competitor-1", "PeopleConnexion"),
+            ("competitor-2", "Kiwi Niugini Recruitment"),
+            ("prospect-1", "Example Mining Services"),
+        ]:
+            conn.execute(
+                "INSERT INTO signals (signal_id, source_type, source_name, source_url, "
+                "captured_at, geography, sector, company_name, watchlist_tier, "
+                "signal_category, review_cycle, raw_content, analysis_notes, "
+                "is_new_prospect, classified_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    signal_id,
+                    "job_board",
+                    "seek",
+                    f"https://x/{signal_id}",
+                    captured,
+                    "AU",
+                    "mining",
+                    company,
+                    None,
+                    "hiring_velocity",
+                    "weekly",
+                    f"{company} is hiring",
+                    "note",
+                    1,
+                    captured,
+                ),
+            )
+
+    payload = build_digest_payload(db, days=7)
+
+    names = {
+        item["co"].strip().casefold()
+        for item in payload["newNames"]
+    }
+
+    assert "peopleconnexion" not in names
+    assert "kiwi niugini recruitment" not in names
+    assert "example mining services" in names
+
+
+def test_the_shipped_competitor_file_is_valid(db):
+    """The test above points the loader at a temp file, so it never touches the
+    real one. If `config/competitors.json` were renamed, moved or left with a
+    trailing comma, every other test would still pass and the filter would
+    silently do nothing in production."""
+    from api.digest_service import COMPETITORS_PATH, _competitor_names
+
+    assert COMPETITORS_PATH.exists(), f"{COMPETITORS_PATH} is missing"
+    names = _competitor_names(COMPETITORS_PATH)
+    assert names, "the shipped competitor list is empty"
+    assert all(n == n.casefold() for n in names), "names must be casefolded for matching"
+
+
+def test_competitor_matching_is_exact_not_substring(db, tmp_path, monkeypatch):
+    """"Newcrest" must not be filtered because some agency is called "Crest".
+    An over-broad match here silently hides real prospects, which is worse than
+    the problem it solves."""
+    competitor_file = tmp_path / "competitors.json"
+    competitor_file.write_text(json.dumps(["Crest Recruitment"]), encoding="utf-8")
+    monkeypatch.setattr("api.digest_service.COMPETITORS_PATH", competitor_file)
+
+    captured = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    with connect(db) as conn:
+        for signal_id, company in [("a", "Crest Recruitment"), ("b", "Newcrest")]:
+            conn.execute(
+                "INSERT INTO signals (signal_id, source_type, source_name, source_url, "
+                "captured_at, geography, sector, company_name, watchlist_tier, "
+                "signal_category, review_cycle, raw_content, analysis_notes, "
+                "is_new_prospect, classified_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (signal_id, "job_board", "seek", f"https://x/{signal_id}", captured,
+                 "AU", "mining", company, None, "hiring_velocity", "weekly",
+                 f"{company} is hiring", "note", 1, captured),
+            )
+
+    names = {n["co"] for n in build_digest_payload(db, days=7)["newNames"]}
+    assert "Crest Recruitment" not in names
+    assert "Newcrest" in names, "an exact-name filter must not swallow a real company"
+
+
+def test_a_missing_competitor_file_does_not_break_the_digest(db, tmp_path, monkeypatch):
+    """Better an unfiltered digest than no digest."""
+    monkeypatch.setattr("api.digest_service.COMPETITORS_PATH", tmp_path / "nope.json")
+    assert build_digest_payload(db, days=7)["sourceMode"] in {"live", "synthetic"}
+

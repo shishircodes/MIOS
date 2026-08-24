@@ -1,5 +1,5 @@
 import type { QueryClient } from '@tanstack/react-query'
-import { QueryClientProvider, QueryClient as QC } from '@tanstack/react-query'
+import { QueryClientProvider, QueryClient as QC, useQuery } from '@tanstack/react-query'
 import {
   HeadContent,
   Link,
@@ -13,6 +13,7 @@ import type { ReactNode } from 'react'
 import { useEffect, useRef, useState } from 'react'
 import { NotFound } from '~/components/NotFound'
 import { Icons, Loading } from '~/components/ui'
+import { watchlistQueryOptions } from '~/lib/api'
 import { AuthProvider, useAuth } from '~/lib/auth-context'
 import appCss from '~/styles/app.css?url'
 
@@ -46,7 +47,7 @@ const NAV = [
   {
     group: 'REFERENCE',
     items: [
-      { to: '/watchlist', label: 'Watchlist', icon: 'watch', badge: '21' },
+      { to: '/watchlist', label: 'Watchlist', icon: 'watch', badge: '' },
       { to: '/dashboard', label: 'Dashboard', icon: 'dash', badge: '' },
     ],
   },
@@ -209,6 +210,7 @@ function Shell({ children }: { children: ReactNode }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname })
   const crumbs = CRUMBS[pathname] ?? ['Mode Monitor', 'Weekly Digest']
   const { session } = useAuth()
+  const { data: watchlistData } = useQuery(watchlistQueryOptions)
 
   // Expanded is the default, and the server always renders that. The stored
   // preference is applied after mount rather than read during render: this app
@@ -295,7 +297,9 @@ function Shell({ children }: { children: ReactNode }) {
               >
                 <span className="ico" aria-hidden="true">{Icons[it.icon]}</span>
                 <span className="label">{it.label}</span>
-                {it.badge && <span className="count mono">{it.badge}</span>}
+                {it.to === '/watchlist'
+                  ? watchlistData && <span className="count mono">{watchlistData.total}</span>
+                  : it.badge && <span className="count mono">{it.badge}</span>}
               </Link>
             ))}
           </div>

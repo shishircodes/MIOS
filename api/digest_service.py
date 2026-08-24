@@ -23,6 +23,10 @@ from loader.db import connect, is_postgres, resolve_target
 
 log = logging.getLogger(__name__)
 
+#: Resolved from this file rather than the working directory, so the digest
+#: behaves the same run from the repo root, from cron, or inside the container.
+COMPETITORS_PATH = Path(__file__).resolve().parents[1] / "config" / "competitors.json"
+
 SECTOR_PRETTY = {
     "mining": "Mining",
     "oil_gas": "Oil & Gas",
@@ -132,6 +136,26 @@ def _watchlist_tiers(path: Path) -> dict[str, str]:
     entries = json.loads(path.read_text(encoding="utf-8"))
     return {e["company_name"]: e["tier"] for e in entries}
 
+
+def _competitor_names(path: Path) -> set[str]:
+    """Company names that must never be offered as prospects.
+
+    Competing recruitment agencies post jobs, so they look like employers to the
+    classifier — and it is not consistent about it: PeopleConnexion was flagged
+    as a new prospect seven times in one run and not at all in the next. A
+    static list does not depend on which way the model leans that week.
+
+    Matched on a casefolded exact name, so it never swallows a real client whose
+    name merely contains an agency's.
+    """
+    if not path.exists():
+        return set()
+    entries = json.loads(path.read_text(encoding="utf-8"))
+    return {
+        str(name).strip().casefold()
+        for name in entries
+        if str(name).strip()
+    }
 
 # --------------------------------------------------------------------------
 # Shaping
@@ -317,6 +341,7 @@ def build_digest_payload(
     rather than passing stale rows off as this week's.
     """
     tiers = _watchlist_tiers(settings.watchlist_path)
+    competitors = _competitor_names(COMPETITORS_PATH)
     since = datetime.now(timezone.utc) - timedelta(days=days)
 
     rows = _rows_from_db(db_path, since=since)
@@ -376,7 +401,14 @@ def build_digest_payload(
                 velocity_counter[company] += 1
                 velocity_meta.setdefault(company, {"sector": sector, "tier": tier})
 
-        if is_new and company != "Unknown" and company not in new_names:
+        company_key = company.strip().casefold()
+
+        if (
+            is_new
+            and company != "Unknown"
+            and company_key not in competitors
+            and company not in new_names
+        ):
             new_names[company] = {
                 "co": company,
                 "signal": desc[:120],

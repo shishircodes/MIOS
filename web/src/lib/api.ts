@@ -9,6 +9,7 @@ import type {
   ParsedCV,
   ProfileDraft,
   StoredProfile,
+  WatchlistResponse,
 } from './types'
 
 export { API_BASE } from './config'
@@ -48,6 +49,19 @@ export function signalsQueryOptions(query: FeedQuery) {
     placeholderData: (prev: FeedPayload | undefined) => prev,
   })
 }
+
+// ---------- Watchlist ----------
+
+export async function fetchWatchlist(): Promise<WatchlistResponse> {
+  return fetchJson<WatchlistResponse>('/api/watchlist')
+}
+
+export const watchlistQueryOptions = queryOptions({
+  queryKey: ['watchlist'],
+  queryFn: fetchWatchlist,
+  // A 401 means "sign in", not "retry" — the auth gate handles it.
+  retry: false,
+})
 
 // ---------- Mode Push ----------
 
