@@ -529,7 +529,11 @@ function SignalDetail({ s }: { s: Signal }) {
       </p>
       <div style={{ display: 'flex', gap: 8, marginTop: 24 }}>
         <button className="btn primary">{Icons.push} Push to match</button>
-        <button className="btn">{Icons.ext} Open source</button>
+        {s.sourceUrl && (
+          <a className="btn" href={s.sourceUrl} target="_blank" rel="noopener">
+            {Icons.ext} Open source
+          </a>
+        )}
         <button className="btn ghost">{Icons.archive} Archive</button>
       </div>
     </>

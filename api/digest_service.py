@@ -66,6 +66,8 @@ SELECT_SIGNALS = (
     # Distinguishes a job posting from a news article. Without it the digest
     # counted both as "roles detected", which a Mining.com.au article is not.
     "source_type, "
+    # Original posting URL — sent to the browser so the drawer can link out.
+    "source_url, "
     # `geography` is what the scraper recorded about its own market. Without it
     # the region falls back to keyword inference alone, which filed PNGworkforce
     # jobs under Australia whenever their teaser named no PNG landmark.
@@ -130,6 +132,7 @@ def _rows_from_synthetic(path: Path) -> list[dict[str, Any]]:
             "analysis_notes": None,
             "source_name": "synthetic",
             "source_type": "job_board",
+            "source_url": g.get("source_url"),
             "_watchlist_match": g.get("ground_truth_watchlist_match"),
         })
     return out
@@ -305,6 +308,10 @@ def shape_signal(r: dict[str, Any], index: int) -> dict[str, Any]:
     is_new = bool(r.get("is_new_prospect"))
     sector_key = r.get("sector") or "other"
     title, desc = _title_and_desc(raw)
+    # Only http(s) opens as a real advert. Synthetic `syn://…` keys and empty
+    # values stay null so the drawer never renders a dead link.
+    url = (r.get("source_url") or "").strip()
+    source_url = url if url.startswith(("http://", "https://")) else None
     return {
         "id": r.get("signal_id") or f"sig-{index:03d}",
         # `n` is assigned after selection — both callers reorder afterwards.
@@ -324,6 +331,7 @@ def shape_signal(r: dict[str, Any], index: int) -> dict[str, Any]:
         "sector": SECTOR_PRETTY.get(sector_key, sector_key.title()),
         "source": r.get("source_name") or "pngworkforce",
         "sourceType": r.get("source_type") or "job_board",
+        "sourceUrl": source_url,
         "category": r.get("signal_category") or "hiring_velocity",
         "cycle": (r.get("review_cycle") or "weekly").upper(),
         "conf": _confidence(index, tier, is_new),

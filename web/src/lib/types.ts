@@ -41,6 +41,8 @@ export interface Signal {
   action: string | null
   sector: string
   source: string
+  /** Original posting URL when available; null when missing or not http(s). */
+  sourceUrl: string | null
   cycle: string
   conf: number
   /** When the scraper collected this. Lets a reader tell a posting found in
