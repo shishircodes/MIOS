@@ -5,7 +5,7 @@ name: Deploy main
 #
 # Runs only after CI passes, so a red build never reaches the server.
 #
-# Like the preview workflows, this degrades gracefully: with no PROD_HOST or
+# Degrades gracefully: with no PROD_HOST or
 # DEPLOY_SSH_KEY configured it skips, so the repo is safe to push before the
 # server exists.
 

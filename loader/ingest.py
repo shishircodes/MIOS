@@ -39,7 +39,47 @@ ADDED_INDEXES: tuple[tuple[str, str], ...] = (
     ("idx_signals_region", "CREATE INDEX IF NOT EXISTS idx_signals_region ON signals(region)"),
     ("idx_signals_feed",
      "CREATE INDEX IF NOT EXISTS idx_signals_feed ON signals(classified_at, captured_at)"),
+    # `window_to` is the newest capture in the window — i.e. which scrape this
+    # is — so it identifies a Market Pulse on its own. The table's primary key
+    # also carries `window_from`, which moves by itself as older signals age
+    # out of a rolling window, so a regeneration inserted a second row for the
+    # same scrape instead of replacing the first. A unique index says what the
+    # primary key should have, and does it without recreating a table that
+    # already holds data.
+    ("ux_digest_pulse_window_to",
+     "CREATE UNIQUE INDEX IF NOT EXISTS ux_digest_pulse_window_to ON digest_pulse(window_to)"),
 )
+
+
+def _dedupe_digest_pulse(conn) -> int:
+    """Leave one row per scrape, keeping the newest attempt.
+
+    Runs before the unique index below, which cannot be created while
+    duplicates exist. Idempotent: a deduplicated table loses nothing.
+    """
+    try:
+        rows = conn.execute(
+            "SELECT window_from, window_to, generated_at FROM digest_pulse "
+            "ORDER BY window_to, generated_at DESC"
+        ).fetchall()
+    except Exception:  # noqa: BLE001 - table may not exist yet
+        return 0
+
+    seen: set[str] = set()
+    removed = 0
+    for r in rows:
+        key = str(r["window_to"])
+        if key in seen:
+            conn.execute(
+                "DELETE FROM digest_pulse WHERE window_from = ? AND window_to = ?",
+                (r["window_from"], r["window_to"]),
+            )
+            removed += 1
+        else:
+            seen.add(key)
+    if removed:
+        log.info("init_db: removed %d superseded digest_pulse row(s)", removed)
+    return removed
 
 
 def _apply_indexes(conn) -> None:
@@ -135,6 +175,7 @@ def init_db(target: str | Path | None = None, watchlist_path: str | Path | None 
     with connect(target) as conn:
         conn.executescript(schema_sql)
         _apply_column_additions(conn)
+        _dedupe_digest_pulse(conn)
         _apply_indexes(conn)
         _seed_watchlist(conn, watchlist_path)
         _seed_bootstrap_admin(conn)
