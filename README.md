@@ -439,8 +439,7 @@ Push), `reports` and `report_sections` (Mode Publish), `app_users` (who may sign
 in, and with what role), and `digest_pulse` (the weekly Market Pulse).
 
 > **Schema changes need `python -m loader.check --init` run against Neon.** The
-> PR preview workflow applies it automatically to preview branches, but nothing
-> applies it to production on your behalf.
+> Nothing applies it to production on your behalf.
 
 `candidate_profiles` stores only what matching consumes, plus enough identity
 for the BD team to know whose profile it is. These are real people; contact
@@ -586,8 +585,6 @@ Four workflows in `.github/workflows/`:
 | Workflow | Trigger | What it does |
 |---|---|---|
 | `ci.yml` | every PR + push to `main` | pytest against **both** SQLite and a real PostgreSQL service container, web typecheck + build, Docker images built **and started** |
-| `pr-preview.yml` | PR opened/updated | Neon branch per PR, publishes images to GHCR, deploys a preview stack, comments the URLs |
-| `pr-cleanup.yml` | PR closed/merged | deletes the Neon branch, tears down the containers |
 | `deploy-main.yml` | `main` **after CI passes** | publishes images, applies the schema, deploys to the VPS |
 
 `deploy-main.yml` chains off CI with `workflow_run`, so a red build never reaches
@@ -606,15 +603,15 @@ names neither the module nor the file.
 
 ### What a PR gets
 
-* **An isolated Neon branch** (`preview/pr-42`), copy-on-write from `main` —
-  instant, and starts with real data. Writes never touch production.
-* **Its own containers**, ports derived from the PR number (`30000+N` web,
-  `40000+N` api) so concurrent previews never collide and the URL stays stable
-  across pushes.
-* **A comment** with both URLs, updated in place rather than spamming the thread.
+Checks, not a deployment. `ci.yml` runs pytest against both SQLite and a real
+PostgreSQL service container, typechecks and builds the web app, and builds the
+Docker images — including starting the API container and polling `/api/health`,
+which is what catches an import that only fails at runtime.
 
-Until the VPS secrets exist, the preview workflows still create the branch, build
-the images, and comment what *would* have been deployed.
+There is no per-PR preview environment. It used to deploy a stack to the VPS
+with its own Neon branch; that was removed because the running cost and the
+moving parts were not earning their keep against a review that reads the diff
+and trusts the checks. Production still deploys from `main` after CI passes.
 
 ### GitHub configuration
 
@@ -624,10 +621,7 @@ Variables:
 
 | Variable | Example | Needed for |
 |---|---|---|
-| `NEON_PROJECT_ID` | `crimson-lab-12345678` | Neon branching |
-| `NEON_PARENT_BRANCH` | `main` (default) | which branch to copy from |
 | `NEON_DB_USER` / `NEON_DB_NAME` | `neondb_owner` / `neondb` | branch connection string |
-| `PREVIEW_HOST` | `203.0.113.10` | preview deploys |
 | `PROD_HOST` | VPS IP | production deploys |
 | `PROD_WEB_URL` / `PROD_API_URL` | `https://mios.example.com` | production |
 | `DEPLOY_USER` | `deploy` (default) | both |
@@ -788,7 +782,7 @@ containers work before pushing.
 ├── data/
 │   └── synthetic_postings.jsonl  ← 80 hand-authored labelled postings
 ├── tests/                    ← pytest; Gemini mocked, scrapers fixture-driven
-├── .github/workflows/        ← ci, pr-preview, pr-cleanup, deploy-main
+├── .github/workflows/        ← ci, deploy-main
 └── docker-compose*.yml       ← local, preview, prod
 ```
 

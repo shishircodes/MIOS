@@ -673,7 +673,10 @@ input, textarea, select { font-family: inherit; }
   /* Was a flat 760px, which on a tall screen scrolled the report inside a box
      less than half the height available. Tracks the viewport instead, with a
      floor so it does not collapse on a laptop. */
-  max-height: max(560px, calc(100vh - 250px));
+  /* `vh` is measured against the real viewport, so under the large-display
+     zoom below this would resolve taller than the screen. The divisor keeps
+     the report inside the window at every scale. */
+  max-height: max(560px, calc((100vh / var(--ui-zoom, 1)) - 250px));
 }
 /* Width is for the layout, not the prose: a paragraph spanning the full column
    on a wide monitor is harder to read, not easier. */
@@ -1239,34 +1242,55 @@ overflow-x: auto;
    The one section a model writes rather than counts. Interpretation bullets are
    marked, because a reader acting on this is entitled to know which sentences
    are measurements and which are a reading of them. */
+/* Market Pulse is the only section on the page a person wrote rather than a
+   query counted, so it is the one section allowed to look like prose. It sits
+   between the collection band and forty signal rows, and previously read as a
+   third bordered box between two others. */
 .pulse {
-  border: 1px solid var(--line-2); border-left: 3px solid var(--teal-2);
-  padding: 14px 18px 16px; margin-bottom: 18px; background: var(--surface);
+  border: 1px solid var(--teal-line);
+  border-top: 4px solid var(--teal-2);
+  padding: 20px 26px 24px; margin-bottom: 20px;
+  background:
+    linear-gradient(180deg, var(--teal-bg) 0%, rgba(255,255,255,0) 58%),
+    var(--surface);
 }
 .pulse-head {
   display: flex; align-items: baseline; justify-content: space-between;
-  gap: 12px; margin-bottom: 10px; font-size: 12px;
+  gap: 12px; margin-bottom: 14px;
+  border-bottom: 1px solid var(--teal-line); padding-bottom: 10px;
 }
-.pulse-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 9px; }
+.pulse-head .kicker { font-size: 12px; color: var(--teal-3); }
+.pulse-head .muted { font-size: 12px; }
+
+.pulse-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 14px; }
 .pulse-item {
-  display: flex; align-items: baseline; gap: 9px; flex-wrap: wrap;
-  font-size: 14px; line-height: 1.5; color: var(--ink);
-  padding-left: 14px; position: relative;
+  display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+  /* Larger than body text on purpose. This is the read of the week; the tables
+     around it are the evidence for it. */
+  font-size: 15.5px; line-height: 1.62; color: var(--ink);
+  padding-left: 20px; position: relative;
 }
 .pulse-item::before {
-  content: ''; position: absolute; left: 0; top: 0.62em;
-  width: 5px; height: 5px; background: var(--teal-2);
+  content: ''; position: absolute; left: 0; top: 0.6em;
+  width: 8px; height: 8px; background: var(--teal-2);
 }
-/* Marked by a dotted rule as well as the tag, so the distinction does not rest
-   on reading a small label. */
-.pulse-item.interpretation { color: var(--ink-3); }
-.pulse-item.interpretation::before { background: transparent; border: 1px solid var(--muted); }
-.pulse-text { flex: 1 1 20ch; min-width: 0; }
+/* Interpretation is marked three ways — hollow marker, lighter rule down the
+   left, and the tag — so telling a reading from a measurement never depends on
+   noticing one small label. */
+.pulse-item.interpretation {
+  color: var(--ink-3);
+  border-left: 2px solid var(--line-2); margin-left: -20px; padding-left: 38px;
+}
+.pulse-item.interpretation::before {
+  left: 20px; background: transparent; border: 1.5px solid var(--muted);
+}
+.pulse-text { flex: 1 1 24ch; min-width: 0; }
 .pulse-tag {
-  font-family: var(--mono); font-size: 10px; letter-spacing: 0.07em;
-  text-transform: uppercase; padding: 2px 7px; white-space: nowrap;
+  font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.07em;
+  text-transform: uppercase; padding: 3px 8px; white-space: nowrap;
   background: var(--paper-2); color: var(--ink-3); border: 1px dashed var(--line-3);
 }
+
 
 /* When a signal was collected. Quiet by default — it distinguishes rows within
    a window rather than being a thing anyone scans for. */
@@ -1275,3 +1299,19 @@ overflow-x: auto;
   white-space: nowrap;
 }
 .signal .meta-col .captured { display: block; margin-top: 2px; }
+
+/* ---------- Text size on large displays ----------
+   Every font-size in this stylesheet is an absolute px value. That reads well
+   at 1366x768 and small at 2560x1440, where the same 13.5px occupies roughly
+   half the share of the screen. The textbook fix is converting ~120 size
+   declarations to rem and scaling the root; this reaches the same place in two
+   rules and cannot drift out of step with them.
+
+   `zoom`, not `transform: scale()` — zoom reflows, so layout, hit targets and
+   scrollbars all grow with the text instead of being stretched over it. */
+@media (min-width: 1700px) {
+  .app { zoom: 1.08; --ui-zoom: 1.08; }
+}
+@media (min-width: 2200px) {
+  .app { zoom: 1.15; --ui-zoom: 1.15; }
+}
