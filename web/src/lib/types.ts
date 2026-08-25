@@ -15,6 +15,21 @@ export interface Collection {
   regions: { AU: number; PNG: number }
 }
 
+/** A Market Pulse bullet. `kind` is the model's own declaration of whether it
+ *  is restating the figures or reasoning past them — the UI must show which,
+ *  so a reader can tell a measurement from a reading of one. */
+export interface PulseBullet {
+  text: string
+  kind: 'fact' | 'interpretation'
+}
+
+export interface MarketPulse {
+  bullets: PulseBullet[]
+  signalsAnalysed: number
+  generatedAt: string
+  note: string | null
+}
+
 export interface Signal {
   id: string
   n: string
@@ -215,6 +230,9 @@ export interface DigestPayload {
   weekLabel: string
   generatedAt: string
   collection: Collection
+  /** Null when the week produced none. The section is then omitted —
+   *  there is deliberately no computed substitute. */
+  marketPulse: MarketPulse | null
   signals: Signal[]
   velocity: VelocityRow[]
   newNames: NewName[]

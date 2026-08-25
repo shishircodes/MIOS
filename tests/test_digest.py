@@ -67,7 +67,15 @@ def test_infer_geography_au_default():
 
 # ---------- digest sections ----------
 
-def test_build_digest_includes_all_five_sections(db):
+def test_build_digest_includes_every_computed_section(db):
+    """Four sections, not five.
+
+    Market Pulse is the exception: it is written by a model rather than counted,
+    is generated once per pipeline run, and is *omitted* when that generation
+    fails — there is deliberately no computed fallback. So it is absent here,
+    where no pulse was passed in, and its presence is covered separately in
+    tests/test_pulse.py.
+    """
     # Both PNG so they fall in the same geography bucket; leadership should rank first.
     _insert_classified(db, sid="s1", company="Newmont", tier="A", sector="mining",
                        category="hiring_velocity",
@@ -84,7 +92,7 @@ def test_build_digest_includes_all_five_sections(db):
 
     assert "MIOS Weekly Intelligence" in out and "Week of" in out
     assert "Key Signals This Week" in out
-    assert "Market Pulse" in out
+    assert "Market Pulse" not in out, "no pulse was passed, so the section must be absent"
     assert "Hiring Velocity" in out and "Top 10 Watchlist Clients" in out
     assert "New Names (Not in Watchlist)" in out
     # Within the PNG bucket, leadership ranks above hiring_velocity.
@@ -168,3 +176,20 @@ def test_post_digest_swallows_request_exception():
     import requests as r
     with patch("delivery.slack.requests.post", side_effect=r.ConnectionError("boom")):
         assert post_digest("https://x", "x") is False
+
+
+def test_a_generated_pulse_slots_in_between_key_signals_and_velocity(db):
+    """Order matters: the written read belongs after the signals it describes
+    and before the tables that quantify them."""
+    _insert_classified(db, sid="s1", company="Newmont", tier="A", sector="mining",
+                       category="hiring_velocity",
+                       raw="Process operators Newmont Lihir PNG, FIFO from Cairns.")
+
+    out = build_digest(
+        db,
+        since=datetime.now(timezone.utc) - timedelta(days=7),
+        pulse=[{"text": "PNG mining hiring is concentrated at Lihir.", "kind": "fact"}],
+    )
+
+    assert out.index("Key Signals This Week") < out.index("Market Pulse")
+    assert out.index("Market Pulse") < out.index("Hiring Velocity")

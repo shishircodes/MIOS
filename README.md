@@ -159,9 +159,10 @@ are deduplicated on `source_url`, so re-running does not create duplicates.
 | `python -m loader.rematch --dry-run` | Reports which signals would change watchlist tier under the current matching rules. |
 | `python -m loader.rematch` | Recomputes `watchlist_tier` and `is_new_prospect` on stored signals. **No Gemini calls** — the watchlist match was always a string comparison, so changing the rules or the watchlist does not require reclassifying. |
 
-> Mode Publish added the `reports` and `report_sections` tables, and roles added
-> `app_users`. Run `loader.check --init` against Neon before deploying either —
-> nothing applies a schema change to production on your behalf.
+> Mode Publish added the `reports` and `report_sections` tables, roles added
+> `app_users`, and Market Pulse added `digest_pulse`. Run `loader.check --init`
+> against Neon before deploying any of them — nothing applies a schema change to
+> production on your behalf.
 
 ### Evaluation
 
@@ -433,9 +434,9 @@ Timestamps stay ISO-8601 `TEXT` rather than `timestamptz`: the strings sort
 chronologically, which is all the code needs, and it keeps one schema instead of
 two.
 
-Seven tables: `signals`, `watchlist`, `kv_store`, `candidate_profiles` (Mode
-Push), `reports` and `report_sections` (Mode Publish), and `app_users` (who
-may sign in, and with what role).
+Eight tables: `signals`, `watchlist`, `kv_store`, `candidate_profiles` (Mode
+Push), `reports` and `report_sections` (Mode Publish), `app_users` (who may sign
+in, and with what role), and `digest_pulse` (the weekly Market Pulse).
 
 > **Schema changes need `python -m loader.check --init` run against Neon.** The
 > PR preview workflow applies it automatically to preview branches, but nothing
@@ -510,6 +511,28 @@ Appending it again produces Google's opaque `invalid_client` error.
 | `ALLOWED_GOOGLE_DOMAIN` | Workspace domain checked against the verified `hd` claim |
 | `ALLOWED_EMAILS` | Comma-separated allowlist bypassing the domain check. Optional — the People & access screen does the same job without a restart — but still honoured, and listed there so it is not an invisible door |
 | `AUTH_DISABLED` | Development bypass. Never in a deployed environment |
+
+### Market Pulse
+
+Everything else in the weekly digest is arithmetic. Market Pulse (spec §9.1) is
+the one section a model *writes*, and it follows two rules that are easy to get
+wrong.
+
+**It is generated once per pipeline run and stored.** `/api/digest` runs on every
+page load; generating there would be a Gemini call per view. `pipeline.live`
+produces it, `digest_pulse` holds it, and both the Slack digest and the dashboard
+read the stored row. Cost is one call per week. `--no-pulse` skips it.
+
+**There is no fallback to computed prose.** If the model cannot be reached, the
+section is omitted and the reason recorded in `digest_pulse.note`. Template
+arithmetic in the place a written summary belongs implies a judgement nobody
+made; an absent section is honest about what happened.
+
+Bullets are tagged `fact` or `interpretation`. The model is allowed to reason
+past the figures — "suggests shutdown preparation" — but never to invent them:
+any bullet containing a number absent from the evidence is discarded, whichever
+tag it carries. Interpretation is marked in both Slack and the dashboard, so a
+consultant can tell a measurement from a reading of one.
 
 ### Roles
 
