@@ -165,3 +165,30 @@ CREATE TABLE IF NOT EXISTS app_users (
 );
 
 CREATE INDEX IF NOT EXISTS idx_app_users_role ON app_users(role);
+
+-- Market Pulse: the digest's 3-5 bullet read on the week (spec 9.1).
+--
+-- Written once per pipeline run, read on every dashboard load. It is stored
+-- rather than generated on demand because generating it costs a Gemini call,
+-- and /api/digest runs every time somebody opens the page.
+--
+-- One row per digest window. Re-running the pipeline for the same window
+-- replaces the row rather than accumulating drafts: unlike a quarterly report
+-- nobody edits this by hand, so there is no work to preserve.
+CREATE TABLE IF NOT EXISTS digest_pulse (
+    window_from      TEXT NOT NULL,
+    window_to        TEXT NOT NULL,
+    -- JSON array of {"text": ..., "kind": "fact" | "interpretation"}.
+    -- NULL when generation failed - see `status`. There is deliberately no
+    -- fallback to computed bullets: template arithmetic dressed as a written
+    -- summary reads like a product, and an absent section reads like an absence.
+    bullets          TEXT,
+    -- 'generated' | 'failed'. A row is written either way so a week that
+    -- produced nothing is visible, with the reason, rather than silent.
+    status           TEXT NOT NULL,
+    note             TEXT,
+    -- How much evidence the bullets stand on, so a thin week is legible.
+    signals_analysed INTEGER NOT NULL,
+    generated_at     TEXT NOT NULL,
+    PRIMARY KEY (window_from, window_to)
+);

@@ -6,7 +6,7 @@ import { digestQueryOptions } from '~/lib/api'
 import { UnauthenticatedError } from '~/lib/auth'
 import { useAuth } from '~/lib/auth-context'
 import { useFigure, useGrowBar, useGrowBars, useReveal } from '~/lib/motion'
-import type { Collection, Signal, VelocityRow } from '~/lib/types'
+import type { Collection, MarketPulse, Signal, VelocityRow } from '~/lib/types'
 
 /** Says what the "Change" column is measured against, so the reader is never
  *  left to assume a comparison that the data cannot support. */
@@ -173,6 +173,10 @@ function WeeklyDigest() {
         windowEmpty={data.windowEmpty}
       />
 
+      {/* Omitted entirely when the week produced none — see delivery/pulse.py.
+          Nothing computed is substituted in its place. */}
+      {data.marketPulse && <MarketPulseSection pulse={data.marketPulse} />}
+
       {/* Signals on the left, the week's measurements alongside them on the
           right. Previously everything was one column, so Hiring Velocity and
           New Names sat below forty signal rows — the numbers that answer "what
@@ -314,6 +318,45 @@ function WeeklyDigest() {
  * zero. These figures are nested — collected, of which shown — which is what
  * they always were.
  */
+/**
+ * The week's written read, the one section a model writes rather than counts.
+ *
+ * Interpretation bullets are labelled. The model is allowed to reason past the
+ * figures — "suggests shutdown preparation" — but a consultant deciding who to
+ * call is entitled to see which bullets are measured and which are a reading of
+ * them, so the distinction is carried into the UI rather than flattened here.
+ */
+function MarketPulseSection({ pulse }: { pulse: MarketPulse }) {
+  const scope = useRef<HTMLDivElement>(null)
+  useReveal(scope, '.pulse-item', { key: pulse.generatedAt, delay: 0.15, stagger: 0.06 })
+
+  return (
+    <div className="pulse" ref={scope}>
+      <div className="pulse-head">
+        <span className="kicker">Market Pulse</span>
+        <span className="muted">
+          Written from {pulse.signalsAnalysed.toLocaleString()} signals
+        </span>
+      </div>
+      <ul className="pulse-list">
+        {pulse.bullets.map((b, i) => (
+          <li key={i} className={`pulse-item ${b.kind}`}>
+            <span className="pulse-text">{b.text}</span>
+            {b.kind === 'interpretation' && (
+              <span
+                className="pulse-tag"
+                title="A reading of the data, not a measurement from it"
+              >
+                interpretation
+              </span>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
 function CollectionBand({
   c,
   windowDays,

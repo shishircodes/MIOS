@@ -1214,3 +1214,36 @@ overflow-x: auto;
 @media (max-width: 900px) {
   .collection { grid-template-columns: 1fr; gap: 16px; }
 }
+
+/* ---------- Weekly digest: Market Pulse ----------
+   The one section a model writes rather than counts. Interpretation bullets are
+   marked, because a reader acting on this is entitled to know which sentences
+   are measurements and which are a reading of them. */
+.pulse {
+  border: 1px solid var(--line-2); border-left: 3px solid var(--teal-2);
+  padding: 14px 18px 16px; margin-bottom: 18px; background: var(--surface);
+}
+.pulse-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 12px; margin-bottom: 10px; font-size: 12px;
+}
+.pulse-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 9px; }
+.pulse-item {
+  display: flex; align-items: baseline; gap: 9px; flex-wrap: wrap;
+  font-size: 14px; line-height: 1.5; color: var(--ink);
+  padding-left: 14px; position: relative;
+}
+.pulse-item::before {
+  content: ''; position: absolute; left: 0; top: 0.62em;
+  width: 5px; height: 5px; background: var(--teal-2);
+}
+/* Marked by a dotted rule as well as the tag, so the distinction does not rest
+   on reading a small label. */
+.pulse-item.interpretation { color: var(--ink-3); }
+.pulse-item.interpretation::before { background: transparent; border: 1px solid var(--muted); }
+.pulse-text { flex: 1 1 20ch; min-width: 0; }
+.pulse-tag {
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.07em;
+  text-transform: uppercase; padding: 2px 7px; white-space: nowrap;
+  background: var(--paper-2); color: var(--ink-3); border: 1px dashed var(--line-3);
+}

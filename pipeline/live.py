@@ -25,7 +25,9 @@ from typing import Any, Callable
 
 from agents.signal_analyst import classify_pending
 from config.settings import configure_logging, settings
+from api.digest_service import build_digest_payload
 from delivery.digest import build_digest
+from delivery.pulse import generate_pulse, save_pulse
 from delivery.slack import post_digest
 from loader.db import describe, resolve_target
 from loader.ingest import ingest, init_db
@@ -48,6 +50,7 @@ def run_live_cycle(
     db_path: str | Path | None = None,
     do_scrape: bool = True,
     do_slack: bool = True,
+    do_pulse: bool = True,
     gemini_caller: Callable[[str, str], dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Run one production-style cycle.
@@ -86,7 +89,35 @@ def run_live_cycle(
     classified = int(classify_counts.get("classified", 0))
 
     since = datetime.now(timezone.utc) - timedelta(days=digest_window_days)
-    digest_text = build_digest(db_path, since=since)
+
+    # Market Pulse costs a Gemini call, so it is produced here — once per run —
+    # and stored. The dashboard reads the stored row; it never generates.
+    #
+    # Built from the same payload the dashboard renders, so the bullets cannot
+    # end up arguing with the table beside them, and so both agree on the window
+    # key without computing it twice.
+    pulse = None
+    if do_pulse:
+        payload = build_digest_payload(db_path, days=digest_window_days)
+        outcome = generate_pulse(payload, target=db_path)
+        save_pulse(
+            outcome,
+            window_from=payload.get("collectedFrom") or since.isoformat(timespec="seconds"),
+            window_to=payload.get("collectedTo")
+            or datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            target=db_path,
+        )
+        if outcome.ok:
+            pulse = outcome.bullets
+            log.info("live: Market Pulse generated (%d bullets)", len(pulse))
+        else:
+            # Deliberately not fatal, and deliberately not replaced with computed
+            # bullets: the section is simply absent this week.
+            log.warning("live: Market Pulse not generated — %s", outcome.note)
+    else:
+        log.info("live: --no-pulse; skipping Market Pulse generation")
+
+    digest_text = build_digest(db_path, since=since, pulse=pulse)
 
     slack_ok = False
     if do_slack:
@@ -130,6 +161,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--days", type=int, default=7, help="digest window in days (default 7)")
     p.add_argument("--no-scrape", action="store_true", help="skip scraping; classify pending only")
     p.add_argument("--no-slack", action="store_true", help="skip Slack delivery")
+    p.add_argument("--no-pulse", action="store_true",
+                   help="skip the Market Pulse generation (saves one Gemini call)")
     p.add_argument("--db", type=str, default=None, help="override DB path")
     p.add_argument("--base-url", type=str, default=None, help="override scraper base URL")
     args = p.parse_args(argv)
@@ -143,6 +176,7 @@ def main(argv: list[str] | None = None) -> int:
         db_path=args.db,
         do_scrape=not args.no_scrape,
         do_slack=not args.no_slack,
+        do_pulse=not args.no_pulse,
     )
 
     by_source = ",".join(f"{k}={v}" for k, v in sorted(summary["scraped_by_source"].items()))

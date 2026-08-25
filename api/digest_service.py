@@ -19,6 +19,7 @@ from typing import Any
 
 from config.settings import settings
 from delivery.digest import infer_geography, interleave, interleave_regions, rank_signal
+from delivery.pulse import load_pulse
 from loader.db import connect, is_postgres, resolve_target
 
 log = logging.getLogger(__name__)
@@ -527,6 +528,15 @@ def build_digest_payload(
             "sources": len({s["source"] for s in signals}),
             "regions": {"AU": geos.get("AU", 0), "PNG": geos.get("PNG", 0)},
         },
+        #: The week's written read, loaded from storage — never generated here.
+        #: `/api/digest` runs on every page load; generating would mean a Gemini
+        #: call per view. None when the week produced none, and the UI omits the
+        #: section rather than substituting computed prose.
+        "marketPulse": load_pulse(
+            (collected_from or velocity_start).isoformat(timespec="seconds"),
+            (collected_to or datetime.now(timezone.utc)).isoformat(timespec="seconds"),
+            db_path,
+        ),
         "signals": shown,
         "velocity": velocity,
         "newNames": list(new_names.values())[:8],

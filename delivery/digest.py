@@ -141,32 +141,28 @@ def _key_signals_section(signals: list[Any], max_items: int = 10) -> str:
     return "\n".join(lines)
 
 
-def _market_pulse_section(signals: list[Any]) -> str:
-    sectors = Counter(r["sector"] for r in signals if r["sector"])
-    geos = Counter(infer_geography(r["raw_content"]) for r in signals)
-    cycles = Counter(r["review_cycle"] for r in signals if r["review_cycle"])
-    new_prospects = sum(1 for r in signals if r["is_new_prospect"])
-    total = len(signals)
-    bullets = [":large_green_circle: *Market Pulse*"]
-    if total:
-        top_sector, top_n = (sectors.most_common(1) or [(None, 0)])[0]
-        if top_sector:
-            bullets.append(
-                f"• Total classified signals this week: *{total}* — top sector "
-                f"*{SECTOR_PRETTY.get(top_sector, top_sector)}* ({top_n})."
-            )
-        au, png = geos.get("AU", 0), geos.get("PNG", 0)
-        bullets.append(f"• Geographic split: *AU {au}* / *PNG {png}*.")
-        if cycles:
-            cycles_str = ", ".join(f"{k} {v}" for k, v in cycles.most_common())
-            bullets.append(f"• Review-cycle mix: {cycles_str}.")
-        if new_prospects:
-            bullets.append(f"• :seedling: *{new_prospects}* new prospect(s) detected — see New Names table.")
-        else:
-            bullets.append("• No new prospects identified outside the watchlist this week.")
-    else:
-        bullets.append("_No data this week._")
-    return "\n".join(bullets)
+def _market_pulse_section(pulse: list[dict[str, str]] | None) -> str:
+    """The week's written read, or nothing at all.
+
+    Returns an empty string when there is no generated pulse, and the caller
+    drops the section entirely. There is deliberately no computed fallback: this
+    section exists to say what the numbers *mean*, and a template restating the
+    numbers in the place a written summary would go implies a judgement nobody
+    made. An absent section is honest; a manufactured one is not.
+    """
+    if not pulse:
+        return ""
+    lines = [":large_green_circle: *Market Pulse*"]
+    for b in pulse:
+        text = (b.get("text") or "").strip()
+        if not text:
+            continue
+        # Interpretation is allowed to be here, but never unlabelled — a reader
+        # deciding who to call is entitled to know which bullets are measured
+        # and which are a reading of them.
+        mark = " _(interpretation)_" if b.get("kind") == "interpretation" else ""
+        lines.append(f"• {text}{mark}")
+    return "\n".join(lines) if len(lines) > 1 else ""
 
 
 def _hiring_velocity_section(signals: list[Any], top_n: int = 10) -> str:
@@ -228,10 +224,19 @@ def _format_week_of(d: datetime) -> str:
     return s.lstrip("0")
 
 
-def build_digest(db_path: str | Path | None, since: datetime) -> str:
+def build_digest(
+    db_path: str | Path | None,
+    since: datetime,
+    pulse: list[dict[str, str]] | None = None,
+) -> str:
     """Build a Slack-flavoured weekly digest covering classified signals since `since`.
 
     `db_path` may be a SQLite path, a Postgres DSN, or None to use configuration.
+
+    `pulse` is the generated Market Pulse, passed in by the pipeline that just
+    produced it rather than re-read from storage — the caller already has it,
+    and looking it up again only creates a way for the two to disagree. Omitted
+    means no Market Pulse section, which is what a failed generation looks like.
     """
     if since.tzinfo is None:
         since = since.replace(tzinfo=timezone.utc)
@@ -251,8 +256,11 @@ def build_digest(db_path: str | Path | None, since: datetime) -> str:
     sections = [
         f":large_blue_circle: *MIOS Weekly Intelligence — Week of {_format_week_of(week_of)}*",
         _key_signals_section(signals),
-        _market_pulse_section(signals),
+        _market_pulse_section(pulse),
         _hiring_velocity_section(signals),
         _new_names_section(signals),
     ]
-    return "\n\n".join(sections)
+    # An empty section is dropped rather than left as a blank gap between two
+    # populated ones — a week with no Market Pulse should read as four sections,
+    # not as four sections and a hole.
+    return "\n\n".join(s for s in sections if s)
