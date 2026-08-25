@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Drawer, Icons, Loading, Section, SparkBar, TierChip, Trend } from '~/components/ui'
+import { CapturedAt, Drawer, Icons, Loading, Section, SparkBar, TierChip, Trend } from '~/components/ui'
 import { digestQueryOptions } from '~/lib/api'
 import { UnauthenticatedError } from '~/lib/auth'
 import { useAuth } from '~/lib/auth-context'
@@ -482,6 +482,7 @@ function SignalRow({ s, onOpen }: { s: Signal; onOpen: () => void }) {
       <div className="meta-col">
         <div>conf {s.conf}</div>
         <div style={{ color: 'var(--ink-3)' }}>{s.source}</div>
+        <CapturedAt at={s.capturedAt} />
       </div>
     </div>
   )

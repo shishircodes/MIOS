@@ -43,6 +43,9 @@ export interface Signal {
   source: string
   cycle: string
   conf: number
+  /** When the scraper collected this. Lets a reader tell a posting found in
+   *  this run from one carried over from an earlier run in the same window. */
+  capturedAt: string | null
 }
 
 export interface VelocityRow {

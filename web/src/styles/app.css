@@ -628,12 +628,21 @@ input, textarea, select { font-family: inherit; }
    own so the contents list and the approve button stay reachable in a long
    report — the reviewer works section by section and should never have to
    scroll back up to act on what they just read. */
+/* The report is the one screen that is a document workspace rather than a
+   feed, so it is allowed past the 1280px the other pages sit at. On a 1440p
+   monitor the old cap left a small panel adrift in the middle of the screen. */
+.page.page-wide { max-width: 1720px; }
+
 .doc-shell {
   display: grid;
   grid-template-columns: 210px minmax(0, 1fr) 260px;
   border: 1px solid var(--line-2);
   background: var(--surface);
   overflow: hidden;
+}
+@media (min-width: 1600px) {
+  .doc-shell { grid-template-columns: 250px minmax(0, 1fr) 320px; }
+  .doc-body { padding: 44px 64px; }
 }
 @media (max-width: 1150px) {
   .doc-shell { grid-template-columns: minmax(0, 1fr); }
@@ -660,8 +669,19 @@ input, textarea, select { font-family: inherit; }
 
 .doc-body {
   padding: 38px 52px; background: var(--surface); line-height: 1.65;
-  overflow-y: auto; max-height: 760px;
+  overflow-y: auto;
+  /* Was a flat 760px, which on a tall screen scrolled the report inside a box
+     less than half the height available. Tracks the viewport instead, with a
+     floor so it does not collapse on a laptop. */
+  max-height: max(560px, calc(100vh - 250px));
 }
+/* Width is for the layout, not the prose: a paragraph spanning the full column
+   on a wide monitor is harder to read, not easier. */
+.doc-body > h1,
+.doc-body > .muted,
+.doc-section p,
+.doc-section ul,
+.doc-section ol { max-width: 84ch; }
 .doc-body > h1 {
   font-family: var(--display); font-weight: 700; font-size: 27px;
   letter-spacing: -0.02em; margin: 0 0 4px;
@@ -1247,3 +1267,11 @@ overflow-x: auto;
   text-transform: uppercase; padding: 2px 7px; white-space: nowrap;
   background: var(--paper-2); color: var(--ink-3); border: 1px dashed var(--line-3);
 }
+
+/* When a signal was collected. Quiet by default — it distinguishes rows within
+   a window rather than being a thing anyone scans for. */
+.captured {
+  font-family: var(--mono); font-size: 11px; color: var(--muted);
+  white-space: nowrap;
+}
+.signal .meta-col .captured { display: block; margin-top: 2px; }

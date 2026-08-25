@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useRef, useState } from 'react'
-import { Icons, Loading, Section, TierChip } from '~/components/ui'
+import { CapturedAt, Icons, Loading, Section, TierChip } from '~/components/ui'
 import { signalsQueryOptions } from '~/lib/api'
 import { useFigure, useReveal } from '~/lib/motion'
 
@@ -150,6 +150,7 @@ function SignalFeed() {
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 4 }}>
                   <TierChip tier={s.tier} />
                   <span className="chip">{s.sector.toUpperCase()}</span>
+                  <CapturedAt at={s.capturedAt} />
                   <span className="chip">{s.cycle}</span>
                   <span className="chip">{s.region}</span>
                 </div>

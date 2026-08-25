@@ -43,6 +43,23 @@ export const Icons: Record<string, ReactNode> = {
   lock: <Icon d="M5 11h14v10H5zM8 11V7a4 4 0 018 0v4M12 15v2" />,
 }
 
+/**
+ * When a signal was collected, as "25 Aug" — short enough to sit inline on a
+ * row. The full timestamp goes in the tooltip rather than the label, because
+ * within a seven-day window the day is the part that distinguishes one signal
+ * from another; the minute never is.
+ */
+export function CapturedAt({ at }: { at: string | null }) {
+  if (!at) return null
+  const d = new Date(at)
+  if (Number.isNaN(d.getTime())) return null
+  return (
+    <span className="captured" title={d.toLocaleString()}>
+      {d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}
+    </span>
+  )
+}
+
 // ----- Trend arrow -----
 export function Trend({ dir, value, unit = '' }: { dir: string; value: number | string; unit?: string }) {
   if (dir === 'up') return <span className="up mono tnum">↑ {value}{unit}</span>

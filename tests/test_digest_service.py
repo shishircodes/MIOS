@@ -675,3 +675,75 @@ def test_nothing_reports_mode_push_activity(db):
     payload = build_digest_payload(db, days=7)
     assert "pushQueries" not in payload["collection"]
     assert "push" not in str(payload["collection"]).lower()
+
+
+def _add_at(db, signal_id: str, captured: str, company="BHP", tier="A"):
+    """Like `_add`, but at an exact instant rather than a number of days back."""
+    with connect(db) as conn:
+        conn.execute(
+            "INSERT INTO signals (signal_id, source_type, source_name, source_url, "
+            "captured_at, geography, region, sector, company_name, watchlist_tier, "
+            "signal_category, review_cycle, raw_content, analysis_notes, "
+            "is_new_prospect, classified_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (signal_id, "job_board", "seek", f"https://x/{signal_id}", captured, "AU",
+             "AU", "mining", company, tier, "hiring_velocity", "weekly",
+             f"{company} is hiring a Maintenance Planner", "note", 0, captured),
+        )
+
+
+# ---------- the window is day-aligned ----------
+#
+# Regression: the boundary was `now - days`, to the second. Scrapes never start
+# at the same minute, so a run sitting almost exactly `days` back was included
+# or excluded depending on when the digest happened to be built. On 25 August
+# the previous week's 146 signals cleared the line by 24 seconds — a digest
+# generated a minute later would have reported different headline figures from
+# identical data.
+
+
+def _at(ts):
+    return ts.isoformat(timespec="seconds")
+
+
+def test_the_window_starts_at_midnight_not_at_the_current_time(db):
+    from api.digest_service import _day_after
+
+    boundary = _day_after(datetime.now(timezone.utc)) - timedelta(days=7)
+    assert (boundary.hour, boundary.minute, boundary.second) == (0, 0, 0)
+
+
+def test_seconds_do_not_decide_whether_a_run_is_in_the_window(db):
+    """Two signals a few seconds either side of the boundary must not land on
+    opposite sides of it — that was the whole bug."""
+    from api.digest_service import _day_after
+
+    boundary = _day_after(datetime.now(timezone.utc)) - timedelta(days=7)
+    _add_at(db, "just-before", _at(boundary - timedelta(seconds=30)))
+    _add_at(db, "just-after", _at(boundary + timedelta(seconds=30)))
+
+    ids = {s["id"] for s in build_digest_payload(db, days=7)["signals"]}
+    assert "just-after" in ids
+    assert "just-before" not in ids, "a signal from the prior period leaked in"
+
+
+def test_a_run_exactly_a_week_back_is_a_previous_week(db):
+    """The case that actually happened: a weekly pipeline run seven days ago is
+    last week's digest, not this week's, whatever the minute says."""
+    now = datetime.now(timezone.utc)
+    _add_at(db, "last-week", _at(now - timedelta(days=7)))
+    _add_at(db, "this-week", _at(now - timedelta(minutes=5)))
+
+    p = build_digest_payload(db, days=7)
+    ids = {s["id"] for s in p["signals"]}
+    assert ids == {"this-week"}
+    assert p["collection"]["collected"] == 1, "two runs were counted as one week"
+
+
+def test_the_capture_time_reaches_the_row(db):
+    """So a reader can tell a posting found in this run from one carried over
+    from an earlier run inside the same window."""
+    when = _at(datetime.now(timezone.utc) - timedelta(hours=2))
+    _add_at(db, "s1", when)
+
+    (signal,) = build_digest_payload(db, days=7)["signals"]
+    assert signal["capturedAt"] == when

@@ -111,7 +111,7 @@ function PublishScreen() {
   const locked = doc?.status === 'approved'
 
   return (
-    <div className="page" ref={scope}>
+    <div className="page page-wide" ref={scope}>
       <div className="page-header">
         <div>
           <div className="kicker">Mode Publish · Quarterly Market Report</div>

@@ -327,6 +327,9 @@ def shape_signal(r: dict[str, Any], index: int) -> dict[str, Any]:
         "category": r.get("signal_category") or "hiring_velocity",
         "cycle": (r.get("review_cycle") or "weekly").upper(),
         "conf": _confidence(index, tier, is_new),
+        #: When the scraper collected this, so a reader can tell a posting found
+        #: today from one carried over from an earlier run in the same window.
+        "capturedAt": r.get("captured_at"),
         "_rank": rank_signal(r.get("signal_category"), len(raw), tier),
     }
 
@@ -350,7 +353,14 @@ def build_digest_payload(
     """
     tiers = _watchlist_tiers(settings.watchlist_path)
     competitors = _competitor_names(COMPETITORS_PATH)
-    since = datetime.now(timezone.utc) - timedelta(days=days)
+
+    # Snapped to a day boundary, for the same reason the velocity baseline below
+    # is: scrapes never start at the same minute. With a to-the-second boundary
+    # a run sitting almost exactly `days` back is included or excluded depending
+    # on the second the digest is built — on 25 August the previous week's 146
+    # signals cleared the line by 24 seconds, and a run a minute later would
+    # have produced different headline figures from identical data.
+    since = _day_after(datetime.now(timezone.utc)) - timedelta(days=days)
 
     rows = _rows_from_db(db_path, since=since)
     source_mode = "live"
