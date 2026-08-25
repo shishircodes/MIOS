@@ -543,6 +543,7 @@ def build_digest_payload(
         #: call per view. None when the week produced none, and the UI omits the
         #: section rather than substituting computed prose.
         "marketPulse": load_pulse(
+            (collected_from or since).isoformat(timespec="seconds"),
             (collected_to or datetime.now(timezone.utc)).isoformat(timespec="seconds"),
             db_path,
         ),

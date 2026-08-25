@@ -293,7 +293,9 @@ def save_pulse(outcome: PulseOutcome, *, window_from: str, window_to: str,
                 "INSERT INTO digest_pulse "
                 "(window_from, window_to, bullets, status, note, signals_analysed, generated_at) "
                 "VALUES (?,?,?,?,?,?,?) "
-                "ON CONFLICT (window_from, window_to) DO UPDATE SET "
+                # Keyed on the scrape, not on the pair — see the unique index in
+                # loader/ingest.py. `window_from` drifts on its own.
+                "ON CONFLICT (window_to) DO UPDATE SET "
                 "bullets = ?, status = ?, note = ?, signals_analysed = ?, generated_at = ?",
                 (window_from, window_to, body, outcome.status, outcome.note,
                  outcome.signals_analysed, _now(),
@@ -303,39 +305,44 @@ def save_pulse(outcome: PulseOutcome, *, window_from: str, window_to: str,
         log.warning("pulse: could not store the result (%s)", exc)
 
 
-def load_pulse(window_to: str, target: str | Path | None = None) -> dict[str, Any] | None:
-    """The stored Market Pulse for a collection run, or None if there is none.
+def load_pulse(window_from: str, window_to: str,
+               target: str | Path | None = None) -> dict[str, Any] | None:
+    """The Market Pulse for a digest window, or None if there is none to show.
 
-    Keyed on `window_to` alone — the newest capture in the window, i.e. *which
-    scrape this is*. The obvious key, `(window_from, window_to)`, does not work:
-    `window_from` is the oldest signal inside a rolling seven-day window, so it
-    moves on its own as older signals age out. A pulse stored on Monday became
-    unreachable by Tuesday, and the section silently stopped rendering while the
-    row sat in the table looking fine.
+    A *range* over the window, not a lookup by key, and both halves of that
+    matter:
 
-    `window_to` only changes when a new scrape lands — which is exactly when a
-    new pulse is generated. If a scrape runs without one, no row matches and the
-    section is correctly absent rather than showing last week's read as this
-    week's.
+    `window_to` alone as a key broke the moment the pipeline ran twice in one
+    week. The second run creates newer captures, so the current `window_to`
+    moves to the new scrape — and if that run's generation failed, the perfectly
+    good pulse from the first run became unreachable under its older key. The
+    section vanished because of a *later* failure, which is not what "no
+    fallback" was meant to mean.
 
-    Returns None for a failed week as well as a missing one — both mean "no
-    section". The reason stays in the table for anyone asking why.
+    Bounding it by `window_from` is what stops the other failure: without a
+    lower bound this would happily serve last month's pulse as this week's read.
+    A pulse only counts if it was generated for a scrape inside the window being
+    rendered.
+
+    Failed rows never match — `status` is filtered here — so a failed run leaves
+    the previous good pulse for the same window in place rather than displacing
+    it. The reason for the failure stays in the table either way.
     """
     try:
         with connect(target, readonly=True) as conn:
             row = conn.execute(
                 "SELECT bullets, status, note, signals_analysed, generated_at "
-                "FROM digest_pulse WHERE window_to = ? "
-                # A re-run for the same scrape writes a second row only if its
-                # window_from differs; the newest attempt is the live one.
-                "ORDER BY generated_at DESC LIMIT 1",
-                (window_to,),
+                "FROM digest_pulse "
+                "WHERE status = ? AND window_to >= ? AND window_to <= ? "
+                # Newest scrape first; for one scrape, the newest attempt.
+                "ORDER BY window_to DESC, generated_at DESC LIMIT 1",
+                (STATUS_GENERATED, window_from, window_to),
             ).fetchone()
     except Exception as exc:  # noqa: BLE001 - table may not exist yet
         log.debug("pulse: could not read (%s)", exc)
         return None
 
-    if row is None or row["status"] != STATUS_GENERATED or not row["bullets"]:
+    if row is None or not row["bullets"]:
         return None
     try:
         bullets = json.loads(row["bullets"])
