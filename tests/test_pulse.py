@@ -222,7 +222,7 @@ def test_a_generated_pulse_round_trips(db):
     ]))
     save_pulse(out, window_from="A", window_to="B", target=db)
 
-    loaded = load_pulse("A", "B", db)
+    loaded = load_pulse("B", db)
     assert loaded["bullets"][0]["text"] == "146 signals collected."
     assert loaded["signalsAnalysed"] == 146
 
@@ -233,7 +233,7 @@ def test_a_failed_week_is_recorded_but_reads_as_absent(db):
     out = generate_pulse(PAYLOAD, target=db, gemini_caller=lambda *a, **k: {"bullets": []})
     save_pulse(out, window_from="A", window_to="B", target=db)
 
-    assert load_pulse("A", "B", db) is None, "a failed week must not render"
+    assert load_pulse("B", db) is None, "a failed week must not render"
 
     with connect(db, readonly=True) as conn:
         row = conn.execute(
@@ -252,8 +252,39 @@ def test_rerunning_a_window_replaces_it(db):
     with connect(db, readonly=True) as conn:
         n = conn.execute("SELECT count(*) FROM digest_pulse").fetchone()[0]
     assert n == 1, "windows accumulated instead of replacing"
-    assert load_pulse("A", "B", db)["bullets"][0]["text"] == "second draft"
+    assert load_pulse("B", db)["bullets"][0]["text"] == "second draft"
 
 
 def test_a_missing_window_is_simply_absent(db):
-    assert load_pulse("nope", "nothing", db) is None
+    assert load_pulse("nothing", db) is None
+
+
+def test_the_lookup_survives_the_window_sliding_underneath_it(db):
+    """The bug this key exists for.
+
+    `window_from` is the oldest signal inside a rolling seven-day window, so it
+    moves on its own as older signals age out. Keying the lookup on it meant a
+    pulse generated on Monday was unreachable by Tuesday — the row sat in the
+    table looking correct while the section silently stopped rendering.
+    """
+    out = generate_pulse(PAYLOAD, target=db, gemini_caller=_caller([
+        {"text": "146 signals collected.", "kind": KIND_FACT},
+    ]))
+    save_pulse(out, window_from="2026-08-18T00:44:11+00:00",
+               window_to="2026-08-25T00:41:11+00:00", target=db)
+
+    # Same scrape, but the oldest signal in the window has since aged out and
+    # `collectedFrom` now reports a different value entirely.
+    assert load_pulse("2026-08-25T00:41:11+00:00", db) is not None
+
+
+def test_a_newer_scrape_without_a_pulse_shows_nothing(db):
+    """Not last week's read presented as this week's. A scrape with no pulse of
+    its own has no Market Pulse, which is the honest answer."""
+    out = generate_pulse(PAYLOAD, target=db, gemini_caller=_caller([
+        {"text": "146 signals collected.", "kind": KIND_FACT},
+    ]))
+    save_pulse(out, window_from="2026-08-18T00:00:00+00:00",
+               window_to="2026-08-25T00:00:00+00:00", target=db)
+
+    assert load_pulse("2026-09-01T00:00:00+00:00", db) is None

@@ -303,19 +303,33 @@ def save_pulse(outcome: PulseOutcome, *, window_from: str, window_to: str,
         log.warning("pulse: could not store the result (%s)", exc)
 
 
-def load_pulse(window_from: str, window_to: str,
-               target: str | Path | None = None) -> dict[str, Any] | None:
-    """The stored Market Pulse for a window, or None if there is nothing to show.
+def load_pulse(window_to: str, target: str | Path | None = None) -> dict[str, Any] | None:
+    """The stored Market Pulse for a collection run, or None if there is none.
+
+    Keyed on `window_to` alone — the newest capture in the window, i.e. *which
+    scrape this is*. The obvious key, `(window_from, window_to)`, does not work:
+    `window_from` is the oldest signal inside a rolling seven-day window, so it
+    moves on its own as older signals age out. A pulse stored on Monday became
+    unreachable by Tuesday, and the section silently stopped rendering while the
+    row sat in the table looking fine.
+
+    `window_to` only changes when a new scrape lands — which is exactly when a
+    new pulse is generated. If a scrape runs without one, no row matches and the
+    section is correctly absent rather than showing last week's read as this
+    week's.
 
     Returns None for a failed week as well as a missing one — both mean "no
-    section". The reason is still in the table for anyone asking why.
+    section". The reason stays in the table for anyone asking why.
     """
     try:
         with connect(target, readonly=True) as conn:
             row = conn.execute(
                 "SELECT bullets, status, note, signals_analysed, generated_at "
-                "FROM digest_pulse WHERE window_from = ? AND window_to = ?",
-                (window_from, window_to),
+                "FROM digest_pulse WHERE window_to = ? "
+                # A re-run for the same scrape writes a second row only if its
+                # window_from differs; the newest attempt is the live one.
+                "ORDER BY generated_at DESC LIMIT 1",
+                (window_to,),
             ).fetchone()
     except Exception as exc:  # noqa: BLE001 - table may not exist yet
         log.debug("pulse: could not read (%s)", exc)
