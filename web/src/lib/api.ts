@@ -40,6 +40,7 @@ export async function fetchSignals(query: FeedQuery): Promise<FeedPayload> {
   // network tab and an empty search does not become `q=`.
   if (query.region) params.set('region', query.region)
   if (query.cycle) params.set('cycle', query.cycle)
+  if (query.source) params.set('source', query.source)
   if (query.q) params.set('q', query.q)
   return fetchJson<FeedPayload>(`/api/signals?${params}`)
 }
