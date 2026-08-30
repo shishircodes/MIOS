@@ -232,3 +232,15 @@ export async function revokeAccess(email: string): Promise<AccessPayload> {
     method: 'DELETE',
   })
 }
+
+/** Turn a source on or off for the next scrape. Returns the refreshed listing. */
+export async function setSourceEnabled(
+  name: string,
+  enabled: boolean,
+): Promise<SourcesPayload> {
+  return postOrExplain<SourcesPayload>(`/api/admin/sources/${encodeURIComponent(name)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled }),
+  })
+}

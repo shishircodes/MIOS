@@ -284,6 +284,12 @@ export interface SourceHealth {
   lastRunRecords: number
   pending: number
   runDays: number
+  /** Whether the next scrape will use this source. Distinct from `status`,
+   *  which describes what it has been doing — a source can be collecting
+   *  healthily and still be switched off for the next run. */
+  enabled: boolean
+  changedBy: string | null
+  changedAt: string | null
 }
 
 export interface SourcesPayload {
@@ -291,4 +297,8 @@ export interface SourcesPayload {
   staleAfterDays: number
   perSourceLimit: number
   totalRecords: number
+  /** How many sources the next scrape will use. Zero is a legitimate choice
+   *  — it is how collection is paused — but the UI must say so, or an empty
+   *  week reads as a broken pipeline. */
+  enabledCount: number
 }

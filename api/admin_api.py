@@ -19,6 +19,7 @@ from api import access
 from api.auth import require_admin
 from config.settings import settings
 from loader.db import connect
+from loader.source_settings import UnknownSource, list_settings, set_enabled
 from scraper import SOURCE_NAMES
 
 log = logging.getLogger(__name__)
@@ -180,12 +181,15 @@ def source_health(user: dict[str, Any] = Depends(require_admin)) -> dict[str, An
     except Exception as exc:  # noqa: BLE001 - an unreachable database is a status, not a crash
         log.warning("admin: could not read source health (%s)", exc)
 
+    settings_by_source = list_settings()
+
     out: list[dict[str, Any]] = []
     for name in SOURCE_NAMES:
         info = SOURCE_INFO.get(name, {"label": name, "market": "—", "kind": "—"})
         s = stats.get(name, {})
         configured, missing = _configured(name)
         last_seen = s.get("lastSeen")
+        chosen = settings_by_source.get(name, {"enabled": True})
 
         if not configured:
             status = "not_configured"
@@ -211,6 +215,12 @@ def source_health(user: dict[str, Any] = Depends(require_admin)) -> dict[str, An
             "lastRunRecords": s.get("lastRunRecords", 0),
             "pending": s.get("pending", 0),
             "runDays": s.get("runDays", 0),
+            #: Whether the next scrape will use it. Distinct from `status`,
+            #: which describes what it has been doing — a source can be
+            #: collecting healthily and still be switched off for the next run.
+            "enabled": bool(chosen.get("enabled", True)),
+            "changedBy": chosen.get("changedBy"),
+            "changedAt": chosen.get("changedAt"),
         })
 
     # Sources that have rows but are no longer registered — a renamed or removed
@@ -224,6 +234,8 @@ def source_health(user: dict[str, Any] = Depends(require_admin)) -> dict[str, An
             "lastSeen": s.get("lastSeen"), "totalRecords": s.get("total", 0),
             "last7Days": s.get("last7", 0), "lastRunRecords": s.get("lastRunRecords", 0),
             "pending": s.get("pending", 0), "runDays": s.get("runDays", 0),
+            # A retired source is not selectable; it has no scraper to run.
+            "enabled": False, "changedBy": None, "changedAt": None,
         })
 
     return {
@@ -231,4 +243,32 @@ def source_health(user: dict[str, Any] = Depends(require_admin)) -> dict[str, An
         "staleAfterDays": STALE_AFTER_DAYS,
         "perSourceLimit": 50,
         "totalRecords": sum(s.get("total", 0) for s in stats.values()),
+        #: How many sources the next scrape will actually use. Zero is allowed
+        #: — pausing collection is a legitimate thing to do — but the UI has to
+        #: say so loudly, or an empty week looks like a broken pipeline.
+        "enabledCount": sum(1 for v in settings_by_source.values() if v["enabled"]),
     }
+
+
+@router.patch("/sources/{source_name}")
+def set_source_enabled(
+    source_name: str,
+    payload: dict[str, Any] = Body(...),
+    user: dict[str, Any] = Depends(require_admin),
+) -> dict[str, Any]:
+    """Turn a source on or off for the next scrape.
+
+    Takes effect on the next pipeline run; it does not touch anything already
+    collected. Turning everything off is permitted — that is how you pause
+    collection — and `enabledCount` in the listing is what makes it visible.
+    """
+    try:
+        set_enabled(
+            source_name,
+            bool(payload.get("enabled", True)),
+            changed_by=user["email"],
+            note=(str(payload["note"]).strip() or None) if payload.get("note") else None,
+        )
+    except UnknownSource as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return source_health(user)
