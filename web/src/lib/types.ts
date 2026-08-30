@@ -205,6 +205,7 @@ export interface FeedQuery {
   offset: number
   region?: string
   cycle?: string
+  source?: string
   q?: string
 }
 
