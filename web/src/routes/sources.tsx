@@ -2,6 +2,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useRef, useState } from 'react'
 import { AdminOnly } from '~/components/AdminOnly'
+import { SchedulePanel } from '~/components/SchedulePanel'
 import { Loading, Section } from '~/components/ui'
 import { setSourceEnabled, sourceHealthQueryOptions } from '~/lib/api'
 import { useFigure, useReveal } from '~/lib/motion'
@@ -154,6 +155,10 @@ function SourcesScreen() {
           the next scrape will fetch nothing. Turn at least one back on below.
         </div>
       )}
+
+      {/* "When we collect" sits above "what we collect from": the schedule is
+          the thing that makes the toggles below take effect. */}
+      <SchedulePanel />
 
       <Section
         title="Collectors"

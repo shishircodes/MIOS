@@ -43,6 +43,12 @@ class Settings:
     allowed_google_domain: str
     allowed_emails: tuple[str, ...]
     auth_disabled: bool
+    #: Whether this process runs the weekly pipeline by itself. Off by default,
+    #: and deliberately an environment variable rather than a database setting:
+    #: it answers "is this the process that runs it?", not "should it run?".
+    #: Every developer with a copy of the production DSN would otherwise start
+    #: scraping and spending Gemini quota the moment they ran the API locally.
+    scheduler_enabled: bool
 
     #: Fields whose value must never be printed. The default dataclass repr
     #: includes every field, so a single unhandled exception — or a failing test,
@@ -139,6 +145,7 @@ def load_settings() -> Settings:
         allowed_google_domain=_get("ALLOWED_GOOGLE_DOMAIN"),
         allowed_emails=_get_list("ALLOWED_EMAILS"),
         auth_disabled=_get_bool("AUTH_DISABLED", False),
+        scheduler_enabled=_get_bool("SCHEDULER_ENABLED", False),
     )
 
 

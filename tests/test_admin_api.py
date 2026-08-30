@@ -221,3 +221,34 @@ def test_granting_a_bad_address_is_a_400_with_something_readable(db):
         admin_api.grant_access({"email": "nonsense", "role": "member"}, user=ADMIN)
     assert exc.value.status_code == 400
     assert "email address" in exc.value.detail
+
+
+# ---------- the browser's half of the contract ----------
+#
+# Every write here reaches the API cross-origin (the web app on :3000, the API
+# on :8787), so the browser sends a preflight first. A method missing from the
+# CORS list fails that preflight and the request never arrives — which no test
+# calling the endpoint directly can see, because none of them send a preflight.
+# `PUT /api/admin/schedule` shipped broken exactly this way.
+
+
+def test_every_method_the_client_uses_is_allowed_cross_origin():
+    """Read the methods off the routes rather than listing them here, so a new
+    endpoint with a new verb cannot be added without this noticing."""
+    from starlette.middleware.cors import CORSMiddleware
+
+    from api.server import app
+
+    allowed = next(
+        set(mw.kwargs["allow_methods"])
+        for mw in app.user_middleware
+        if mw.cls is CORSMiddleware
+    )
+
+    used = {
+        method
+        for route in app.routes
+        for method in getattr(route, "methods", set())
+        if method not in {"HEAD", "OPTIONS"}
+    }
+    assert used <= allowed, f"the browser cannot reach: {sorted(used - allowed)}"

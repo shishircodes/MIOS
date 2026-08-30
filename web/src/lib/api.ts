@@ -11,6 +11,7 @@ import type {
   ProfileDraft,
   Report,
   ReportSummary,
+  SchedulePayload,
   SourcesPayload,
   StoredProfile,
   WatchlistResponse,
@@ -211,6 +212,15 @@ export const accessQueryOptions = queryOptions({
   retry: false,
 })
 
+export const scheduleQueryOptions = queryOptions({
+  queryKey: ['admin', 'schedule'],
+  queryFn: () => fetchJson<SchedulePayload>('/api/admin/schedule'),
+  retry: false,
+  // A run in flight changes this payload without the browser doing anything,
+  // so the panel polls rather than showing a stale "running" for minutes.
+  refetchInterval: 15_000,
+})
+
 export const sourceHealthQueryOptions = queryOptions({
   queryKey: ['admin', 'sources'],
   queryFn: () => fetchJson<SourcesPayload>('/api/admin/sources'),
@@ -245,3 +255,25 @@ export async function setSourceEnabled(
     body: JSON.stringify({ enabled }),
   })
 }
+
+/** Change when the pipeline runs by itself. */
+export async function saveSchedule(next: {
+  enabled: boolean
+  dayOfWeek: number
+  hour: number
+  minute: number
+  timezone: string
+}): Promise<SchedulePayload> {
+  return postOrExplain<SchedulePayload>('/api/admin/schedule', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(next),
+  })
+}
+
+/** Start a run now. Returns as soon as it has started, not when it finishes —
+ *  a full cycle takes minutes, far longer than any sensible request timeout. */
+export async function runPipelineNow(): Promise<{ started: boolean; runId: string; note: string }> {
+  return postOrExplain('/api/admin/schedule/run', { method: 'POST' })
+}
+

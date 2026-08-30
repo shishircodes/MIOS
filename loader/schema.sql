@@ -207,3 +207,52 @@ CREATE TABLE IF NOT EXISTS source_settings (
     changed_at  TEXT NOT NULL,
     note        TEXT
 );
+
+
+-- ---------------------------------------------------------------------------
+-- When the pipeline runs by itself
+-- ---------------------------------------------------------------------------
+
+-- A single row (id = 1). One weekly run is the whole product rhythm — the
+-- digest is weekly, the velocity baselines are weekly — so this is deliberately
+-- not a general cron table. A cron expression would let an administrator
+-- configure something the rest of the system cannot support.
+CREATE TABLE IF NOT EXISTS schedule_settings (
+    id          INTEGER PRIMARY KEY,
+    enabled     INTEGER NOT NULL DEFAULT 1,
+    -- ISO weekday order, 0 = Monday, matching datetime.weekday().
+    day_of_week INTEGER NOT NULL DEFAULT 0,
+    hour        INTEGER NOT NULL DEFAULT 5,
+    minute      INTEGER NOT NULL DEFAULT 0,
+    -- An IANA zone, not an offset. "Early Monday morning" has to survive
+    -- daylight saving, and an offset does not.
+    timezone    TEXT    NOT NULL DEFAULT 'Australia/Sydney',
+    changed_by  TEXT,
+    changed_at  TEXT
+);
+
+-- Every pipeline run, however it was started. This is not a log for its own
+-- sake: it is what makes the schedule correct across restarts. `due_at` records
+-- which scheduled occurrence a run satisfied, so "has Monday 05:00 already
+-- happened?" is an exact question rather than a comparison against wall clock
+-- time that a redeploy can lose.
+CREATE TABLE IF NOT EXISTS pipeline_runs (
+    id           TEXT PRIMARY KEY,
+    -- schedule | manual | cli
+    trigger      TEXT NOT NULL,
+    -- The scheduled instant this run satisfies (UTC), NULL for manual runs.
+    due_at       TEXT,
+    started_at   TEXT NOT NULL,
+    -- Refreshed while the run is in flight, so a process killed mid-run leaves
+    -- a lease that visibly goes stale instead of blocking every later run.
+    heartbeat_at TEXT NOT NULL,
+    finished_at  TEXT,
+    -- running | ok | failed
+    status       TEXT NOT NULL,
+    started_by   TEXT,
+    collected    INTEGER,
+    note         TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_pipeline_runs_started ON pipeline_runs(started_at);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_pipeline_runs_due ON pipeline_runs(due_at);
+

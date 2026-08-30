@@ -10,6 +10,11 @@ dependencies = [
     "beautifulsoup4>=4.12.0",
     "rapidfuzz>=3.9.0",
     "requests>=2.32.0",
+    # The IANA timezone database. The weekly run is scheduled in a named zone
+    # ("Monday 05:00 Australia/Sydney") so it survives daylight saving, and
+    # zoneinfo falls back to the system zone files — which a slim container
+    # image is not guaranteed to have.
+    "tzdata>=2024.1",
     # Neon / PostgreSQL. Binary wheel avoids needing libpq + a compiler locally.
     "psycopg[binary]>=3.2.0",
     # Connection pooling. Opening a Neon connection costs ~6.7 network round

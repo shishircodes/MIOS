@@ -510,6 +510,41 @@ Appending it again produces Google's opaque `invalid_client` error.
 | `ALLOWED_GOOGLE_DOMAIN` | Workspace domain checked against the verified `hd` claim |
 | `ALLOWED_EMAILS` | Comma-separated allowlist bypassing the domain check. Optional — the People & access screen does the same job without a restart — but still honoured, and listed there so it is not an invisible door |
 | `AUTH_DISABLED` | Development bypass. Never in a deployed environment |
+| `SCHEDULER_ENABLED` | Whether this process runs the weekly pipeline by itself. Off by default; set on the deployed API and nowhere else. The day and time are set in the Admin panel, not here |
+
+### The weekly run
+
+The pipeline runs itself. `SCHEDULER_ENABLED=true` makes a process the one that
+runs it; **Admin → Sources health → Automatic run** decides when — day, time and
+timezone, taking effect within a minute and without a redeploy. The default is
+Monday 05:00 Australia/Sydney.
+
+The scheduler is a loop inside the API container rather than cron, because the
+requirement is not only "run it on Monday" but "let an administrator change
+when". A GitHub Actions `schedule:` keeps its cron expression in a YAML file, so
+changing the time means a commit and a deploy — and scheduled workflows stop
+firing after 60 days without repository activity, which for a university project
+means the automation dies quietly some weeks after semester ends. A host crontab
+needs SSH.
+
+Three things it is careful about, each of which is a way a timer goes wrong in
+production and never in development:
+
+- **Restarts.** Every deploy restarts the container. The loop asks "has the due
+  moment passed with nothing run for it?", not "is it 05:00 now?" — the second
+  form loses the week whenever a restart lands on the scheduled minute. The
+  answer comes from `pipeline_runs.due_at`, so it survives the restart.
+- **Running late.** A missed run is picked up within 12 hours and abandoned after
+  that. The digest is labelled with the week it covers, so collecting it on
+  Friday would publish a window that does not match its own title.
+- **Two at once.** A run holds a heartbeated lease. A scrape spends Gemini quota
+  against a cap of 20 calls a day and writes into `signals`; two overlapping
+  would double-spend it. A container killed mid-scrape leaves a lease that goes
+  stale after 90 minutes rather than blocking the pipeline for good.
+
+`Run now` starts a cycle immediately through the same lease, and the run history
+under the panel says how the last few went — which is what makes "why is there no
+digest this week?" answerable.
 
 ### Market Pulse
 
