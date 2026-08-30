@@ -332,3 +332,64 @@ def test_an_offset_past_the_end_is_empty_not_an_error(db):
     p = build_feed_payload(db, limit=50, offset=500)
     assert p["signals"] == []
     assert p["total"] == 1, "the count still describes the whole match set"
+
+
+# ---------- the filter options come from the data ----------
+#
+# The UI used to keep its own list of source names. A hardcoded copy of
+# `SOURCE_NAMES` goes stale the moment a scraper is added or renamed, and the
+# failure is silent — an option that matches nothing, or a source with no way
+# to reach it. These pin the payload the buttons are now built from.
+
+
+def test_the_payload_lists_the_sources_present_in_the_data(db):
+    _add(db, "a", source="seek")
+    _add(db, "b", source="newsfeed")
+    _add(db, "c", source="seek")
+
+    assert build_feed_payload(db)["sources"] == ["newsfeed", "seek"]
+
+
+def test_a_retired_source_stays_filterable(db):
+    """Its scraper is gone but its signals remain, so the feed must still be
+    able to reach them. A list built from the registry could not."""
+    _add(db, "old", source="oldboard")
+    _add(db, "new", source="seek")
+
+    p = build_feed_payload(db)
+    assert "oldboard" in p["sources"]
+    assert [s["id"] for s in build_feed_payload(db, source="OLDBOARD")["signals"]] == ["old"]
+
+
+def test_every_listed_source_actually_matches_something(db):
+    """The point of deriving the list: no option can come back empty."""
+    _add(db, "a", source="seek")
+    _add(db, "b", source="adzuna")
+
+    p = build_feed_payload(db)
+    for name in p["sources"]:
+        assert build_feed_payload(db, source=name.upper())["total"] > 0, name
+
+
+def test_unclassified_rows_do_not_add_a_dead_option(db):
+    """The feed only ever shows classified rows, so a source with nothing but
+    pending rows would be an option that matches nothing."""
+    _add(db, "pending", source="newsfeed", classified=False)
+    _add(db, "shown", source="seek")
+
+    assert build_feed_payload(db)["sources"] == ["seek"]
+
+
+def test_an_empty_database_lists_no_sources(db):
+    assert build_feed_payload(db)["sources"] == []
+
+
+def test_the_options_do_not_narrow_when_a_filter_is_applied(db):
+    """The list describes what is filterable, not what the current page holds.
+    Narrowing it would remove every other button the moment you pressed one,
+    leaving no way back."""
+    _add(db, "a", source="seek")
+    _add(db, "b", source="adzuna")
+
+    assert build_feed_payload(db, source="SEEK")["sources"] == ["adzuna", "seek"]
+    assert build_feed_payload(db, q="nothing matches this")["sources"] == ["adzuna", "seek"]

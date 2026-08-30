@@ -678,8 +678,8 @@ def build_feed_payload(
     """
     resolved = resolve_target(db_path)
     if not is_postgres(resolved) and not Path(resolved).exists():
-        return {"signals": [], "total": 0, "totalClassified": 0,
-                "scrapedAllTime": 0, "limit": limit, "offset": offset}
+        return {"signals": [], "total": 0, "totalClassified": 0, "scrapedAllTime": 0,
+                "sources": [], "limit": limit, "offset": offset}
 
     limit = max(1, min(limit, MAX_PAGE_SIZE))
     offset = max(0, offset)
@@ -708,10 +708,20 @@ def build_feed_payload(
                 "SELECT count(*) FROM signals WHERE classified_at IS NOT NULL"
             ).fetchone()[0]
             scraped = conn.execute("SELECT count(*) FROM signals").fetchone()[0]
+            # The filter options, taken from the data rather than a list kept in
+            # the UI. A hardcoded copy goes stale the moment a scraper is added
+            # or renamed — silently, as an option that matches nothing or a
+            # source you cannot reach. Reading the column also keeps signals
+            # from a retired source filterable, which a registry list would not.
+            source_rows = conn.execute(
+                "SELECT DISTINCT source_name FROM signals "
+                "WHERE classified_at IS NOT NULL AND source_name IS NOT NULL "
+                "ORDER BY source_name"
+            ).fetchall()
     except Exception as exc:  # noqa: BLE001 - missing table, unreachable Neon
         log.warning("feed: could not read signals (%s)", exc)
-        return {"signals": [], "total": 0, "totalClassified": 0,
-                "scrapedAllTime": 0, "limit": limit, "offset": offset}
+        return {"signals": [], "total": 0, "totalClassified": 0, "scrapedAllTime": 0,
+                "sources": [], "limit": limit, "offset": offset}
 
     page = [shape_signal(dict(r), i) for i, r in enumerate(rows)]
     for s in page:
@@ -729,6 +739,10 @@ def build_feed_payload(
         #: Every row the scrapers have ever collected, including any not yet
         #: classified. This is the "all time" figure the feed header shows.
         "scrapedAllTime": int(scraped),
+        #: Every source the feed can actually be filtered to, alphabetically.
+        #: Unaffected by the filters above — it describes what is reachable, not
+        #: what this page holds, so pressing one button cannot remove the rest.
+        "sources": [str(r["source_name"]) for r in source_rows],
         "limit": limit,
         "offset": offset,
     }

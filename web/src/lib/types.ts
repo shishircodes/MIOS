@@ -217,6 +217,9 @@ export interface FeedPayload {
   totalClassified: number
   /** Every row ever collected, including any not yet classified. */
   scrapedAllTime: number
+  /** Every source the feed can be filtered to, read from the data. Drives the
+   *  filter buttons so they cannot drift from what is actually collectable. */
+  sources: string[]
   limit: number
   offset: number
 }
