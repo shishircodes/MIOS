@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { CapturedAt, Icons, Loading, Section, TierChip } from '~/components/ui'
 import { signalsQueryOptions } from '~/lib/api'
 import { useFigure, useReveal } from '~/lib/motion'
@@ -12,7 +12,6 @@ export const Route = createFileRoute('/monitor/feed')({
 
 const REGIONS = ['ALL', 'AU', 'PNG'] as const
 const CYCLES = ['ALL', 'WEEKLY', 'MONTHLY', 'QUARTERLY'] as const
-const SOURCES = ['ALL', 'PNGWORKFORCE', 'SEEK', 'ADZUNA', 'NEWSFEED'] as const
 const PAGE_SIZE = 50
 
 /** Debounce, so typing a search term is one request rather than one per key. */
@@ -63,6 +62,14 @@ function SignalFeed() {
     delay: 0.08,
   })
 
+  // Built from the payload rather than a list kept here. A hardcoded copy
+  // drifts the moment a scraper is added or renamed, and the failure is silent
+  // — an option matching nothing, or a source with no way to reach it.
+  const sourceOptions = useMemo(
+    () => ['ALL', ...(data?.sources ?? []).map((s) => s.toUpperCase())],
+    [data?.sources],
+  )
+
   const signals = data?.signals ?? []
   const total = data?.total ?? 0
   const anyFilterActive = region !== 'ALL' || cycle !== 'ALL' || source !== 'ALL' || query.trim() !== ''
@@ -100,7 +107,11 @@ function SignalFeed() {
           <span className="mono muted" style={{ fontSize: 10.5, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Filter</span>
           <FilterGroup label="Region" value={region} options={[...REGIONS]} onChange={setRegion} />
           <FilterGroup label="Cycle" value={cycle} options={[...CYCLES]} onChange={setCycle} />
-          <FilterGroup label="Source" value={source} options={[...SOURCES]} onChange={setSource} />
+          {/* Hidden until the first payload arrives; rendering a lone "All"
+              button would offer a filter that cannot filter. */}
+          {sourceOptions.length > 1 && (
+            <FilterGroup label="Source" value={source} options={sourceOptions} onChange={setSource} />
+          )}
 
           <div className="feed-search">
             <span className="feed-search-icon" aria-hidden="true">{Icons.search}</span>

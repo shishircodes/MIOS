@@ -1,9 +1,9 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { useQuery } from '@tanstack/react-query'
-import { useRef } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useRef, useState } from 'react'
 import { AdminOnly } from '~/components/AdminOnly'
 import { Loading, Section } from '~/components/ui'
-import { sourceHealthQueryOptions } from '~/lib/api'
+import { setSourceEnabled, sourceHealthQueryOptions } from '~/lib/api'
 import { useFigure, useReveal } from '~/lib/motion'
 import type { SourceHealth, SourceStatus } from '~/lib/types'
 
@@ -34,7 +34,17 @@ function ago(iso: string | null): string {
   return `${days} days ago`
 }
 
-function SourceRow({ s, limit }: { s: SourceHealth; limit: number }) {
+function SourceRow({
+  s,
+  limit,
+  onToggle,
+  busy,
+}: {
+  s: SourceHealth
+  limit: number
+  onToggle: (name: string, enabled: boolean) => void
+  busy: boolean
+}) {
   const st = STATUS[s.status] ?? STATUS.retired
   // A run that came back exactly at the cap was almost certainly truncated —
   // worth flagging, because the number is a limit, not a measurement.
@@ -60,12 +70,47 @@ function SourceRow({ s, limit }: { s: SourceHealth; limit: number }) {
       <div className="num">{s.last7Days.toLocaleString()}</div>
       <div className="num">{s.totalRecords.toLocaleString()}</div>
       <div className="muted mono" style={{ fontSize: 11 }}>{ago(s.lastSeen)}</div>
+
+      <div className="src-toggle">
+        {s.status === 'retired' ? (
+          <span className="muted" style={{ fontSize: 11 }}>—</span>
+        ) : (
+          <label className="switch" title={
+            s.enabled
+              ? `Included in the next scrape${s.status === 'not_configured'
+                  ? ' — but it has no credentials, so it will collect nothing' : ''}`
+              : `Skipped${s.changedBy ? ` — switched off by ${s.changedBy}` : ''}`
+          }>
+            <input
+              type="checkbox"
+              checked={s.enabled}
+              disabled={busy}
+              onChange={(e) => onToggle(s.name, e.target.checked)}
+            />
+            <span className="switch-track" aria-hidden="true" />
+            {/* The word carries the state as well as the position, so it does
+                not depend on reading a small visual difference. */}
+            <span className="switch-label">{s.enabled ? 'On' : 'Off'}</span>
+          </label>
+        )}
+      </div>
     </div>
   )
 }
 
 function SourcesScreen() {
+  const qc = useQueryClient()
   const { data, isPending, error } = useQuery(sourceHealthQueryOptions)
+  const [problem, setProblem] = useState<string | null>(null)
+
+  const toggle = useMutation({
+    mutationFn: (v: { name: string; enabled: boolean }) => setSourceEnabled(v.name, v.enabled),
+    onSuccess: (payload) => {
+      qc.setQueryData(sourceHealthQueryOptions.queryKey, payload)
+      setProblem(null)
+    },
+    onError: (e: Error) => setProblem(e.message),
+  })
 
   // Before the early returns below: hooks cannot be called conditionally, so
   // these tolerate `data` being undefined while the query is in flight.
@@ -99,7 +144,21 @@ function SourcesScreen() {
         </div>
       </div>
 
-      <Section title="Collectors" tools={<span>{live.length} SOURCES</span>}>
+      {problem && <div className="notice err" role="alert">{problem}</div>}
+
+      {/* Zero enabled is a legitimate choice — it is how collection is paused —
+          but an empty week would otherwise look like a broken pipeline. */}
+      {data.enabledCount === 0 && (
+        <div className="notice err" role="status">
+          <strong>Collection is paused.</strong> Every source is switched off, so
+          the next scrape will fetch nothing. Turn at least one back on below.
+        </div>
+      )}
+
+      <Section
+        title="Collectors"
+        tools={<span>{data.enabledCount} OF {live.length} ON FOR NEXT SCRAPE</span>}
+      >
         <div className="src-row src-head">
           <div>Source</div>
           <div>Type / market</div>
@@ -108,9 +167,16 @@ function SourcesScreen() {
           <div className="num">7 days</div>
           <div className="num">All time</div>
           <div>Last seen</div>
+          <div>Next scrape</div>
         </div>
         {data.sources.map((s) => (
-          <SourceRow key={s.name} s={s} limit={data.perSourceLimit} />
+          <SourceRow
+            key={s.name}
+            s={s}
+            limit={data.perSourceLimit}
+            busy={toggle.isPending}
+            onToggle={(name, enabled) => toggle.mutate({ name, enabled })}
+          />
         ))}
       </Section>
 

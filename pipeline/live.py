@@ -31,6 +31,7 @@ from delivery.pulse import generate_pulse, save_pulse
 from delivery.slack import post_digest
 from loader.db import describe, resolve_target
 from loader.ingest import ingest, init_db
+from loader.source_settings import enabled_sources
 from scraper import SOURCE_NAMES, scrape_all
 
 log = logging.getLogger(__name__)
@@ -68,7 +69,26 @@ def run_live_cycle(
     inserted = 0
     scraped_by_source: dict[str, int] = {}
     if do_scrape:
-        records = scrape_all(limit=scrape_limit, sources=sources, base_url=base_url)
+        # An explicit --source wins over the stored selection: asking for a
+        # specific source on the command line is a deliberate override, not a
+        # default to be second-guessed.
+        chosen = sources if sources else enabled_sources(db_path)
+
+        if not chosen:
+            # Deliberately not passed down to `scrape_all`, which reads an empty
+            # list as falsy and would fall back to *every* source — the exact
+            # opposite of what an administrator asked for by switching them all
+            # off. Skipping here is the only safe reading of "none enabled".
+            log.warning(
+                "live: every source is switched off in the Admin panel — skipping the "
+                "fetch. Re-enable one under Admin > Sources, or pass --source to override."
+            )
+            records = []
+        else:
+            if sources is None and set(chosen) != set(SOURCE_NAMES):
+                log.info("live: collecting from %s (others switched off in Admin)",
+                         ", ".join(chosen))
+            records = scrape_all(limit=scrape_limit, sources=chosen, base_url=base_url)
         scraped = len(records)
         scraped_by_source = dict(Counter(r.get("source_name", "unknown") for r in records))
         log.info("live: scraped %d postings %s", scraped, scraped_by_source)

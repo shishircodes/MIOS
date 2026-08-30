@@ -192,3 +192,18 @@ CREATE TABLE IF NOT EXISTS digest_pulse (
     generated_at     TEXT NOT NULL,
     PRIMARY KEY (window_from, window_to)
 );
+
+-- Which sources the next scrape uses, chosen by an administrator.
+--
+-- Only deviations are stored: a source with no row here is enabled. That way a
+-- scraper added later is collected from by default, and adding one needs no
+-- migration and no seeding.
+CREATE TABLE IF NOT EXISTS source_settings (
+    source_name TEXT PRIMARY KEY,
+    enabled     INTEGER NOT NULL DEFAULT 1,
+    -- Who turned it off and when, because "why did we collect nothing from
+    -- SEEK last week?" is the question this table exists to answer.
+    changed_by  TEXT,
+    changed_at  TEXT NOT NULL,
+    note        TEXT
+);
