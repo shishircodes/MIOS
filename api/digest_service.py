@@ -618,7 +618,7 @@ def _sector_as_displayed() -> str:
     return f"CASE sector {whens} ELSE lower(coalesce(sector,'')) END"
 
 
-def _feed_where(region: str | None, cycle: str | None,
+def _feed_where(region: str | None, cycle: str | None, source: str | None,
                 terms: list[str]) -> tuple[str, list[Any]]:
     """The filter, as SQL. Returns a WHERE fragment and its parameters."""
     clauses: list[str] = ["classified_at IS NOT NULL"]
@@ -630,6 +630,9 @@ def _feed_where(region: str | None, cycle: str | None,
     if cycle:
         clauses.append("upper(coalesce(review_cycle, 'weekly')) = ?")
         params.append(cycle)
+    if source:
+        clauses.append("upper(coalesce(source_name, '')) = ?")
+        params.append(source)
 
     for term in terms:
         # Every term must appear somewhere in the row, so "bhp mining" narrows
@@ -656,6 +659,7 @@ def build_feed_payload(
     offset: int = 0,
     region: str | None = None,
     cycle: str | None = None,
+    source: str | None = None,
     q: str | None = None,
 ) -> dict[str, Any]:
     """One page of the full signal list, newest first.
@@ -681,7 +685,8 @@ def build_feed_payload(
     offset = max(0, offset)
     terms = [t for t in (q or "").strip().lower().split() if t]
     where, params = _feed_where((region or "").upper() or None,
-                                (cycle or "").upper() or None, terms)
+                                (cycle or "").upper() or None,
+                                (source or "").strip().upper() or None, terms)
 
     try:
         # One connection for all four queries. Each `with connect()` is a

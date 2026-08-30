@@ -34,7 +34,7 @@ def db(tmp_path, watchlist):
 
 
 def _add(db, signal_id, *, days_ago=1, company="BHP", geo="AU", cycle="weekly",
-         raw=None, classified=True):
+         source="seek", raw=None, classified=True):
     captured = (datetime.now(timezone.utc) - timedelta(days=days_ago)).isoformat(timespec="seconds")
     with connect(db) as conn:
         conn.execute(
@@ -44,7 +44,7 @@ def _add(db, signal_id, *, days_ago=1, company="BHP", geo="AU", cycle="weekly",
             "is_new_prospect, classified_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             # `region` is resolved the same way loader.ingest resolves it, so
             # these rows look like rows the pipeline actually wrote.
-            (signal_id, "job_board", "seek", f"https://x/{signal_id}", captured, geo,
+            (signal_id, "job_board", source, f"https://x/{signal_id}", captured, geo,
              infer_geography(raw if raw is not None else "", default=geo),
              "mining", company, "A", "hiring_velocity", cycle,
              raw or f"{company} is hiring a Maintenance Planner", "note", 0,
@@ -173,6 +173,16 @@ def test_cycle_filter(db):
     assert [s["id"] for s in build_feed_payload(db, cycle="MONTHLY")["signals"]] == ["m"]
 
 
+def test_source_filter_updates_count(db):
+    _add(db, "seek", source="seek")
+    _add(db, "news", source="newsfeed")
+
+    p = build_feed_payload(db, source="NEWSFEED")
+    assert [s["id"] for s in p["signals"]] == ["news"]
+    assert p["total"] == 1
+    assert p["totalClassified"] == 2
+
+
 def test_search_requires_every_term(db):
     """Both rows match "bhp"; only one also matches "pilbara"."""
     _add(db, "bhp-pilbara", company="BHP", raw="BHP Maintenance Planner Pilbara")
@@ -196,20 +206,21 @@ def test_search_is_case_insensitive(db):
 
 
 def test_filters_combine(db):
-    _add(db, "au-weekly", geo="AU", cycle="weekly", company="BHP")
-    _add(db, "au-monthly", geo="AU", cycle="monthly", company="BHP")
-    _add(db, "png-weekly", geo="PNG", cycle="weekly", company="BHP",
+    _add(db, "au-weekly-seek", geo="AU", cycle="weekly", source="seek", company="BHP")
+    _add(db, "au-weekly-news", geo="AU", cycle="weekly", source="newsfeed", company="BHP")
+    _add(db, "au-monthly-seek", geo="AU", cycle="monthly", source="seek", company="BHP")
+    _add(db, "png-weekly-seek", geo="PNG", cycle="weekly", source="seek", company="BHP",
          raw="BHP Operator at Lihir, Papua New Guinea")
 
-    p = build_feed_payload(db, region="AU", cycle="WEEKLY", q="bhp")
-    assert [s["id"] for s in p["signals"]] == ["au-weekly"]
+    p = build_feed_payload(db, region="AU", cycle="WEEKLY", source="SEEK", q="bhp")
+    assert [s["id"] for s in p["signals"]] == ["au-weekly-seek"]
 
 
 def test_blank_filters_are_ignored(db):
     """The UI sends nothing for 'ALL', but an empty string must not filter
     everything out if one slips through."""
     _add(db, "s1")
-    assert build_feed_payload(db, region="", cycle="", q="  ")["total"] == 1
+    assert build_feed_payload(db, region="", cycle="", source="", q="  ")["total"] == 1
 
 
 # ---------- shape ----------
