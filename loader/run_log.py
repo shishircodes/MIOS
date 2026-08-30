@@ -58,7 +58,24 @@ def _now() -> datetime:
 
 
 def _stamp(when: datetime | None = None) -> str:
-    return (when or _now()).isoformat(timespec="seconds")
+    """A UTC ISO string, whatever zone the caller handed us.
+
+    Normalised rather than trusted, because `due_at` is compared and made
+    unique as *text*: the same instant spelled `2026-09-07T05:00:00+10:00` and
+    `2026-09-06T19:00:00+00:00` would look like two different occurrences, and
+    Monday would run twice. The same applies to `heartbeat_at`, which is
+    compared against a cutoff by string ordering.
+
+    Nothing passes a non-UTC value today — `due_occurrence` converts before
+    returning — but that is one call site away from being untrue, and the
+    failure would be a duplicate scrape rather than an error.
+    """
+    when = when or _now()
+    if when.tzinfo is None:
+        # A naive datetime has no instant. Refusing beats guessing: assuming UTC
+        # would silently shift the schedule when the guess is wrong.
+        raise ValueError("timestamps must carry a timezone")
+    return when.astimezone(timezone.utc).isoformat(timespec="seconds")
 
 
 def _row(r: Any) -> dict[str, Any]:

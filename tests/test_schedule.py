@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -420,3 +421,74 @@ def test_a_failing_run_does_not_kill_the_loop(db, monkeypatch):
     monkeypatch.setattr(sched_mod, "run_pipeline", _boom)
 
     asyncio.run(sched_mod._tick())  # must not raise
+
+
+# ---------- where the clock comes from ----------
+#
+# The schedule means "05:00 in Sydney". The server it runs on may be anywhere,
+# and may move. These pin that the machine's own timezone is never consulted.
+
+
+@pytest.mark.parametrize("server_tz", ["UTC", "America/New_York", "Europe/Berlin",
+                                       "Asia/Kathmandu", "Australia/Sydney"])
+def test_the_servers_own_timezone_does_not_move_the_run(server_tz, monkeypatch):
+    """A VPS in Frankfurt and one in Sydney must fire at the same instant. The
+    schedule is anchored to its stored IANA zone; the host clock is only ever
+    read as UTC, which has no local time to be wrong about."""
+    monkeypatch.setenv("TZ", server_tz)
+    if hasattr(time, "tzset"):
+        time.tzset()
+
+    when = next_due(Schedule(), datetime(2026, 9, 2, 12, 0, tzinfo=timezone.utc))
+    assert when == syd(2026, 9, 7, 5, 0)
+    assert when.astimezone(SYD).hour == 5
+
+
+def test_every_clock_read_in_the_scheduler_is_utc():
+    """A single naive `datetime.now()` anywhere in this path would make the run
+    time depend on where the container happens to be deployed — and it would
+    look correct in development, where the developer is in Sydney anyway."""
+    import ast
+    import pathlib
+
+    for name in ("loader/schedule.py", "loader/run_log.py", "api/scheduler.py"):
+        tree = ast.parse(pathlib.Path(name).read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            fn = node.func
+            if isinstance(fn, ast.Attribute) and fn.attr in {"now", "utcnow", "today"}:
+                assert fn.attr == "now", f"{name}: {fn.attr}() has no timezone"
+                assert node.args, f"{name}: datetime.now() with no timezone argument"
+
+
+def test_a_timestamp_is_stored_as_utc_whatever_zone_it_arrives_in():
+    """`due_at` is unique and compared as *text*. The same instant written
+    `2026-09-07T05:00:00+10:00` and `2026-09-06T19:00:00+00:00` would read as
+    two different occurrences, and Monday would run twice."""
+    from loader.run_log import _stamp
+
+    moment = datetime(2026, 9, 7, 5, 0, tzinfo=SYD)
+    assert _stamp(moment) == _stamp(moment.astimezone(timezone.utc))
+    assert _stamp(moment).endswith("+00:00")
+
+
+def test_a_naive_timestamp_is_refused_rather_than_guessed():
+    """Assuming UTC for a datetime that carries no zone would silently shift the
+    schedule by the size of the guess."""
+    from loader.run_log import _stamp
+
+    with pytest.raises(ValueError, match="timezone"):
+        _stamp(datetime(2026, 9, 7, 5, 0))
+
+
+def test_the_same_occurrence_is_not_claimed_twice_across_zones(db):
+    """The end of that chain: claiming with a Sydney-spelled instant and then a
+    UTC-spelled one must be refused as the single occurrence it is."""
+    as_sydney = datetime(2026, 9, 7, 5, 0, tzinfo=SYD)
+    run_id = run_log.claim(trigger=run_log.TRIGGER_SCHEDULE, due_at=as_sydney, target=db)
+    run_log.finish(run_id, status=run_log.STATUS_OK, target=db)
+
+    with pytest.raises(run_log.AlreadyRan):
+        run_log.claim(trigger=run_log.TRIGGER_SCHEDULE,
+                      due_at=as_sydney.astimezone(timezone.utc), target=db)

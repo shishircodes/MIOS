@@ -537,6 +537,12 @@ production and never in development:
 - **Running late.** A missed run is picked up within 12 hours and abandoned after
   that. The digest is labelled with the week it covers, so collecting it on
   Friday would publish a window that does not match its own title.
+- **Where the server is.** Nothing reads the host's local clock. "Now" is
+  `datetime.now(timezone.utc)`, an absolute instant; "Monday 05:00" is built in
+  the stored IANA zone and converted to UTC. A VPS in Frankfurt and one in
+  Sydney fire at the same moment, and moving the deployment changes nothing. The
+  Admin panel shows every time in the schedule's own zone — not the browser's —
+  so it reads the same wherever it is opened from.
 - **Two at once.** A run holds a heartbeated lease. A scrape spends Gemini quota
   against a cap of 20 calls a day and writes into `signals`; two overlapping
   would double-spend it. A container killed mid-scrape leaves a lease that goes

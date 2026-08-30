@@ -9,17 +9,23 @@ import type { PipelineRun, SchedulePayload } from '~/lib/types'
  *  server accepts any valid zone, so nothing is lost by keeping this short. */
 const ZONES = ['Australia/Sydney', 'Australia/Perth', 'Pacific/Port_Moresby', 'UTC']
 
-/** Local time, spelled out. The scheduled moment arrives as UTC and means
- *  nothing to a reader in that form. */
-function when(iso: string | null): string {
+/** A moment, spelled out in the schedule's own timezone.
+ *
+ *  Deliberately not the viewer's zone. The schedule means "05:00 in Sydney",
+ *  and an admin reading this from Port Moresby or on a laptop still set to
+ *  another country would otherwise see a different number than the one they
+ *  set, with nothing on screen saying why. The zone is always shown, so the
+ *  reading is never ambiguous. */
+function when(iso: string | null, tz: string): string {
   if (!iso) return '—'
-  return new Date(iso).toLocaleString(undefined, {
+  return new Date(iso).toLocaleString('en-AU', {
     weekday: 'short', day: 'numeric', month: 'short',
     hour: '2-digit', minute: '2-digit',
+    timeZone: tz, timeZoneName: 'short',
   })
 }
 
-function RunRow({ r }: { r: PipelineRun }) {
+function RunRow({ r, tz }: { r: PipelineRun; tz: string }) {
   const label =
     r.status === 'ok' ? 'Completed' : r.status === 'failed' ? 'Failed' : 'Running'
   const cls = r.status === 'ok' ? 'ok' : r.status === 'failed' ? 'err' : 'warn'
@@ -32,7 +38,7 @@ function RunRow({ r }: { r: PipelineRun }) {
         <span style={{ marginLeft: 8 }}>{label}</span>
       </div>
       <div className="muted">{r.trigger === 'schedule' ? 'Automatic' : 'Started by hand'}</div>
-      <div className="muted">{when(r.startedAt)}</div>
+      <div className="muted">{when(r.startedAt, tz)}</div>
       <div className="num">{r.collected === null ? '—' : r.collected.toLocaleString()}</div>
       <div className="muted" title={r.note ?? undefined}>
         {r.startedBy ?? (r.trigger === 'schedule' ? 'On schedule' : '—')}
@@ -105,7 +111,7 @@ export function SchedulePanel() {
       title="Automatic run"
       tools={
         <span>
-          {data.enabled ? `NEXT ${when(data.nextRunAt).toUpperCase()}` : 'PAUSED'}
+          {data.enabled ? `NEXT ${when(data.nextRunAt, data.timezone).toUpperCase()}` : 'PAUSED'}
         </span>
       }
     >
@@ -126,8 +132,8 @@ export function SchedulePanel() {
 
       {data.activeRun && (
         <div className="notice" role="status">
-          A run started {when(data.activeRun.startedAt)} is in progress. It takes a few
-          minutes.
+          A run started {when(data.activeRun.startedAt, data.timezone)} is in progress. It
+          takes a few minutes.
         </div>
       )}
 
@@ -200,8 +206,10 @@ export function SchedulePanel() {
         <p>
           {data.enabled ? (
             <>
-              The next automatic run is <strong>{when(data.nextRunAt)}</strong> in your
-              local time — {data.describe} where the server counts it. Changes take
+              The next automatic run is <strong>{when(data.nextRunAt, data.timezone)}</strong>.
+              Every time on this panel is shown in {data.timezone}, the schedule's own
+              timezone — not your browser's and not the server's, so it reads the same
+              wherever it is opened from and wherever MIOS is deployed. Changes take
               effect within a minute; no redeploy is needed.
             </>
           ) : (
@@ -237,7 +245,7 @@ export function SchedulePanel() {
             <div className="num">Collected</div>
             <div>By</div>
           </div>
-          {data.history.map((r) => <RunRow key={r.id} r={r} />)}
+          {data.history.map((r) => <RunRow key={r.id} r={r} tz={data.timezone} />)}
         </>
       )}
     </Section>
