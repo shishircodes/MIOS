@@ -16,6 +16,12 @@ Endpoints:
     GET  /api/digest   -> structured weekly digest  [AUTH REQUIRED]
     GET  /api/signals  -> the full signal list, paginated  [AUTH REQUIRED]
 
+The Admin section lives at /api/admin/* and is gated by `require_admin`, not
+just `require_user` — a member gets 403 there even with a valid session.
+
+Mode Publish adds /api/publish/* (see api/publish_api.py). It has no endpoint
+that distributes externally, by design — see that module's docstring.
+
 Mode Push adds /api/push/* (see api/push_api.py), all auth-required.
 """
 from __future__ import annotations
@@ -28,6 +34,7 @@ from fastapi import Depends, FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
+from api import access
 from api.auth import check_google_client_id, require_user, router as auth_router
 from api.digest_service import (
     DEFAULT_PAGE_SIZE,
@@ -36,10 +43,13 @@ from api.digest_service import (
     build_digest_payload,
     build_feed_payload,
 )
+from api import scheduler
+from api.admin_api import router as admin_router
+from api.publish_api import router as publish_router
 from api.push_api import router as push_router
 from api.watchlist_api import router as watchlist_router
 from config.settings import configure_logging, settings
-from loader.db import backend_label
+from loader.db import backend_label, close_pool
 
 configure_logging()
 log = logging.getLogger("api.server")
@@ -49,7 +59,18 @@ log = logging.getLogger("api.server")
 async def lifespan(_app: FastAPI):
     # Defined below; resolved at call time, not at definition time.
     _warn_on_insecure_config()
+    # No-op once an admin exists. Without it a fresh database has no admin and
+    # no way to create one from inside the app.
+    access.ensure_bootstrap_admin()
+    # The weekly pipeline. A no-op unless SCHEDULER_ENABLED is set, so only the
+    # deployed server runs it — a developer with the production DSN in their
+    # .env would otherwise start scraping the moment they ran the API.
+    task = scheduler.start(_app.state)
     yield
+    await scheduler.stop(task)
+    # Returns the pooled database connections rather than leaving the far end to
+    # time them out.
+    close_pool()
 
 
 app = FastAPI(title="MIOS API", version="0.2.0", lifespan=lifespan)
@@ -79,14 +100,20 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
-    # DELETE is here for /api/push/profiles/{id}: these rows describe real
-    # people, so removing one has to be possible from the UI.
-    allow_methods=["GET", "POST", "DELETE"],
+    # Listed explicitly rather than "*", so each one is here for a reason:
+    # DELETE for /api/push/profiles/{id}, because those rows describe real
+    # people and removing one has to be possible from the UI; PUT for
+    # /api/admin/schedule, which replaces the single settings row rather than
+    # patching a field of it. A method missing from this list fails as a
+    # rejected preflight — visible only in the browser, never in the tests.
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
     allow_headers=["*"],
 )
 
 app.include_router(auth_router)
 app.include_router(push_router)
+app.include_router(publish_router)
+app.include_router(admin_router)
 app.include_router(watchlist_router)
 
 
@@ -137,6 +164,7 @@ def signals(
     offset: int = Query(0, ge=0),
     region: str | None = Query(None, description="AU or PNG; omit for all"),
     cycle: str | None = Query(None, description="WEEKLY, MONTHLY or QUARTERLY"),
+    source: str | None = Query(None, description="collector source; omit for all"),
     q: str | None = Query(None, description="free-text search across the row"),
     user: dict[str, Any] = Depends(require_user),
 ) -> dict:
@@ -147,7 +175,7 @@ def signals(
     whole list, newest first, with no cap.
     """
     payload = build_feed_payload(
-        limit=limit, offset=offset, region=region, cycle=cycle, q=q
+        limit=limit, offset=offset, region=region, cycle=cycle, source=source, q=q
     )
     log.info("api: /api/signals served to %s (%d-%d of %d)",
              user["email"], offset, offset + len(payload["signals"]), payload["total"])

@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
 import { useRef, useState } from 'react'
 import { Icons, RegionChip, Section } from '~/components/ui'
+import { useCountUpAll, useReveal } from '~/lib/motion'
 import {
   deleteProfile,
   fetchMatches,
@@ -159,6 +160,14 @@ function PushScreen() {
 
   const profiles = useQuery(profilesQueryOptions)
 
+  // Matches arrive after a request, not on mount, so these key off the result
+  // itself — a new ranking replays; re-rendering the form beside it does not.
+  const scope = useRef<HTMLDivElement>(null)
+  const matchKey = matches ? `${matches.length}-${subject}` : 'none'
+  useReveal(scope, '.match-row', { key: matchKey, delay: 0.05, stagger: 0.06, y: 12 })
+  useCountUpAll(scope, '.match-row .score .big', matchKey, { delay: 0.15, stagger: 0.06 })
+  useReveal(scope, '.tbl tbody tr', { key: profiles.data?.length ?? 0, delay: 0.1, max: 10, y: 6 })
+
   function set<K extends keyof ProfileDraft>(key: K, value: ProfileDraft[K]) {
     setDraft((d) => ({ ...d, [key]: value }))
   }
@@ -272,7 +281,7 @@ function PushScreen() {
   }
 
   return (
-    <div className="page">
+    <div className="page" ref={scope}>
       <div className="page-header">
         <div>
           <div className="kicker">Mode Push · Profile-to-client matching</div>

@@ -13,9 +13,159 @@ from pathlib import Path
 from typing import Iterable
 
 from config.settings import settings
+from delivery.digest import infer_geography
 from loader.db import SCHEMA_PATH, connect, describe
 
 log = logging.getLogger(__name__)
+
+
+#: Columns added to tables that already shipped. `CREATE TABLE IF NOT EXISTS`
+#: does nothing at all when the table exists, so a column added to schema.sql
+#: after the first deploy never reaches an existing database — it fails at
+#: query time with "column does not exist", which is how this was found.
+#:
+#: Postgres has `ADD COLUMN IF NOT EXISTS`; SQLite does not, so the columns are
+#: checked before being added rather than relying on either dialect.
+ADDED_COLUMNS: tuple[tuple[str, str, str], ...] = (
+    ("reports", "prose_source", "TEXT NOT NULL DEFAULT 'computed'"),
+    ("reports", "prose_note", "TEXT"),
+    ("report_sections", "computed_body", "TEXT"),
+    ("signals", "region", "TEXT"),
+)
+
+#: Indexes that depend on a migrated column, so they cannot live in schema.sql —
+#: that script runs before the columns are added.
+ADDED_INDEXES: tuple[tuple[str, str], ...] = (
+    ("idx_signals_region", "CREATE INDEX IF NOT EXISTS idx_signals_region ON signals(region)"),
+    ("idx_signals_feed",
+     "CREATE INDEX IF NOT EXISTS idx_signals_feed ON signals(classified_at, captured_at)"),
+    # `window_to` is the newest capture in the window — i.e. which scrape this
+    # is — so it identifies a Market Pulse on its own. The table's primary key
+    # also carries `window_from`, which moves by itself as older signals age
+    # out of a rolling window, so a regeneration inserted a second row for the
+    # same scrape instead of replacing the first. A unique index says what the
+    # primary key should have, and does it without recreating a table that
+    # already holds data.
+    ("ux_digest_pulse_window_to",
+     "CREATE UNIQUE INDEX IF NOT EXISTS ux_digest_pulse_window_to ON digest_pulse(window_to)"),
+)
+
+
+def _dedupe_digest_pulse(conn) -> int:
+    """Leave one row per scrape, keeping the newest attempt.
+
+    Runs before the unique index below, which cannot be created while
+    duplicates exist. Idempotent: a deduplicated table loses nothing.
+    """
+    try:
+        rows = conn.execute(
+            "SELECT window_from, window_to, generated_at FROM digest_pulse "
+            "ORDER BY window_to, generated_at DESC"
+        ).fetchall()
+    except Exception:  # noqa: BLE001 - table may not exist yet
+        return 0
+
+    seen: set[str] = set()
+    removed = 0
+    for r in rows:
+        key = str(r["window_to"])
+        if key in seen:
+            conn.execute(
+                "DELETE FROM digest_pulse WHERE window_from = ? AND window_to = ?",
+                (r["window_from"], r["window_to"]),
+            )
+            removed += 1
+        else:
+            seen.add(key)
+    if removed:
+        log.info("init_db: removed %d superseded digest_pulse row(s)", removed)
+    return removed
+
+
+def _apply_indexes(conn) -> None:
+    """Create the post-migration indexes. Idempotent, and never fatal — a
+    missing index is slow, not broken."""
+    for name, sql in ADDED_INDEXES:
+        try:
+            conn.execute(sql)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("init_db: could not create %s (%s)", name, exc)
+
+
+def _existing_columns(conn, table: str) -> set[str]:
+    if conn.is_postgres:
+        rows = conn.execute(
+            "SELECT column_name FROM information_schema.columns WHERE table_name = ?",
+            (table,),
+        ).fetchall()
+        return {str(r[0]) for r in rows}
+    rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
+    return {str(r[1]) for r in rows}
+
+
+def _apply_column_additions(conn) -> None:
+    """Add any column in ADDED_COLUMNS that the database is missing. Idempotent."""
+    by_table: dict[str, set[str]] = {}
+    for table, column, decl in ADDED_COLUMNS:
+        if table not in by_table:
+            try:
+                by_table[table] = _existing_columns(conn, table)
+            except Exception as exc:  # noqa: BLE001 - table may not exist yet
+                log.debug("init_db: cannot inspect %s (%s)", table, exc)
+                by_table[table] = set()
+        if not by_table[table] or column in by_table[table]:
+            continue
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
+        log.info("init_db: added %s.%s", table, column)
+
+
+def backfill_regions(target=None, batch: int = 500) -> int:
+    """Fill `region` on rows ingested before the column existed.
+
+    Runs from `init_db`, so `loader.check --init` is all a deployment needs.
+    Idempotent — it only ever touches rows where the column is still null.
+    """
+    from delivery.digest import infer_geography as _infer
+
+    filled = 0
+    with connect(target) as conn:
+        rows = conn.execute(
+            "SELECT signal_id, raw_content, geography FROM signals WHERE region IS NULL"
+        ).fetchall()
+        for r in rows:
+            conn.execute(
+                "UPDATE signals SET region = ? WHERE signal_id = ?",
+                (_infer(r["raw_content"] or "", default=r["geography"] or "AU"), r["signal_id"]),
+            )
+            filled += 1
+    if filled:
+        log.info("init_db: backfilled region on %d signal(s)", filled)
+    return filled
+
+
+def _seed_bootstrap_admin(conn) -> None:
+    """Give the access list a first administrator when it has none.
+
+    Imported lazily: loader must not depend on the api package, or the pipeline
+    would drag FastAPI in just to write a signal.
+    """
+    try:
+        from api.access import BOOTSTRAP_ADMIN, ROLE_ADMIN
+
+        row = conn.execute(
+            "SELECT count(*) FROM app_users WHERE role = ?", (ROLE_ADMIN,)
+        ).fetchone()
+        if int(row[0]) > 0:
+            return
+        conn.execute(
+            "INSERT INTO app_users (email, role, added_by, added_at, note) "
+            "VALUES (?,?,?,?,?) ON CONFLICT (email) DO UPDATE SET role = ?",
+            (BOOTSTRAP_ADMIN, ROLE_ADMIN, "system", _now_iso(),
+             "Seeded automatically as the first administrator", ROLE_ADMIN),
+        )
+        log.info("init_db: seeded %s as the bootstrap administrator", BOOTSTRAP_ADMIN)
+    except Exception as exc:  # noqa: BLE001 - never block init on this
+        log.warning("init_db: could not seed the bootstrap admin (%s)", exc)
 
 
 def init_db(target: str | Path | None = None, watchlist_path: str | Path | None = None) -> None:
@@ -24,7 +174,13 @@ def init_db(target: str | Path | None = None, watchlist_path: str | Path | None 
     schema_sql = SCHEMA_PATH.read_text(encoding="utf-8")
     with connect(target) as conn:
         conn.executescript(schema_sql)
+        _apply_column_additions(conn)
+        _dedupe_digest_pulse(conn)
+        _apply_indexes(conn)
         _seed_watchlist(conn, watchlist_path)
+        _seed_bootstrap_admin(conn)
+    # Outside the block above: it needs the column the migration just added.
+    backfill_regions(target)
     log.info("init_db complete: %s", describe(target))
 
 
@@ -67,13 +223,21 @@ def ingest(records: Iterable[dict], target: str | Path | None = None) -> int:
             if not raw:
                 skipped += 1
                 continue
+            # One value, used for both columns. Defaulting them separately let
+            # a record with no geography land as geography=PNG, region=AU — the
+            # two disagreeing about the same row.
+            geography = rec.get("geography") or "PNG"
             row = (
                 rec.get("signal_id") or str(uuid.uuid4()),
                 rec.get("source_type", "job_board"),
                 rec.get("source_name", "pngworkforce"),
                 rec.get("source_url"),
                 rec.get("captured_at") or _now_iso(),
-                rec.get("geography", "PNG"),
+                geography,
+                # Resolved once here rather than on every read. `geography` is
+                # what the scraper assumed from its own source; a PNG role
+                # advertised on an Australian board is only visible in the text.
+                infer_geography(raw, default=geography),
                 rec.get("sector"),
                 rec.get("company_name"),
                 rec.get("watchlist_tier"),
@@ -93,9 +257,10 @@ def ingest(records: Iterable[dict], target: str | Path | None = None) -> int:
             cur = conn.execute(
                 """INSERT INTO signals (
                     signal_id, source_type, source_name, source_url, captured_at,
-                    geography, sector, company_name, watchlist_tier, signal_category,
-                    review_cycle, raw_content, analysis_notes, is_new_prospect, classified_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    geography, region, sector, company_name, watchlist_tier,
+                    signal_category, review_cycle, raw_content, analysis_notes,
+                    is_new_prospect, classified_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT DO NOTHING
                 RETURNING signal_id""",
                 row,

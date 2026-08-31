@@ -43,6 +43,12 @@ class Settings:
     allowed_google_domain: str
     allowed_emails: tuple[str, ...]
     auth_disabled: bool
+    #: Whether this process runs the weekly pipeline by itself. Off by default,
+    #: and deliberately an environment variable rather than a database setting:
+    #: it answers "is this the process that runs it?", not "should it run?".
+    #: Every developer with a copy of the production DSN would otherwise start
+    #: scraping and spending Gemini quota the moment they ran the API locally.
+    scheduler_enabled: bool
 
     #: Fields whose value must never be printed. The default dataclass repr
     #: includes every field, so a single unhandled exception — or a failing test,
@@ -121,7 +127,12 @@ def load_settings() -> Settings:
         database_url=_get("DATABASE_URL"),
         log_level=_get("LOG_LEVEL", "INFO"),
         apify_token=_get("APIFY_TOKEN"),
-        pngworkforce_base_url=_get("PNGWORKFORCE_BASE_URL", "https://www.pngworkforce.com"),
+        # The listings page, not the homepage. The homepage carries no job
+        # cards, so the default silently scraped nothing wherever
+        # PNGWORKFORCE_BASE_URL was unset — which was every deployed
+        # container, while every developer had it in their .env.
+        pngworkforce_base_url=_get("PNGWORKFORCE_BASE_URL",
+                                   "https://www.pngworkforce.com/jobs/view-latest-jobs"),
         seek_base_url=_get("SEEK_BASE_URL", "https://au.seek.com"),
         seek_paths=_get_list("SEEK_PATHS"),
         adzuna_app_id=_get("ADZUNA_APP_ID"),
@@ -139,6 +150,7 @@ def load_settings() -> Settings:
         allowed_google_domain=_get("ALLOWED_GOOGLE_DOMAIN"),
         allowed_emails=_get_list("ALLOWED_EMAILS"),
         auth_disabled=_get_bool("AUTH_DISABLED", False),
+        scheduler_enabled=_get_bool("SCHEDULER_ENABLED", False),
     )
 
 

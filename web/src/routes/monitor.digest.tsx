@@ -1,11 +1,12 @@
 import { useQuery } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
-import { useEffect, useMemo, useState } from 'react'
-import { Drawer, Icons, Loading, Section, SparkBar, TierChip, Trend } from '~/components/ui'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { CapturedAt, Drawer, Icons, Loading, Section, SparkBar, TierChip, Trend } from '~/components/ui'
 import { digestQueryOptions } from '~/lib/api'
 import { UnauthenticatedError } from '~/lib/auth'
 import { useAuth } from '~/lib/auth-context'
-import type { Signal, VelocityRow } from '~/lib/types'
+import { useFigure, useGrowBar, useGrowBars, useReveal } from '~/lib/motion'
+import type { Collection, MarketPulse, Signal, VelocityRow } from '~/lib/types'
 
 /** Says what the "Change" column is measured against, so the reader is never
  *  left to assume a comparison that the data cannot support. */
@@ -44,6 +45,23 @@ function WeeklyDigest() {
   useEffect(() => {
     setQuery(urlQuery ?? '')
   }, [urlQuery])
+
+  // Same rule as `matched` below: these run before any early return, so they
+  // tolerate `data` being undefined while the query is in flight. Keyed on what
+  // is being shown, so filtering replays the reveal but an unrelated re-render
+  // does not. Both are capped inside the hooks — forty rows on the compositor
+  // at once costs more than the effect is worth.
+  const mainRef = useRef<HTMLDivElement>(null)
+  const railRef = useRef<HTMLElement>(null)
+  useReveal(mainRef, '.signal', {
+    key: `${query}-${showAll}-${data?.signals.length ?? 0}`,
+    delay: 0.1,
+  })
+  useReveal(railRef, '.vel-item', { key: data?.velocity.length ?? 0, delay: 0.2, stagger: 0.04 })
+  useGrowBars(railRef, '.vel-rail > span', data?.velocity.length ?? 0, { delay: 0.3 })
+  // New Names sits below the velocity chart in the same rail, so it starts a
+  // little later — the eye should reach it after, not alongside.
+  useReveal(railRef, '.nn-item', { key: data?.newNames.length ?? 0, delay: 0.4, stagger: 0.05 })
 
   // Hooks must run before any early return, so this tolerates `data` being
   // undefined while the query is still in flight.
@@ -122,6 +140,7 @@ function WeeklyDigest() {
   // comparison rather than ten unrelated numbers.
   const velocityMax = data.velocity.reduce((m, r) => Math.max(m, r.wk), 0)
 
+
   return (
     <div className="page">
       <div className="page-header">
@@ -148,23 +167,22 @@ function WeeklyDigest() {
         </div>
       )}
 
-      {/* KPI strip */}
-      <div className="kpi-row">
-        <Kpi
-          label={data.windowEmpty ? 'Roles detected · latest' : `Roles detected · ${data.windowDays}d`}
-          kpi={data.kpis.rolesThisWeek}
-        />
-        <Kpi label="Key signals" kpi={data.kpis.newSignals} />
-        <Kpi label="New Names" kpi={data.kpis.newNames} />
-        <Kpi label="Mode Push queries" kpi={data.kpis.pushQueries} />
-      </div>
+      <CollectionBand
+        c={data.collection}
+        windowDays={data.windowDays}
+        windowEmpty={data.windowEmpty}
+      />
+
+      {/* Omitted entirely when the week produced none — see delivery/pulse.py.
+          Nothing computed is substituted in its place. */}
+      {data.marketPulse && <MarketPulseSection pulse={data.marketPulse} />}
 
       {/* Signals on the left, the week's measurements alongside them on the
           right. Previously everything was one column, so Hiring Velocity and
           New Names sat below forty signal rows — the numbers that answer "what
           changed?" were the last thing anyone saw, if they scrolled at all. */}
       <div className="digest-grid">
-        <div className="digest-main">
+        <div className="digest-main" ref={mainRef}>
           <Section
             title="Key Signals This Week"
             tools={
@@ -234,7 +252,7 @@ function WeeklyDigest() {
           </Section>
         </div>
 
-        <aside className="digest-rail" aria-label="Measurements for this week">
+        <aside className="digest-rail" aria-label="Measurements for this week" ref={railRef}>
           <Section
             title="Hiring Velocity"
             tools={<span>TOP {data.velocity.length}</span>}
@@ -290,17 +308,162 @@ function WeeklyDigest() {
   )
 }
 
-function Kpi({ label, kpi }: { label: string; kpi: { val: number; delta: string; dir: string } }) {
+/**
+ * What was collected this week, as one connected statement rather than four
+ * separate tiles.
+ *
+ * The tiles it replaced invited fabrication: each needed a headline number and
+ * a delta, so two ended up showing the same variable, one carried an upward
+ * arrow with nothing measured behind it, and Mode Push reported a hardcoded
+ * zero. These figures are nested — collected, of which shown — which is what
+ * they always were.
+ */
+/**
+ * The week's written read, the one section a model writes rather than counts.
+ *
+ * Interpretation bullets are labelled. The model is allowed to reason past the
+ * figures — "suggests shutdown preparation" — but a consultant deciding who to
+ * call is entitled to see which bullets are measured and which are a reading of
+ * them, so the distinction is carried into the UI rather than flattened here.
+ */
+function MarketPulseSection({ pulse }: { pulse: MarketPulse }) {
+  const scope = useRef<HTMLDivElement>(null)
+  useReveal(scope, '.pulse-item', { key: pulse.generatedAt, delay: 0.15, stagger: 0.06 })
+
   return (
-    <div className="kpi">
-      <div className="label">{label}</div>
-      <div className="val tnum">{kpi.val}</div>
-      <div className={`delta ${kpi.dir}`}>
-        {kpi.dir === 'up' ? '↑ ' : kpi.dir === 'down' ? '↓ ' : ''}{kpi.delta}
+    <div className="pulse" ref={scope}>
+      <div className="pulse-head">
+        <span className="kicker">Market Pulse</span>
+        <span className="muted">
+          Written from {pulse.signalsAnalysed.toLocaleString()} signals
+        </span>
       </div>
+      <ul className="pulse-list">
+        {pulse.bullets.map((b, i) => (
+          <li key={i} className={`pulse-item ${b.kind}`}>
+            <span className="pulse-text">{b.text}</span>
+            {b.kind === 'interpretation' && (
+              <span
+                className="pulse-tag"
+                title="A reading of the data, not a measurement from it"
+              >
+                interpretation
+              </span>
+            )}
+          </li>
+        ))}
+      </ul>
     </div>
   )
 }
+
+function CollectionBand({
+  c,
+  windowDays,
+  windowEmpty,
+}: {
+  c: Collection
+  windowDays: number
+  windowEmpty: boolean
+}) {
+  const scope = useRef<HTMLDivElement>(null)
+  const auFill = useRef<HTMLSpanElement>(null)
+  const pngFill = useRef<HTMLSpanElement>(null)
+
+  const total = useFigure(c.collected)
+  const jobs = useFigure(c.jobs, { delay: 0.15 })
+  const news = useFigure(c.news, { delay: 0.2 })
+  const shown = useFigure(c.shown, { delay: 0.25 })
+  const names = useFigure(c.newNames, { delay: 0.3 })
+
+  // Both segments grow from their own leading edge, PNG a beat later, so the
+  // bar reads as filling left to right rather than splitting apart.
+  useGrowBar(auFill, c.regions.AU)
+  useGrowBar(pngFill, c.regions.PNG, { delay: 0.28 })
+  useReveal(scope, '.collection-facts li', { key: c.collected, delay: 0.35 })
+
+  const pct = (n: number) => (c.collected ? (n / c.collected) * 100 : 0)
+  const auShare = pct(c.regions.AU)
+  const pngShare = 100 - auShare
+
+  return (
+    <div className="collection" ref={scope}>
+      <div className="collection-lead">
+        <div className="kicker">
+          {windowEmpty ? 'Most recent collection' : `Collected over ${windowDays} days`}
+        </div>
+        <div className="collection-figure">
+          {/* Starts at the real value so it is correct before hydration and if
+              JavaScript never runs; the count-up overwrites it either way. */}
+          <strong className="tnum" ref={total}>
+            {c.collected}
+          </strong>
+          <span>
+            signals from {c.sources} source{c.sources === 1 ? '' : 's'}
+          </span>
+        </div>
+        <div className="collection-kinds">
+          <span className="tnum" ref={jobs}>
+            {c.jobs}
+          </span>{' '}
+          job postings ·{' '}
+          <span className="tnum" ref={news}>
+            {c.news}
+          </span>{' '}
+          news articles
+        </div>
+      </div>
+
+      <div className="collection-split">
+        {/* Labels sit above their own segment and share its width, so nothing
+            has to fit inside a fill that may be narrow. */}
+        <div className="split-labels" aria-hidden="true">
+          <span style={{ width: `${auShare}%` }}>
+            <em>Australia</em>
+            <b className="tnum">{c.regions.AU}</b>
+            <i className="tnum">{Math.round(auShare)}%</i>
+          </span>
+          <span style={{ width: `${pngShare}%` }}>
+            <em>Papua New Guinea</em>
+            <b className="tnum">{c.regions.PNG}</b>
+            <i className="tnum">{Math.round(pngShare)}%</i>
+          </span>
+        </div>
+
+        <div
+          className="split-bar"
+          role="img"
+          aria-label={`Australia ${c.regions.AU} signals, ${Math.round(auShare)} percent. Papua New Guinea ${c.regions.PNG} signals, ${Math.round(pngShare)} percent.`}
+        >
+          {/* The outer span holds the layout width; the inner fill is what
+              scales, so the growth never triggers a reflow. */}
+          <span className="seg au" style={{ width: `${auShare}%` }}>
+            <span className="fill" ref={auFill} />
+          </span>
+          <span className="seg png" style={{ width: `${pngShare}%` }}>
+            <span className="fill" ref={pngFill} />
+          </span>
+        </div>
+      </div>
+
+      <ul className="collection-facts">
+        <li>
+          <b className="tnum" ref={shown}>
+            {c.shown}
+          </b>
+          <span>ranked as key signals below</span>
+        </li>
+        <li>
+          <b className="tnum" ref={names}>
+            {c.newNames}
+          </b>
+          <span>companies not yet on the watchlist</span>
+        </li>
+      </ul>
+    </div>
+  )
+}
+
 
 function SignalRow({ s, onOpen }: { s: Signal; onOpen: () => void }) {
   return (
@@ -319,6 +482,7 @@ function SignalRow({ s, onOpen }: { s: Signal; onOpen: () => void }) {
       <div className="meta-col">
         <div>conf {s.conf}</div>
         <div style={{ color: 'var(--ink-3)' }}>{s.source}</div>
+        <CapturedAt at={s.capturedAt} />
       </div>
     </div>
   )
@@ -365,7 +529,11 @@ function SignalDetail({ s }: { s: Signal }) {
       </p>
       <div style={{ display: 'flex', gap: 8, marginTop: 24 }}>
         <button className="btn primary">{Icons.push} Push to match</button>
-        <button className="btn">{Icons.ext} Open source</button>
+        {s.sourceUrl && (
+          <a className="btn" href={s.sourceUrl} target="_blank" rel="noopener">
+            {Icons.ext} Open source
+          </a>
+        )}
         <button className="btn ghost">{Icons.archive} Archive</button>
       </div>
     </>

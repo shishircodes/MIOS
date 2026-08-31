@@ -1,12 +1,33 @@
 // Types mirror the JSON shape produced by api/digest_service.py (the Python backend).
 
-export type Dir = 'up' | 'down' | 'flat'
 export type Tier = 'A' | 'B' | 'C' | null
 
-export interface Kpi {
-  val: number
-  delta: string
-  dir: Dir
+/** What the week's collection consisted of. Nested rather than independent:
+ *  `collected` is the whole, `shown` is the ranked subset listed below it, and
+ *  `newNames` are the unfamiliar companies found among them. */
+export interface Collection {
+  collected: number
+  jobs: number
+  news: number
+  shown: number
+  newNames: number
+  sources: number
+  regions: { AU: number; PNG: number }
+}
+
+/** A Market Pulse bullet. `kind` is the model's own declaration of whether it
+ *  is restating the figures or reasoning past them — the UI must show which,
+ *  so a reader can tell a measurement from a reading of one. */
+export interface PulseBullet {
+  text: string
+  kind: 'fact' | 'interpretation'
+}
+
+export interface MarketPulse {
+  bullets: PulseBullet[]
+  signalsAnalysed: number
+  generatedAt: string
+  note: string | null
 }
 
 export interface Signal {
@@ -20,8 +41,13 @@ export interface Signal {
   action: string | null
   sector: string
   source: string
+  /** Original posting URL when available; null when missing or not http(s). */
+  sourceUrl: string | null
   cycle: string
   conf: number
+  /** When the scraper collected this. Lets a reader tell a posting found in
+   *  this run from one carried over from an earlier run in the same window. */
+  capturedAt: string | null
 }
 
 export interface VelocityRow {
@@ -63,6 +89,55 @@ export type WatchlistCompany = {
 export type WatchlistResponse = {
   total: number
   companies: WatchlistCompany[]
+}
+
+// ---------- Mode Publish (api/publish_api.py) ----------
+
+export interface ReportSection {
+  id: string
+  position: number
+  heading: string
+  body: string
+  /** 'generated' is computed from signals; 'manual' must be written by a human. */
+  source: 'generated' | 'manual'
+  approved: boolean
+  approvedAt: string | null
+  approvedBy: string | null
+  editedAt: string | null
+  /** True once a human has changed what the generator wrote. */
+  edited: boolean
+  empty: boolean
+  /** The deterministic prose this section was computed from, before any rewrite. */
+  computedBody: string
+  /** True when Gemini reworded this section rather than shipping the computed text. */
+  rewritten: boolean
+}
+
+export interface ReportSummary {
+  id: string
+  quarter: string
+  title: string
+  status: 'draft' | 'approved'
+  generatedAt: string
+  signalsAnalysed: number
+  approvedAt: string | null
+  approvedBy: string | null
+  sectionsApproved: number
+  sectionsTotal: number
+  /** Whether a language model wrote the wording. Figures are computed either way. */
+  proseSource: 'computed' | 'gemini'
+}
+
+export interface Report extends ReportSummary {
+  windowFrom: string | null
+  windowTo: string | null
+  sections: ReportSection[]
+  /** Why the computed wording was kept, when it was — quota, key, or a rewrite
+   *  that introduced figures the data does not support. */
+  proseNote: string | null
+  /** Headings still blocking sign-off, named so the reviewer need not hunt. */
+  outstanding: string[]
+  canApprove: boolean
 }
 
 // ---------- Mode Push (api/push_api.py) ----------
@@ -130,6 +205,7 @@ export interface FeedQuery {
   offset: number
   region?: string
   cycle?: string
+  source?: string
   q?: string
 }
 
@@ -141,6 +217,9 @@ export interface FeedPayload {
   totalClassified: number
   /** Every row ever collected, including any not yet classified. */
   scrapedAllTime: number
+  /** Every source the feed can be filtered to, read from the data. Drives the
+   *  filter buttons so they cannot drift from what is actually collectable. */
+  sources: string[]
   limit: number
   offset: number
 }
@@ -159,13 +238,115 @@ export interface DigestPayload {
   week: string
   weekLabel: string
   generatedAt: string
-  kpis: {
-    rolesThisWeek: Kpi
-    newSignals: Kpi
-    newNames: Kpi
-    pushQueries: Kpi
-  }
+  collection: Collection
+  /** Null when the week produced none. The section is then omitted —
+   *  there is deliberately no computed substitute. */
+  marketPulse: MarketPulse | null
   signals: Signal[]
   velocity: VelocityRow[]
   newNames: NewName[]
 }
+
+// ---------- Admin ----------
+
+/** A person who can sign in. `source` says whether this screen can change it:
+ *  'database' rows are editable, 'environment' grants come from ALLOWED_EMAILS
+ *  and need a config change plus a restart. */
+export interface AccessUser {
+  email: string
+  role: 'admin' | 'member'
+  addedBy: string | null
+  addedAt: string | null
+  note: string | null
+  lastSeen: string | null
+  source: 'database' | 'environment'
+}
+
+export interface AccessPayload {
+  users: AccessUser[]
+  envGrants: AccessUser[]
+  /** Workspace domain admitted wholesale as members, if configured. */
+  domain: string | null
+  roles: string[]
+  you: string
+  /** Set after a revoke that did not actually close every door. */
+  warning?: string | null
+}
+
+export type SourceStatus = 'ok' | 'stale' | 'never_run' | 'not_configured' | 'retired'
+
+export interface SourceHealth {
+  /** Whether this source ships switched on. A source that is off for a
+   *  documented reason must not look like one switched off by accident. */
+  defaultEnabled: boolean
+  /** Why it ships off, when it does. Shown beside the toggle and repeated as a
+   *  warning if somebody switches it on. */
+  offReason: string | null
+  name: string
+  label: string
+  market: string
+  kind: string
+  status: SourceStatus
+  note: string | null
+  lastSeen: string | null
+  totalRecords: number
+  last7Days: number
+  lastRunRecords: number
+  pending: number
+  runDays: number
+  /** Whether the next scrape will use this source. Distinct from `status`,
+   *  which describes what it has been doing — a source can be collecting
+   *  healthily and still be switched off for the next run. */
+  enabled: boolean
+  changedBy: string | null
+  changedAt: string | null
+}
+
+export interface SourcesPayload {
+  sources: SourceHealth[]
+  staleAfterDays: number
+  perSourceLimit: number
+  totalRecords: number
+  /** How many sources the next scrape will use. Zero is a legitimate choice
+   *  — it is how collection is paused — but the UI must say so, or an empty
+   *  week reads as a broken pipeline. */
+  enabledCount: number
+  /** Set after switching on a source that ships off, explaining what was just
+   *  turned on. Not an error — the request succeeded. */
+  warning?: string | null
+}
+
+/** One pipeline run, however it was started. */
+export interface PipelineRun {
+  id: string
+  trigger: 'schedule' | 'manual' | 'cli'
+  dueAt: string | null
+  startedAt: string
+  finishedAt: string | null
+  status: 'running' | 'ok' | 'failed'
+  startedBy: string | null
+  collected: number | null
+  note: string | null
+}
+
+export interface SchedulePayload {
+  enabled: boolean
+  dayOfWeek: number
+  hour: number
+  minute: number
+  timezone: string
+  changedBy: string | null
+  changedAt: string | null
+  describe: string
+  /** Computed on the server: "Monday 05:00 in Sydney" depends on that zone's
+   *  daylight-saving rules, not on the rules of the browser's own zone. */
+  nextRunAt: string | null
+  dayNames: string[]
+  graceHours: number
+  /** Whether any process is actually watching this schedule. A time set on a
+   *  server with SCHEDULER_ENABLED unset looks right and never fires. */
+  schedulerRunning: boolean
+  activeRun: PipelineRun | null
+  history: PipelineRun[]
+}
+

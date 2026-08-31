@@ -5,7 +5,7 @@ name: Deploy main
 #
 # Runs only after CI passes, so a red build never reaches the server.
 #
-# Like the preview workflows, this degrades gracefully: with no PROD_HOST or
+# Degrades gracefully: with no PROD_HOST or
 # DEPLOY_SSH_KEY configured it skips, so the repo is safe to push before the
 # server exists.
 
@@ -198,6 +198,9 @@ jobs:
             ADZUNA_APP_KEY=${{ secrets.ADZUNA_APP_KEY }}
             ADZUNA_COUNTRY=${{ vars.ADZUNA_COUNTRY || 'au' }}
             ADZUNA_QUERIES=${{ vars.ADZUNA_QUERIES }}
+            PNGWORKFORCE_BASE_URL=${{ vars.PNGWORKFORCE_BASE_URL }}
+            SEEK_BASE_URL=${{ vars.SEEK_BASE_URL }}
+            SEEK_PATHS=${{ vars.SEEK_PATHS }}
             GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }}
             GOOGLE_CLIENT_SECRET=${{ secrets.GOOGLE_CLIENT_SECRET }}
             SESSION_SECRET=${{ secrets.SESSION_SECRET }}
@@ -208,6 +211,10 @@ jobs:
             # cannot complete and the dashboard would be unreachable. Flip it
             # back to false the moment the domain and certificate are in place.
             AUTH_DISABLED=${{ vars.PROD_AUTH_DISABLED || 'false' }}
+            # The weekly pipeline runs itself on this server. Set the variable
+            # to false to stop it without a redeploy of the code; the day and
+            # time are set in the Admin panel.
+            SCHEDULER_ENABLED=${{ vars.PROD_SCHEDULER_ENABLED || 'true' }}
             ENVEOF
 
             docker compose -p mios -f docker-compose.prod.yml pull

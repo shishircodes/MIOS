@@ -31,6 +31,22 @@ services:
       ADZUNA_COUNTRY: ${ADZUNA_COUNTRY:-au}
       ADZUNA_QUERIES: ${ADZUNA_QUERIES:-}
 
+      # Scrape targets. Defaulted in config/settings.py, listed here because a
+      # source silently collecting nothing because the container never received
+      # a URL is exactly the failure this file should make visible.
+      PNGWORKFORCE_BASE_URL: ${PNGWORKFORCE_BASE_URL:-}
+      SEEK_BASE_URL: ${SEEK_BASE_URL:-}
+      SEEK_PATHS: ${SEEK_PATHS:-}
+
+      # Whether this process runs the weekly pipeline by itself. Deliberately
+      # an environment variable and not a database setting: it answers "is this
+      # the process that runs it?", which is a property of the deployment, not
+      # a preference. Set it here and nowhere else — a second container sharing
+      # this database would otherwise scrape at the same moment.
+      #
+      # The day and time themselves are set in the Admin panel, not here.
+      SCHEDULER_ENABLED: ${SCHEDULER_ENABLED:-true}
+
       # Public URLs, as the browser sees them — i.e. whatever your TLS layer
       # presents, not the container ports below.
       WEB_APP_URL: ${WEB_APP_URL}

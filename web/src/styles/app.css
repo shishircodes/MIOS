@@ -489,7 +489,11 @@ input, textarea, select { font-family: inherit; }
 }
 .vel-head .wk { font-size: 17px; font-weight: 600; color: var(--ink); flex: none; }
 .vel-rail { height: 5px; background: var(--paper-2); }
-.vel-rail > span { display: block; height: 100%; background: var(--teal); }
+.vel-rail > span {
+  display: block; height: 100%; background: var(--teal);
+  /* Grown with scaleX by lib/motion.ts, so it must anchor at the left edge. */
+  transform-origin: left center;
+}
 .vel-meta {
   display: flex; align-items: center; gap: 7px;
   font-family: var(--mono); font-size: 11px; color: var(--ink-3); letter-spacing: 0.03em;
@@ -613,6 +617,101 @@ input, textarea, select { font-family: inherit; }
   padding: 12px 16px; border-top: 1px solid var(--line-2); background: var(--surface-2);
 }
 .pager-status { font-size: 11.5px; letter-spacing: 0.06em; color: var(--ink-3); }
+
+.prose-source {
+  margin: -8px 0 14px; font-family: var(--mono); font-size: 11px;
+  letter-spacing: 0.05em; color: var(--ink-3);
+}
+
+/* ---------- Mode Publish: the document shell ----------
+   Contents, the document, and the review rail. The middle column scrolls on its
+   own so the contents list and the approve button stay reachable in a long
+   report — the reviewer works section by section and should never have to
+   scroll back up to act on what they just read. */
+/* The report is the one screen that is a document workspace rather than a
+   feed, so it is allowed past the 1280px the other pages sit at. On a 1440p
+   monitor the old cap left a small panel adrift in the middle of the screen. */
+.page.page-wide { max-width: 1720px; }
+
+.doc-shell {
+  display: grid;
+  grid-template-columns: 210px minmax(0, 1fr) 260px;
+  border: 1px solid var(--line-2);
+  background: var(--surface);
+  overflow: hidden;
+}
+@media (min-width: 1600px) {
+  .doc-shell { grid-template-columns: 250px minmax(0, 1fr) 320px; }
+  .doc-body { padding: 44px 64px; }
+}
+@media (max-width: 1150px) {
+  .doc-shell { grid-template-columns: minmax(0, 1fr); }
+  .doc-toc, .doc-rail { border: none !important; border-top: 1px solid var(--line-2) !important; }
+  .doc-body { max-height: none !important; }
+}
+
+.doc-label {
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.10em;
+  text-transform: uppercase; color: var(--ink-3); margin-bottom: 10px;
+}
+
+.doc-toc { border-right: 1px solid var(--line-2); padding: 16px 12px; background: var(--surface-2); }
+.doc-toc ol { list-style: none; padding: 0; margin: 0; }
+.doc-toc li {
+  display: flex; align-items: baseline; gap: 7px;
+  padding: 6px 6px; font-size: 12.5px; color: var(--ink-2);
+  border-left: 2px solid transparent;
+}
+.doc-toc li.done { border-left-color: var(--teal); color: var(--ink); }
+.doc-toc .num { font-size: 10px; color: var(--muted); flex: none; }
+.doc-toc .toc-heading { flex: 1; min-width: 0; }
+.doc-toc .toc-state { color: var(--teal-3); font-size: 12px; flex: none; }
+
+.doc-body {
+  padding: 38px 52px; background: var(--surface); line-height: 1.65;
+  overflow-y: auto;
+  /* Was a flat 760px, which on a tall screen scrolled the report inside a box
+     less than half the height available. Tracks the viewport instead, with a
+     floor so it does not collapse on a laptop. */
+  /* `vh` is measured against the real viewport, so under the large-display
+     zoom below this would resolve taller than the screen. The divisor keeps
+     the report inside the window at every scale. */
+  max-height: max(560px, calc((100vh / var(--ui-zoom, 1)) - 250px));
+}
+/* Width is for the layout, not the prose: a paragraph spanning the full column
+   on a wide monitor is harder to read, not easier. */
+.doc-body > h1,
+.doc-body > .muted,
+.doc-section p,
+.doc-section ul,
+.doc-section ol { max-width: 84ch; }
+.doc-body > h1 {
+  font-family: var(--display); font-weight: 700; font-size: 27px;
+  letter-spacing: -0.02em; margin: 0 0 4px;
+}
+.doc-section { margin-top: 26px; padding-top: 14px; border-top: 1px solid var(--line); }
+.doc-section-h { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.doc-section-h h2 {
+  font-family: var(--display); font-weight: 600; font-size: 17px; margin: 0;
+}
+.doc-section-tools { display: flex; gap: 6px; flex: none; }
+.doc-section p { margin: 10px 0; }
+.doc-empty { color: var(--muted); font-style: italic; }
+.doc-section-actions { display: flex; gap: 8px; margin-top: 10px; }
+.doc-section .textarea { margin-top: 10px; min-height: 190px; font-size: 14px; line-height: 1.6; }
+
+.doc-rail { border-left: 1px solid var(--line-2); padding: 16px 14px; background: var(--surface-2); }
+.report-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.report-list button {
+  width: 100%; display: flex; justify-content: space-between; gap: 8px;
+  padding: 6px 8px; border: 1px solid transparent; background: none;
+  font-family: var(--sans); font-size: 12.5px; color: var(--ink-2); cursor: pointer;
+  text-align: left;
+}
+.report-list button:hover { background: var(--teal-bg); color: var(--teal-3); }
+.report-list button.active { background: var(--teal-2); color: var(--on-teal); }
+.report-list button.active .muted { color: rgba(255,255,255,0.85); }
+.report-list button:focus-visible { outline: 2px solid var(--teal); outline-offset: -2px; }
 
 /* ---------- Loading ---------- */
 .loading {
@@ -902,4 +1001,474 @@ width: 100%;
 max-width: 100%;
 overflow-x: auto;
 }
+}
+/* ---------- Admin: source health & access ----------
+   Status is never carried by colour alone (WCAG 1.4.1): every chip and dot is
+   accompanied by a word. The chip borders sit at 3:1 against their fill so the
+   boundary itself passes 1.4.11. */
+.status-chip {
+  display: inline-block; font-family: var(--mono); font-size: 11px;
+  letter-spacing: 0.06em; text-transform: uppercase; padding: 3px 8px;
+  border: 1px solid var(--line-2); white-space: nowrap;
+}
+.status-chip.ok   { background: var(--moss-bg);  color: var(--moss);      border-color: rgba(15,110,61,0.35); }
+.status-chip.warn { background: var(--amber-bg); color: var(--amber-ink); border-color: var(--amber-line); }
+.status-chip.off  { background: var(--paper-2);  color: var(--ink-3);     border-color: var(--line-3); }
+
+/* Six columns now: the mock had no status or per-run figure. */
+.src-row { grid-template-columns: 150px 1fr 116px 96px 76px 88px 96px; }
+.src-head {
+  font-family: var(--mono); font-size: 10.5px; text-transform: uppercase;
+  letter-spacing: 0.08em; color: var(--muted); background: var(--paper-2);
+}
+.src-note { font-size: 11.5px; color: var(--muted); margin-top: 2px; line-height: 1.35; }
+.src-row .num .src-note { text-align: right; }
+
+/* Four columns, not six: "added by" and "added" read as one fact, and the
+   last sign-in belongs under the address rather than in a column of its own. */
+.person-row {
+  display: grid; grid-template-columns: 1fr 170px 240px 110px;
+  gap: 14px; padding: 10px 16px; border-bottom: 1px solid var(--line);
+  align-items: center; font-size: 13.5px;
+}
+.person-head {
+  font-family: var(--mono); font-size: 10.5px; text-transform: uppercase;
+  letter-spacing: 0.08em; color: var(--muted); background: var(--paper-2);
+}
+.person-row .name { font-weight: 500; word-break: break-all; }
+.row-sub { font-size: 11.5px; font-weight: 400; color: var(--muted); margin-top: 2px; }
+.row-how { font-size: 12.5px; line-height: 1.4; }
+.row-action { display: flex; justify-content: flex-end; align-items: center; }
+.add-actions { gap: 6px; }
+
+/* The inline add row, revealed by the header button. */
+.add-row { background: var(--teal-bg); border-bottom: 1px solid var(--teal-line); }
+.add-row .input, .add-row .select { padding: 6px 9px; font-size: 13px; }
+
+/* A lock rather than a disabled Remove: the action is not unavailable right
+   now, it lives in the server configuration. */
+.lock { display: inline-flex; color: var(--muted); padding: 4px; }
+.lock .ico { display: block; }
+
+.you-chip {
+  margin-left: 8px; font-family: var(--mono); font-size: 10.5px;
+  text-transform: uppercase; letter-spacing: 0.06em; padding: 2px 6px;
+  background: var(--teal-bg); color: var(--teal-3); border: 1px solid var(--teal);
+}
+.role-select { padding: 5px 8px; font-size: 13px; width: 100%; }
+
+/* The domain rule: one line plus an expandable, because it is read far less
+   often than the list it sits under. */
+.rule-note { padding: 14px 16px; border: 1px solid var(--line-2); }
+.rule-note > p { font-size: 13.5px; line-height: 1.55; color: var(--ink-3); margin: 0; }
+
+.prose-note { padding: 4px 16px 16px; max-width: 68ch; }
+.prose-note p { font-size: 13.5px; line-height: 1.6; color: var(--ink-3); margin: 0 0 10px; }
+.prose-note p:last-child { margin-bottom: 0; }
+
+.notice {
+  padding: 10px 14px; margin-bottom: 16px; font-size: 13.5px;
+  border: 1px solid var(--line-2); border-left-width: 3px;
+}
+.notice.ok  { background: var(--moss-bg);  color: var(--moss);   border-left-color: var(--moss); }
+.notice.err { background: var(--crimson-bg); color: var(--crimson); border-left-color: var(--crimson); }
+/* Succeeded, but the reader needs to know what they just did — e.g. switching
+   on a source that ships off. Amber rather than red: nothing went wrong. */
+.notice.warn { background: var(--amber-bg); color: var(--amber-ink); border-left-color: var(--amber-line); }
+
+/* Shown when a member reaches an Admin URL directly. */
+.empty-state { text-align: center; padding: 72px 24px; max-width: 46ch; margin: 0 auto; }
+.empty-state .ico { display: inline-block; color: var(--muted); }
+.empty-state h2 { font-size: 18px; margin: 12px 0 8px; }
+.empty-state p { font-size: 14px; line-height: 1.6; color: var(--ink-3); margin: 0; }
+
+/* Text for screen readers only. Clipped rather than display:none, which would
+   remove it from the accessibility tree along with the visual layout. */
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0;
+}
+
+/* Neutral connection dot, for while the first request is still in flight. */
+.dot-muted {
+  display: inline-block; width: 7px; height: 7px;
+  background: var(--muted); vertical-align: middle;
+}
+
+/* ---------- Weekly digest: what was collected ----------
+   Replaces a four-tile KPI strip. The tiles each demanded a headline number and
+   a delta whether or not one existed, which is how two of them ended up showing
+   the same variable and a third an arrow with nothing behind it. */
+.collection {
+  display: grid;
+  grid-template-columns: minmax(210px, 0.9fr) minmax(280px, 1.4fr) minmax(190px, 0.85fr);
+  gap: 28px; align-items: start;
+  border: 1px solid var(--line-2);
+  /* A hairline of the accent along the top, so the band reads as a masthead for
+     the page rather than another card. */
+  border-top: 3px solid var(--teal-2);
+  padding: 18px 20px; margin-bottom: 18px;
+  background:
+    linear-gradient(180deg, var(--teal-bg) 0%, rgba(255,255,255,0) 46%),
+    var(--surface);
+}
+
+.collection-figure { display: flex; align-items: baseline; gap: 9px; margin-top: 8px; }
+.collection-figure strong {
+  font-family: var(--display); font-size: 40px; line-height: 0.9;
+  letter-spacing: -0.02em; color: var(--ink);
+  /* Reserve the width of the final value so the count-up cannot reflow the
+     line beside it on every frame. */
+  min-width: 2ch; display: inline-block;
+}
+.collection-figure span { font-size: 13px; color: var(--ink-3); }
+.collection-kinds { margin-top: 10px; font-size: 12.5px; color: var(--muted); }
+.collection-kinds .tnum { color: var(--ink-3); font-weight: 600; }
+
+/* ----- Region split ----- */
+.collection-split { padding-top: 2px; }
+
+.split-labels { display: flex; margin-bottom: 7px; }
+.split-labels > span {
+  display: flex; flex-direction: column; gap: 1px;
+  min-width: 0; padding-right: 10px;
+  /* Aligns each label with the segment it describes. */
+  border-left: 2px solid transparent;
+}
+.split-labels > span:first-child { border-left-color: var(--teal-2); padding-left: 8px; }
+.split-labels > span:last-child { border-left-color: var(--navy); padding-left: 8px; }
+.split-labels em {
+  font-style: normal; font-family: var(--mono); font-size: 10px;
+  letter-spacing: 0.09em; text-transform: uppercase; color: var(--muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.split-labels b { font-size: 17px; line-height: 1.1; color: var(--ink); }
+.split-labels i { font-style: normal; font-size: 11px; color: var(--muted); }
+
+.split-bar { display: flex; height: 30px; width: 100%; background: var(--paper-2); }
+.split-bar .seg { position: relative; overflow: hidden; }
+.split-bar .seg + .seg { border-left: 2px solid var(--surface); }
+.split-bar .fill {
+  position: absolute; inset: 0;
+  transform-origin: left center;
+  /* Only ever driven by scaleX — see lib/motion.ts. */
+}
+.split-bar .seg.au .fill {
+  background: linear-gradient(105deg, var(--teal-3) 0%, var(--teal-2) 62%, #12A3A1 100%);
+}
+.split-bar .seg.png .fill {
+  background: var(--navy);
+}
+/* Diagonal hatching on the second segment. It carries the same information as
+   the colour difference, which matters because the two fills are only ~2.2:1
+   apart — the pattern, not the hue, is what separates them. */
+.split-bar .seg.png .fill::after {
+  content: ''; position: absolute; inset: 0;
+  background: repeating-linear-gradient(
+    115deg,
+    rgba(255,255,255,0.16) 0 2px,
+    rgba(255,255,255,0) 2px 7px
+  );
+}
+
+/* ----- The two derived figures ----- */
+.collection-facts { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.collection-facts li {
+  display: grid; grid-template-columns: auto 1fr; gap: 10px; align-items: baseline;
+  padding-left: 10px; border-left: 2px solid var(--line-2);
+}
+.collection-facts b {
+  font-family: var(--display); font-size: 20px; line-height: 1;
+  color: var(--ink); min-width: 2ch;
+}
+.collection-facts span { font-size: 12.5px; color: var(--ink-3); line-height: 1.35; }
+
+@media (max-width: 1000px) {
+  .collection { grid-template-columns: 1fr; gap: 18px; }
+  .collection-figure strong { font-size: 34px; }
+}
+
+/* Motion is opt-out at the source too (lib/motion.ts short-circuits), but the
+   bar is sized by scaleX, so its resting state must be correct without JS. */
+@media (prefers-reduced-motion: reduce) {
+  .split-bar .fill { transform: none !important; }
+}
+
+/* Neutral connection dot, for while the first request is still in flight. */
+.dot-muted {
+  display: inline-block; width: 7px; height: 7px;
+  background: var(--muted); vertical-align: middle;
+}
+
+/* ---------- Weekly digest: what was collected ----------
+   Replaces a four-tile KPI strip. The tiles each demanded a headline number and
+   a delta whether or not one existed, which is how two of them ended up showing
+   the same variable and a third an arrow with nothing behind it. */
+.collection {
+  display: grid; grid-template-columns: minmax(220px, 1fr) minmax(240px, 1.2fr) minmax(200px, 1fr);
+  gap: 24px; align-items: start;
+  border: 1px solid var(--line-2); padding: 16px 18px; margin-bottom: 18px;
+  background: var(--surface);
+}
+.collection-figure { display: flex; align-items: baseline; gap: 8px; margin-top: 6px; }
+.collection-figure strong { font-family: var(--display); font-size: 30px; line-height: 1; }
+.collection-figure span { font-size: 13px; color: var(--ink-3); }
+.collection-kinds { margin-top: 8px; font-size: 12.5px; color: var(--muted); }
+.collection-kinds .tnum { color: var(--ink-3); font-weight: 500; }
+
+.collection-split { padding-top: 2px; }
+.split-bar { display: flex; height: 12px; width: 100%; background: var(--paper-2); }
+.split-bar .seg.au { background: var(--teal-2); }
+.split-bar .seg.png { background: var(--navy); }
+/* The two fills are only ~2.2:1 apart, so the join would be hard to place by
+   colour alone. The hairline makes the boundary structural instead; the legend
+   below carries both figures in words, so nothing here depends on colour. */
+.split-bar .seg + .seg { border-left: 2px solid var(--surface); }
+.split-legend {
+  display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 9px;
+  font-size: 12.5px; color: var(--ink-3);
+}
+.split-legend b { margin-left: 4px; color: var(--ink); }
+.swatch { display: inline-block; width: 9px; height: 9px; margin-right: 6px; }
+.swatch.au { background: var(--teal-2); }
+.swatch.png { background: var(--navy); }
+
+.collection-facts { list-style: none; margin: 0; padding: 0; display: grid; gap: 7px; }
+.collection-facts li { font-size: 13px; color: var(--ink-3); line-height: 1.4; }
+.collection-facts b { font-family: var(--mono); color: var(--ink); margin-right: 3px; }
+
+@media (max-width: 900px) {
+  .collection { grid-template-columns: 1fr; gap: 16px; }
+}
+
+/* ---------- Weekly digest: Market Pulse ----------
+   The one section a model writes rather than counts. Interpretation bullets are
+   marked, because a reader acting on this is entitled to know which sentences
+   are measurements and which are a reading of them. */
+/* Market Pulse is the only section on the page a person wrote rather than a
+   query counted, so it is the one section allowed to look like prose. It sits
+   between the collection band and forty signal rows, and previously read as a
+   third bordered box between two others. */
+.pulse {
+  border: 1px solid var(--teal-line);
+  border-top: 4px solid var(--teal-2);
+  padding: 20px 26px 24px; margin-bottom: 20px;
+  background:
+    linear-gradient(180deg, var(--teal-bg) 0%, rgba(255,255,255,0) 58%),
+    var(--surface);
+}
+.pulse-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 12px; margin-bottom: 14px;
+  border-bottom: 1px solid var(--teal-line); padding-bottom: 10px;
+}
+.pulse-head .kicker { font-size: 12px; color: var(--teal-3); }
+.pulse-head .muted { font-size: 12px; }
+
+.pulse-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 14px; }
+.pulse-item {
+  display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+  /* Larger than body text on purpose. This is the read of the week; the tables
+     around it are the evidence for it. */
+  font-size: 15.5px; line-height: 1.62; color: var(--ink);
+  padding-left: 20px; position: relative;
+}
+.pulse-item::before {
+  content: ''; position: absolute; left: 0; top: 0.6em;
+  width: 8px; height: 8px; background: var(--teal-2);
+}
+/* Interpretation is marked three ways — hollow marker, lighter rule down the
+   left, and the tag — so telling a reading from a measurement never depends on
+   noticing one small label. */
+.pulse-item.interpretation {
+  color: var(--ink-3);
+  border-left: 2px solid var(--line-2); margin-left: -20px; padding-left: 38px;
+}
+.pulse-item.interpretation::before {
+  left: 20px; background: transparent; border: 1.5px solid var(--muted);
+}
+.pulse-text { flex: 1 1 24ch; min-width: 0; }
+.pulse-tag {
+  font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.07em;
+  text-transform: uppercase; padding: 3px 8px; white-space: nowrap;
+  background: var(--paper-2); color: var(--ink-3); border: 1px dashed var(--line-3);
+}
+
+
+/* When a signal was collected. Quiet by default — it distinguishes rows within
+   a window rather than being a thing anyone scans for. */
+.captured {
+  font-family: var(--mono); font-size: 11px; color: var(--muted);
+  white-space: nowrap;
+}
+.signal .meta-col .captured { display: block; margin-top: 2px; }
+
+/* ---------- Text size on large displays ----------
+   Every font-size in this stylesheet is an absolute px value. That reads well
+   at 1366x768 and small at 2560x1440, where the same 13.5px occupies roughly
+   half the share of the screen. The textbook fix is converting ~120 size
+   declarations to rem and scaling the root; this reaches the same place in two
+   rules and cannot drift out of step with them.
+
+   `zoom`, not `transform: scale()` — zoom reflows, so layout, hit targets and
+   scrollbars all grow with the text instead of being stretched over it. */
+@media (min-width: 1700px) {
+  .app { zoom: 1.08; --ui-zoom: 1.08; }
+}
+@media (min-width: 2200px) {
+  .app { zoom: 1.15; --ui-zoom: 1.15; }
+}
+
+/* ---------- Source on/off switch (Admin) ----------
+   State is carried by the word as much as the track position, so it never
+   depends on spotting a small colour or alignment difference. */
+.src-row { grid-template-columns: 140px 1fr 108px 90px 70px 82px 88px 74px; }
+.src-toggle { display: flex; justify-content: flex-start; }
+.switch { display: inline-flex; align-items: center; gap: 7px; cursor: pointer; }
+.switch input { position: absolute; opacity: 0; width: 0; height: 0; }
+.switch-track {
+  position: relative; width: 30px; height: 16px; flex: none;
+  background: var(--paper-2); border: 1px solid var(--line-3);
+  transition: background 120ms, border-color 120ms;
+}
+.switch-track::after {
+  content: ''; position: absolute; top: 1px; left: 1px;
+  width: 12px; height: 12px; background: var(--muted);
+  transition: transform 120ms, background 120ms;
+}
+.switch input:checked + .switch-track { background: var(--teal-bg); border-color: var(--teal-2); }
+.switch input:checked + .switch-track::after { transform: translateX(14px); background: var(--teal-2); }
+.switch input:focus-visible + .switch-track { outline: 2px solid var(--teal); outline-offset: 2px; }
+.switch input:disabled ~ * { opacity: 0.5; cursor: not-allowed; }
+.switch-label {
+  font-family: var(--mono); font-size: 11px; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--muted); min-width: 3ch;
+}
+.switch input:checked ~ .switch-label { color: var(--teal-3); }
+
+/* ---------- Automatic run (Admin · Sources) ---------- */
+
+.sched-form {
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.sched-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13.5px;
+  cursor: pointer;
+}
+
+.sched-fields {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.sched-fields[aria-disabled='true'] {
+  opacity: 0.5;
+}
+
+.sched-fields label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sched-fields .fld {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.sched-fields select,
+.sched-fields input[type='time'] {
+  font: inherit;
+  font-size: 13.5px;
+  padding: 6px 8px;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+
+.sched-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 12px 16px;
+  border-top: 1px solid var(--line);
+  font-size: 13px;
+}
+
+/* The run history. Same column rhythm as .src-row so the two tables on this
+   page read as one page rather than two designs. */
+.run-row {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr 1.4fr 0.8fr 1.4fr;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 16px;
+  border-top: 1px solid var(--line);
+  font-size: 13px;
+}
+
+.run-head {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.run-row .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 760px) {
+  .run-row {
+    grid-template-columns: 1fr 1fr;
+    row-gap: 4px;
+  }
+}
+
+/* Why a source ships switched off. Collapsed by default — the explanation is
+   long, and only matters to whoever is about to change the setting. */
+.src-why {
+  /* A direct child of the .src-row grid, spanning every column: the toggle
+     cell it used to live in is 80px wide. */
+  grid-column: 1 / -1;
+  margin-top: 4px;
+  font-size: 12px;
+}
+
+.src-why summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.src-why summary:hover {
+  color: var(--ink);
+}
+
+.src-why p {
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  background: var(--amber-bg);
+  border-left: 2px solid var(--amber-line);
+  color: var(--ink);
+  line-height: 1.5;
+  max-width: 46em;
 }

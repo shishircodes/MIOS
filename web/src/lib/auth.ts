@@ -9,6 +9,9 @@ export interface MiosUser {
   authDisabled?: boolean
 }
 
+/** 'admin' reaches the Admin section; 'member' does not. Null when signed out. */
+export type Role = 'admin' | 'member'
+
 export interface SessionInfo {
   authenticated: boolean
   user: MiosUser | null
@@ -17,9 +20,14 @@ export interface SessionInfo {
   oauthConfigured: boolean
   /** Workspace domain the server restricts sign-in to, if configured. */
   domain: string | null
-  /** True when specific non-domain accounts are also permitted (dev allowlist). */
-  hasAllowlist: boolean
+  /** True when accounts outside the domain are also permitted — whether named
+   *  in ALLOWED_EMAILS or granted a row on the People & access screen. */
+  hasExceptions: boolean
   loginUrl: string
+  role: Role | null
+  /** Mirrors role === 'admin'. The server decides this; the UI only reflects it,
+   *  and every admin endpoint re-checks server-side. */
+  isAdmin: boolean
 }
 
 /** Thrown by fetchJson when the API says we're not signed in. */

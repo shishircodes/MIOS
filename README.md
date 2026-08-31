@@ -159,6 +159,11 @@ are deduplicated on `source_url`, so re-running does not create duplicates.
 | `python -m loader.rematch --dry-run` | Reports which signals would change watchlist tier under the current matching rules. |
 | `python -m loader.rematch` | Recomputes `watchlist_tier` and `is_new_prospect` on stored signals. **No Gemini calls** — the watchlist match was always a string comparison, so changing the rules or the watchlist does not require reclassifying. |
 
+> Mode Publish added the `reports` and `report_sections` tables, roles added
+> `app_users`, and Market Pulse added `digest_pulse`. Run `loader.check --init`
+> against Neon before deploying any of them — nothing applies a schema change to
+> production on your behalf.
+
 ### Evaluation
 
 | Command | What it does |
@@ -207,6 +212,17 @@ Signals are classified into six categories — `hiring_velocity`, `project`,
 `leadership`, `financial`, `competitive`, `market_intel` — and matched against a
 20-company watchlist of Easy Skill's actual clients. The output is a dashboard
 and a Slack digest.
+
+**Mode Publish** turns the same intelligence outward. It assembles a quarterly
+client-facing report — hiring trends across both markets — with every figure
+counted from the signals collected in that quarter. Gemini then rewrites the wording — one call for the whole
+report, on the same daily budget the classifier uses — but never the figures:
+every number in its output is checked against the computed text, and a section
+that introduces one is discarded. If the quota is gone the computed wording
+ships and the report says so. A reviewer then works through it section by
+section, and the report cannot be signed off until each one is approved. **MIOS has no endpoint that distributes anything**: §8.3 of the
+project spec requires that gate to be architecturally enforced, so export hands
+the document to a person and distribution happens outside the system.
 
 **Mode Push** runs on demand. A consultant's contract ends in 30 days; the
 business development team submits their profile and MIOS replies with a ranked
@@ -418,11 +434,12 @@ Timestamps stay ISO-8601 `TEXT` rather than `timestamptz`: the strings sort
 chronologically, which is all the code needs, and it keeps one schema instead of
 two.
 
-Three tables: `signals`, `watchlist`, and `candidate_profiles` (Mode Push).
+Eight tables: `signals`, `watchlist`, `kv_store`, `candidate_profiles` (Mode
+Push), `reports` and `report_sections` (Mode Publish), `app_users` (who may sign
+in, and with what role), and `digest_pulse` (the weekly Market Pulse).
 
 > **Schema changes need `python -m loader.check --init` run against Neon.** The
-> PR preview workflow applies it automatically to preview branches, but nothing
-> applies it to production on your behalf.
+> Nothing applies it to production on your behalf.
 
 `candidate_profiles` stores only what matching consumes, plus enough identity
 for the BD team to know whose profile it is. These are real people; contact
@@ -491,8 +508,108 @@ Appending it again produces Google's opaque `invalid_client` error.
 | `API_BASE_URL` / `WEB_APP_URL` | Where the API and dashboard live |
 | `OAUTH_REDIRECT_URI` | Defaults to `<API_BASE_URL>/auth/callback`; must match the console exactly |
 | `ALLOWED_GOOGLE_DOMAIN` | Workspace domain checked against the verified `hd` claim |
-| `ALLOWED_EMAILS` | Comma-separated allowlist bypassing the domain check, for dev accounts |
+| `ALLOWED_EMAILS` | Comma-separated allowlist bypassing the domain check. Optional — the People & access screen does the same job without a restart — but still honoured, and listed there so it is not an invisible door |
 | `AUTH_DISABLED` | Development bypass. Never in a deployed environment |
+| `SCHEDULER_ENABLED` | Whether this process runs the weekly pipeline by itself. Off by default; set on the deployed API and nowhere else. The day and time are set in the Admin panel, not here |
+
+### The weekly run
+
+The pipeline runs itself. `SCHEDULER_ENABLED=true` makes a process the one that
+runs it; **Admin → Sources health → Automatic run** decides when — day, time and
+timezone, taking effect within a minute and without a redeploy. The default is
+Monday 05:00 Australia/Sydney.
+
+The scheduler is a loop inside the API container rather than cron, because the
+requirement is not only "run it on Monday" but "let an administrator change
+when". A GitHub Actions `schedule:` keeps its cron expression in a YAML file, so
+changing the time means a commit and a deploy — and scheduled workflows stop
+firing after 60 days without repository activity, which for a university project
+means the automation dies quietly some weeks after semester ends. A host crontab
+needs SSH.
+
+Three things it is careful about, each of which is a way a timer goes wrong in
+production and never in development:
+
+- **Restarts.** Every deploy restarts the container. The loop asks "has the due
+  moment passed with nothing run for it?", not "is it 05:00 now?" — the second
+  form loses the week whenever a restart lands on the scheduled minute. The
+  answer comes from `pipeline_runs.due_at`, so it survives the restart.
+- **Running late.** A missed run is picked up within 12 hours and abandoned after
+  that. The digest is labelled with the week it covers, so collecting it on
+  Friday would publish a window that does not match its own title.
+- **Where the server is.** Nothing reads the host's local clock. "Now" is
+  `datetime.now(timezone.utc)`, an absolute instant; "Monday 05:00" is built in
+  the stored IANA zone and converted to UTC. A VPS in Frankfurt and one in
+  Sydney fire at the same moment, and moving the deployment changes nothing. The
+  Admin panel shows every time in the schedule's own zone — not the browser's —
+  so it reads the same wherever it is opened from.
+- **Two at once.** A run holds a heartbeated lease. A scrape spends Gemini quota
+  against a cap of 20 calls a day and writes into `signals`; two overlapping
+  would double-spend it. A container killed mid-scrape leaves a lease that goes
+  stale after 90 minutes rather than blocking the pipeline for good.
+
+`Run now` starts a cycle immediately through the same lease, and satisfies a
+scheduled run that is still owed — pressing it at 08:00 after the server missed
+05:00 collects the week once, not twice — and the run history
+under the panel says how the last few went — which is what makes "why is there no
+digest this week?" answerable.
+
+### Market Pulse
+
+Everything else in the weekly digest is arithmetic. Market Pulse (spec §9.1) is
+the one section a model *writes*, and it follows two rules that are easy to get
+wrong.
+
+**It is generated once per pipeline run and stored.** `/api/digest` runs on every
+page load; generating there would be a Gemini call per view. `pipeline.live`
+produces it, `digest_pulse` holds it, and both the Slack digest and the dashboard
+read the stored row. Cost is one call per week. `--no-pulse` skips it.
+
+**There is no fallback to computed prose.** If the model cannot be reached, the
+section is omitted and the reason recorded in `digest_pulse.note`. Template
+arithmetic in the place a written summary belongs implies a judgement nobody
+made; an absent section is honest about what happened.
+
+Bullets are tagged `fact` or `interpretation`. The model is allowed to reason
+past the figures — "suggests shutdown preparation" — but never to invent them:
+any bullet containing a number absent from the evidence is discarded, whichever
+tag it carries. Interpretation is marked in both Slack and the dashboard, so a
+consultant can tell a measurement from a reading of one.
+
+### Roles
+
+Two roles. **Member** gets the intelligence pages; **administrator** also gets
+the Admin section — source health, model spend, and the access list itself.
+
+There are three ways in, and they differ in kind:
+
+| Route | Grants | Managed from |
+|---|---|---|
+| `ALLOWED_GOOGLE_DOMAIN` | member | Server configuration. Admits everyone at the Workspace domain, and can never grant admin |
+| `app_users` table | member **or** admin | The **Admin → People & access** screen. Works for any address, at any domain — this is how somebody outside Easy Skill gets in without widening the domain rule |
+| `ALLOWED_EMAILS` | member | Server configuration plus a restart. Left in place deliberately: removing it would lock out whoever it names on the next deploy |
+
+The People & access screen shows one list of everyone who can sign in, whichever
+route let them in — an access route nobody can see is a route nobody revokes.
+Rows from `ALLOWED_EMAILS` carry a lock instead of a Remove button, since closing
+that door takes a configuration change and a restart. The domain rule admits
+people who never appear as rows at all, so it is stated under the list.
+
+`revgames7@gmail.com` is seeded as the first administrator on an empty database,
+so a fresh deploy is never a locked room with the key inside. Seeding only fires
+when there is no administrator at all, so it cannot undo a deliberate demotion.
+The last remaining administrator cannot be demoted or removed.
+
+Hiding the Admin nav group is presentation. Every `/api/admin/*` endpoint checks
+the role server-side and answers a member with `403`.
+
+`ALLOWED_EMAILS` may be left empty. Two things key off "can anyone outside the
+domain sign in?" — the `hd` hint that filters Google's account chooser, and the
+line on the sign-in screen — and both ask `access.has_external_grants()`, which
+counts named rows as well as the environment variable. Reading the variable
+directly would make an empty one mean "domain accounts only", hiding named
+outsiders from the chooser and telling them on the sign-in page that they cannot
+get in.
 
 > **Sign-out caveat.** Because the session is a stateless signed cookie, sign-out
 > is a client-side delete — there is no server-side record to revoke. A cookie
@@ -511,8 +628,6 @@ Four workflows in `.github/workflows/`:
 | Workflow | Trigger | What it does |
 |---|---|---|
 | `ci.yml` | every PR + push to `main` | pytest against **both** SQLite and a real PostgreSQL service container, web typecheck + build, Docker images built **and started** |
-| `pr-preview.yml` | PR opened/updated | Neon branch per PR, publishes images to GHCR, deploys a preview stack, comments the URLs |
-| `pr-cleanup.yml` | PR closed/merged | deletes the Neon branch, tears down the containers |
 | `deploy-main.yml` | `main` **after CI passes** | publishes images, applies the schema, deploys to the VPS |
 
 `deploy-main.yml` chains off CI with `workflow_run`, so a red build never reaches
@@ -531,15 +646,15 @@ names neither the module nor the file.
 
 ### What a PR gets
 
-* **An isolated Neon branch** (`preview/pr-42`), copy-on-write from `main` —
-  instant, and starts with real data. Writes never touch production.
-* **Its own containers**, ports derived from the PR number (`30000+N` web,
-  `40000+N` api) so concurrent previews never collide and the URL stays stable
-  across pushes.
-* **A comment** with both URLs, updated in place rather than spamming the thread.
+Checks, not a deployment. `ci.yml` runs pytest against both SQLite and a real
+PostgreSQL service container, typechecks and builds the web app, and builds the
+Docker images — including starting the API container and polling `/api/health`,
+which is what catches an import that only fails at runtime.
 
-Until the VPS secrets exist, the preview workflows still create the branch, build
-the images, and comment what *would* have been deployed.
+There is no per-PR preview environment. It used to deploy a stack to the VPS
+with its own Neon branch; that was removed because the running cost and the
+moving parts were not earning their keep against a review that reads the diff
+and trusts the checks. Production still deploys from `main` after CI passes.
 
 ### GitHub configuration
 
@@ -549,10 +664,7 @@ Variables:
 
 | Variable | Example | Needed for |
 |---|---|---|
-| `NEON_PROJECT_ID` | `crimson-lab-12345678` | Neon branching |
-| `NEON_PARENT_BRANCH` | `main` (default) | which branch to copy from |
 | `NEON_DB_USER` / `NEON_DB_NAME` | `neondb_owner` / `neondb` | branch connection string |
-| `PREVIEW_HOST` | `203.0.113.10` | preview deploys |
 | `PROD_HOST` | VPS IP | production deploys |
 | `PROD_WEB_URL` / `PROD_API_URL` | `https://mios.example.com` | production |
 | `DEPLOY_USER` | `deploy` (default) | both |
@@ -679,7 +791,7 @@ containers work before pushing.
 │   └── adzuna.py             ← Adzuna JSON API, one query per client (AU)
 ├── loader/
 │   ├── db.py                 ← Neon PostgreSQL / SQLite adapter
-│   ├── schema.sql            ← signals + watchlist + candidate_profiles DDL
+│   ├── schema.sql            ← all seven tables, one file, both engines
 │   ├── ingest.py             ← UUID + dedupe-on-source_url ingestion
 │   ├── check.py              ← connectivity probe / schema init
 │   ├── migrate.py            ← SQLite → Neon copy
@@ -694,8 +806,11 @@ containers work before pushing.
 │   └── store.py              ← profile persistence + signal queries
 ├── api/
 │   ├── server.py             ← FastAPI app; data endpoints require auth
-│   ├── auth.py               ← Google Sign-In (OAuth2/OIDC) + require_user
+│   ├── auth.py               ← Google Sign-In (OAuth2/OIDC) + require_user/require_admin
+│   ├── access.py             ← roles, the three sign-in routes, last-admin guards
+│   ├── admin_api.py          ← /api/admin/* — access list and source health
 │   ├── digest_service.py     ← dashboard payload, windowing, velocity baseline
+│   ├── publish_api.py        ← /api/publish/* — quarterly reports and review
 │   └── push_api.py           ← /api/push/* — CV intake and matching
 ├── delivery/
 │   ├── digest.py             ← Slack mrkdwn weekly digest + ranking helpers
@@ -705,11 +820,12 @@ containers work before pushing.
 ├── pipeline/
 │   └── live.py               ← the production cycle
 ├── web/                      ← TanStack Start + React 19 dashboard
-│   └── src/routes/           ← digest, feed, push, watchlist, sources, tokens
+│   └── src/routes/           ← digest, feed, push, publish, watchlist, sources,
+│                                access, tokens
 ├── data/
 │   └── synthetic_postings.jsonl  ← 80 hand-authored labelled postings
 ├── tests/                    ← pytest; Gemini mocked, scrapers fixture-driven
-├── .github/workflows/        ← ci, pr-preview, pr-cleanup, deploy-main
+├── .github/workflows/        ← ci, deploy-main
 └── docker-compose*.yml       ← local, preview, prod
 ```
 

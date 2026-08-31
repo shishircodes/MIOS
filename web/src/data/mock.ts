@@ -32,18 +32,6 @@ export const matches = [
   { rank: 4, co: 'Eramet — Doniambo', score: 71, rel: 'TIER B', region: 'NC', sector: 'Mining', evidence: ['Client call: Q3 maintenance shutdown 10–15 contractors', 'French-speaking advantage'], action: 'Account manager intro' },
 ] as const
 
-export const sources = [
-  { name: 'pngworkforce', type: 'Apify', region: 'PNG', last: '07:02 AEST', records: 150, sla: 'OK', uptime: '100%' },
-  { name: 'au.seek.com', type: 'Apify', region: 'AU', last: '07:08 AEST', records: 581, sla: 'OK', uptime: '98%' },
-  { name: 'au.indeed.com', type: 'Apify', region: 'AU', last: '07:11 AEST', records: 248, sla: 'OK', uptime: '96%' },
-  { name: 'LinkedIn Jobs', type: 'Phantom', region: 'AU', last: '06:54 AEST', records: 142, sla: 'WARN', uptime: '82%' },
-  { name: 'ASX Announcements', type: 'API', region: 'AU', last: '07:01 AEST', records: 18, sla: 'OK', uptime: '100%' },
-  { name: 'Business Adv PNG', type: 'RSS', region: 'PNG', last: '07:00 AEST', records: 7, sla: 'OK', uptime: '100%' },
-  { name: 'Mining.com.au', type: 'RSS', region: 'AU', last: '07:00 AEST', records: 22, sla: 'OK', uptime: '100%' },
-  { name: 'AFR', type: 'RSS', region: 'AU', last: '07:00 AEST', records: 9, sla: 'OK', uptime: '99%' },
-  { name: 'HubSpot (Fathom)', type: 'API', region: '—', last: '07:14 AEST', records: 6, sla: 'OK', uptime: '100%' },
-  { name: 'BCI GEM', type: 'API', region: 'AU', last: '—', records: 0, sla: 'OFF', uptime: '—' },
-] as const
 
 export const tokens = {
   weekIn: 1_842_300,

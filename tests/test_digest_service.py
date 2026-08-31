@@ -12,7 +12,7 @@ from datetime import datetime, time, timedelta, timezone
 
 import pytest
 
-from api.digest_service import build_digest_payload
+from api.digest_service import MAX_SIGNALS_SHOWN, build_digest_payload
 from loader.db import connect
 from loader.ingest import init_db
 
@@ -33,7 +33,8 @@ def db(tmp_path, watchlist):
     return path
 
 
-def _add(db, signal_id: str, *, days_ago: float, company="BHP", tier="A"):
+def _add(db, signal_id: str, *, days_ago: float, company="BHP", tier="A",
+         source_type="job_board", source="seek", is_new=0):
     captured = (datetime.now(timezone.utc) - timedelta(days=days_ago)).isoformat(timespec="seconds")
     with connect(db) as conn:
         conn.execute(
@@ -41,9 +42,9 @@ def _add(db, signal_id: str, *, days_ago: float, company="BHP", tier="A"):
             "captured_at, geography, sector, company_name, watchlist_tier, "
             "signal_category, review_cycle, raw_content, analysis_notes, "
             "is_new_prospect, classified_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            (signal_id, "job_board", "seek", f"https://x/{signal_id}", captured, "AU",
+            (signal_id, source_type, source, f"https://x/{signal_id}", captured, "AU",
              "mining", company, tier, "hiring_velocity", "weekly",
-             f"{company} is hiring a Maintenance Planner in the Pilbara", "note", 0,
+             f"{company} is hiring a Maintenance Planner in the Pilbara", "note", is_new,
              captured),
         )
 
@@ -72,17 +73,16 @@ def test_signals_outside_the_window_are_excluded(db):
     assert ids == {"recent"}, "a 30-day-old signal must not appear in a 7-day window"
 
 
-def test_kpis_count_only_the_window(db):
-    """Regression: the KPI tile read 'ROLES DETECTED · 7D' but was computed over
+def test_the_collection_summary_counts_only_the_window(db):
+    """Regression: the tile read 'ROLES DETECTED · 7D' but was computed over
     every classified row ever, so it silently over-reported."""
     _add(db, "in-1", days_ago=1)
     _add(db, "in-2", days_ago=2)
     for i in range(5):
         _add(db, f"out-{i}", days_ago=40 + i)
 
-    p = build_digest_payload(db, days=7)
-    assert p["kpis"]["rolesThisWeek"]["val"] == 2
-    assert p["kpis"]["newSignals"]["val"] == 2
+    c = build_digest_payload(db, days=7)["collection"]
+    assert c["collected"] == 2
 
 
 def test_window_length_is_configurable(db):
@@ -137,7 +137,7 @@ def test_missing_database_falls_back_to_synthetic(tmp_path):
 def test_payload_always_declares_the_window(db):
     _add(db, "s1", days_ago=1)
     p = build_digest_payload(db, days=7)
-    for key in ("sourceMode", "windowDays", "windowEmpty", "kpis", "signals", "velocity"):
+    for key in ("sourceMode", "windowDays", "windowEmpty", "collection", "signals", "velocity"):
         assert key in p, f"the dashboard reads {key}"
 
 
@@ -549,3 +549,201 @@ def test_competitors_are_excluded_from_new_names(db, tmp_path, monkeypatch):
     assert "peopleconnexion" not in names
     assert "kiwi niugini recruitment" not in names
     assert "example mining services" in names
+
+
+def test_the_shipped_competitor_file_is_valid(db):
+    """The test above points the loader at a temp file, so it never touches the
+    real one. If `config/competitors.json` were renamed, moved or left with a
+    trailing comma, every other test would still pass and the filter would
+    silently do nothing in production."""
+    from api.digest_service import COMPETITORS_PATH, _competitor_names
+
+    assert COMPETITORS_PATH.exists(), f"{COMPETITORS_PATH} is missing"
+    names = _competitor_names(COMPETITORS_PATH)
+    assert names, "the shipped competitor list is empty"
+    assert all(n == n.casefold() for n in names), "names must be casefolded for matching"
+
+
+def test_competitor_matching_is_exact_not_substring(db, tmp_path, monkeypatch):
+    """"Newcrest" must not be filtered because some agency is called "Crest".
+    An over-broad match here silently hides real prospects, which is worse than
+    the problem it solves."""
+    competitor_file = tmp_path / "competitors.json"
+    competitor_file.write_text(json.dumps(["Crest Recruitment"]), encoding="utf-8")
+    monkeypatch.setattr("api.digest_service.COMPETITORS_PATH", competitor_file)
+
+    captured = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    with connect(db) as conn:
+        for signal_id, company in [("a", "Crest Recruitment"), ("b", "Newcrest")]:
+            conn.execute(
+                "INSERT INTO signals (signal_id, source_type, source_name, source_url, "
+                "captured_at, geography, sector, company_name, watchlist_tier, "
+                "signal_category, review_cycle, raw_content, analysis_notes, "
+                "is_new_prospect, classified_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (signal_id, "job_board", "seek", f"https://x/{signal_id}", captured,
+                 "AU", "mining", company, None, "hiring_velocity", "weekly",
+                 f"{company} is hiring", "note", 1, captured),
+            )
+
+    names = {n["co"] for n in build_digest_payload(db, days=7)["newNames"]}
+    assert "Crest Recruitment" not in names
+    assert "Newcrest" in names, "an exact-name filter must not swallow a real company"
+
+
+def test_a_missing_competitor_file_does_not_break_the_digest(db, tmp_path, monkeypatch):
+    """Better an unfiltered digest than no digest."""
+    monkeypatch.setattr("api.digest_service.COMPETITORS_PATH", tmp_path / "nope.json")
+    assert build_digest_payload(db, days=7)["sourceMode"] in {"live", "synthetic"}
+
+
+
+# ---------- the collection summary ----------
+#
+# Four KPI tiles used to sit here. Two showed the same variable under different
+# labels, one of those contradicted the "Key Signals" list below it, and a
+# fourth reported Mode Push as a hardcoded zero. These pin the replacements to
+# things that are actually counted.
+
+
+def test_a_news_article_is_not_counted_as_a_role(db):
+    """The headline used to read "roles detected" over every signal, including
+    Mining.com.au articles, which advertise no role at all."""
+    _add(db, "job-1", days_ago=1)
+    _add(db, "job-2", days_ago=1.1)
+    _add(db, "news-1", days_ago=1.2, source_type="news", source="newsfeed")
+
+    c = build_digest_payload(db, days=7)["collection"]
+    assert c["jobs"] == 2
+    assert c["news"] == 1
+    assert c["collected"] == 3, "the total still covers everything gathered"
+
+
+def test_the_kinds_always_add_up_to_the_total(db):
+    for i in range(4):
+        _add(db, f"j{i}", days_ago=1 + i * 0.1)
+    for i in range(3):
+        _add(db, f"n{i}", days_ago=2 + i * 0.1, source_type="news", source="newsfeed")
+
+    c = build_digest_payload(db, days=7)["collection"]
+    assert c["jobs"] + c["news"] == c["collected"]
+
+
+def test_the_regions_always_add_up_to_the_total(db):
+    """The split is drawn as a proportional bar, so a shortfall would render as
+    a silently truncated bar rather than an obvious error."""
+    for i in range(5):
+        _add(db, f"s{i}", days_ago=1 + i * 0.1)
+
+    c = build_digest_payload(db, days=7)["collection"]
+    assert c["regions"]["AU"] + c["regions"]["PNG"] == c["collected"]
+
+
+def test_shown_matches_the_list_the_page_actually_renders(db):
+    """The old 'Key signals' tile showed every signal collected while the
+    section directly beneath it listed 40. One of the two had to be wrong."""
+    for i in range(MAX_SIGNALS_SHOWN + 12):
+        _add(db, f"s{i}", days_ago=1 + i * 0.01, company=f"Co {i}")
+
+    p = build_digest_payload(db, days=7)
+    assert p["collection"]["shown"] == len(p["signals"])
+    assert p["collection"]["shown"] == MAX_SIGNALS_SHOWN
+    assert p["collection"]["collected"] > p["collection"]["shown"], "shown is a subset"
+
+
+def test_the_source_count_is_measured_not_assumed(db):
+    _add(db, "a", days_ago=1, source="seek")
+    _add(db, "b", days_ago=1.1, source="seek")
+    _add(db, "c", days_ago=1.2, source="pngworkforce")
+
+    assert build_digest_payload(db, days=7)["collection"]["sources"] == 2
+
+
+def test_new_names_counts_unfamiliar_companies_once_each(db):
+    _add(db, "n1", days_ago=1, company="Newco", tier=None, is_new=1)
+    _add(db, "n2", days_ago=1.1, company="Newco", tier=None, is_new=1)
+    _add(db, "n3", days_ago=1.2, company="Otherco", tier=None, is_new=1)
+    _add(db, "known", days_ago=1.3, company="BHP", tier="A", is_new=0)
+
+    assert build_digest_payload(db, days=7)["collection"]["newNames"] == 2
+
+
+def test_nothing_reports_mode_push_activity(db):
+    """It was a hardcoded zero that would have stayed zero after the first
+    profile was saved. The digest is about market signals; Mode Push has its
+    own page."""
+    _add(db, "s1", days_ago=1)
+    payload = build_digest_payload(db, days=7)
+    assert "pushQueries" not in payload["collection"]
+    assert "push" not in str(payload["collection"]).lower()
+
+
+def _add_at(db, signal_id: str, captured: str, company="BHP", tier="A"):
+    """Like `_add`, but at an exact instant rather than a number of days back."""
+    with connect(db) as conn:
+        conn.execute(
+            "INSERT INTO signals (signal_id, source_type, source_name, source_url, "
+            "captured_at, geography, region, sector, company_name, watchlist_tier, "
+            "signal_category, review_cycle, raw_content, analysis_notes, "
+            "is_new_prospect, classified_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (signal_id, "job_board", "seek", f"https://x/{signal_id}", captured, "AU",
+             "AU", "mining", company, tier, "hiring_velocity", "weekly",
+             f"{company} is hiring a Maintenance Planner", "note", 0, captured),
+        )
+
+
+# ---------- the window is day-aligned ----------
+#
+# Regression: the boundary was `now - days`, to the second. Scrapes never start
+# at the same minute, so a run sitting almost exactly `days` back was included
+# or excluded depending on when the digest happened to be built. On 25 August
+# the previous week's 146 signals cleared the line by 24 seconds — a digest
+# generated a minute later would have reported different headline figures from
+# identical data.
+
+
+def _at(ts):
+    return ts.isoformat(timespec="seconds")
+
+
+def test_the_window_starts_at_midnight_not_at_the_current_time(db):
+    from api.digest_service import _day_after
+
+    boundary = _day_after(datetime.now(timezone.utc)) - timedelta(days=7)
+    assert (boundary.hour, boundary.minute, boundary.second) == (0, 0, 0)
+
+
+def test_seconds_do_not_decide_whether_a_run_is_in_the_window(db):
+    """Two signals a few seconds either side of the boundary must not land on
+    opposite sides of it — that was the whole bug."""
+    from api.digest_service import _day_after
+
+    boundary = _day_after(datetime.now(timezone.utc)) - timedelta(days=7)
+    _add_at(db, "just-before", _at(boundary - timedelta(seconds=30)))
+    _add_at(db, "just-after", _at(boundary + timedelta(seconds=30)))
+
+    ids = {s["id"] for s in build_digest_payload(db, days=7)["signals"]}
+    assert "just-after" in ids
+    assert "just-before" not in ids, "a signal from the prior period leaked in"
+
+
+def test_a_run_exactly_a_week_back_is_a_previous_week(db):
+    """The case that actually happened: a weekly pipeline run seven days ago is
+    last week's digest, not this week's, whatever the minute says."""
+    now = datetime.now(timezone.utc)
+    _add_at(db, "last-week", _at(now - timedelta(days=7)))
+    _add_at(db, "this-week", _at(now - timedelta(minutes=5)))
+
+    p = build_digest_payload(db, days=7)
+    ids = {s["id"] for s in p["signals"]}
+    assert ids == {"this-week"}
+    assert p["collection"]["collected"] == 1, "two runs were counted as one week"
+
+
+def test_the_capture_time_reaches_the_row(db):
+    """So a reader can tell a posting found in this run from one carried over
+    from an earlier run inside the same window."""
+    when = _at(datetime.now(timezone.utc) - timedelta(hours=2))
+    _add_at(db, "s1", when)
+
+    (signal,) = build_digest_payload(db, days=7)["signals"]
+    assert signal["capturedAt"] == when

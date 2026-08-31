@@ -1,5 +1,4 @@
 import type { QueryClient } from '@tanstack/react-query'
-import { watchlistQueryOptions } from '~/lib/api'
 import { QueryClientProvider, QueryClient as QC, useQuery } from '@tanstack/react-query'
 import {
   HeadContent,
@@ -14,6 +13,7 @@ import type { ReactNode } from 'react'
 import { useEffect, useRef, useState } from 'react'
 import { NotFound } from '~/components/NotFound'
 import { Icons, Loading } from '~/components/ui'
+import { watchlistQueryOptions } from '~/lib/api'
 import { AuthProvider, useAuth } from '~/lib/auth-context'
 import appCss from '~/styles/app.css?url'
 
@@ -34,28 +34,36 @@ export const Route = createRootRouteWithContext<RouterContext>()({
   component: RootComponent,
 })
 
+// No decorative badges. A number beside a nav item is a claim about the data,
+// so the only one here is the watchlist count, which is read from the API. The
+// previous 'LIVE', '3' and 'Q1' were hardcoded strings that looked like state.
 const NAV = [
   {
     group: 'INTELLIGENCE',
     items: [
-      { to: '/monitor/digest', label: 'Weekly Digest', icon: 'monitor', badge: 'LIVE' },
-      { to: '/monitor/feed', label: 'Signal Feed', icon: 'spark', badge: '' },
+      { to: '/monitor/digest', label: 'Weekly Digest', icon: 'monitor' },
+      { to: '/monitor/feed', label: 'Signal Feed', icon: 'spark' },
     ],
   },
-  { group: 'OUTBOUND', items: [{ to: '/push', label: 'Mode Push', icon: 'push', badge: '3' }] },
-  { group: 'PUBLISH', items: [{ to: '/publish', label: 'Mode Publish', icon: 'publish', badge: 'Q1' }] },
+  { group: 'OUTBOUND', items: [{ to: '/push', label: 'Mode Push', icon: 'push' }] },
+  { group: 'PUBLISH', items: [{ to: '/publish', label: 'Mode Publish', icon: 'publish' }] },
   {
     group: 'REFERENCE',
     items: [
-      { to: '/watchlist', label: 'Watchlist', icon: 'watch', badge: '' },
-      { to: '/dashboard', label: 'Dashboard', icon: 'dash', badge: '' },
+      { to: '/watchlist', label: 'Watchlist', icon: 'watch' },
+      { to: '/dashboard', label: 'Dashboard', icon: 'dash' },
     ],
   },
   {
     group: 'ADMIN',
+    // Hidden from members. This is presentation only — every /api/admin/*
+    // endpoint re-checks the role, so a member who types the URL still gets
+    // nothing back.
+    adminOnly: true,
     items: [
-      { to: '/sources', label: 'Sources health', icon: 'src', badge: '12' },
-      { to: '/tokens', label: 'Tokens & cost', icon: 'tokens', badge: '' },
+      { to: '/sources', label: 'Sources health', icon: 'src' },
+      { to: '/access', label: 'People & access', icon: 'people' },
+      { to: '/tokens', label: 'Tokens & cost', icon: 'tokens' },
     ],
   },
 ] as const
@@ -64,12 +72,21 @@ const CRUMBS: Record<string, string[]> = {
   '/monitor/digest': ['Mode Monitor', 'Weekly Digest'],
   '/monitor/feed': ['Mode Monitor', 'Signal Feed'],
   '/push': ['Mode Push', 'Submit profile'],
-  '/publish': ['Mode Publish', 'Q1 2026 Report'],
+  '/publish': ['Mode Publish', 'Quarterly report'],
   '/watchlist': ['Reference', 'Watchlist'],
   '/dashboard': ['Reference', 'Dashboard'],
   '/sources': ['Admin', 'Source health'],
+  '/access': ['Admin', 'People & access'],
   '/tokens': ['Admin', 'Tokens & cost'],
 }
+
+/** The footer dot said "Connected" unconditionally, including when nothing was
+ *  reachable. These are driven by the shell's own request instead. */
+const CONNECTION = {
+  success: { dot: 'dot-ok', label: 'Connected' },
+  error: { dot: 'dot-warn', label: 'Not responding' },
+  pending: { dot: 'dot-muted', label: 'Connecting' },
+} as const
 
 const SIGNIN_PATH = '/signin'
 const DEFAULT_LANDING = '/monitor/digest'
@@ -210,7 +227,11 @@ function Shell({ children }: { children: ReactNode }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname })
   const crumbs = CRUMBS[pathname] ?? ['Mode Monitor', 'Weekly Digest']
   const { session } = useAuth()
-  const { data: watchlistData } = useQuery(watchlistQueryOptions)
+  const isAdmin = Boolean(session?.isAdmin)
+  // Doubles as the connection check in the footer: this is the one request the
+  // shell already makes on every page, so its state is the honest answer to
+  // "is the backend reachable?" without adding a second poll for the same fact.
+  const { data: watchlistData, status: apiStatus } = useQuery(watchlistQueryOptions)
 
   // Expanded is the default, and the server always renders that. The stored
   // preference is applied after mount rather than read during render: this app
@@ -277,7 +298,7 @@ function Shell({ children }: { children: ReactNode }) {
       </div>
 
       <nav className="sidebar" id="sidebar-nav" aria-label="Main">
-        {NAV.map((g) => (
+        {NAV.filter((g) => !('adminOnly' in g && g.adminOnly) || isAdmin).map((g) => (
           <div className="nav-group" key={g.group}>
             {/* Collapsed, the text is hidden by CSS and the element becomes a
                 rule between groups — so the sections stay visually separated
@@ -297,26 +318,24 @@ function Shell({ children }: { children: ReactNode }) {
               >
                 <span className="ico" aria-hidden="true">{Icons[it.icon]}</span>
                 <span className="label">{it.label}</span>
-                {it.to === '/watchlist'
-                  ? watchlistData && <span className="count mono">{watchlistData.total}</span>
-                  : it.badge && <span className="count mono">{it.badge}</span>}
+                {it.to === '/watchlist' && watchlistData && (
+                  <span className="count mono">{watchlistData.total}</span>
+                )}
               </Link>
             ))}
           </div>
         ))}
         <div className="footer">
           <span
-            className="rail-dot dot-ok"
-            title="Connected"
-            aria-label="Connected"
+            className={`rail-dot ${CONNECTION[apiStatus].dot}`}
+            title={CONNECTION[apiStatus].label}
+            aria-label={CONNECTION[apiStatus].label}
             role="img"
           />
-          <div>MIOS v0.2.0</div>
           <div style={{ marginTop: 4 }}>
-            <span className="dot-ok" />
-            <span style={{ marginLeft: 6 }}>Connected</span>
+            <span className={CONNECTION[apiStatus].dot} />
+            <span style={{ marginLeft: 6 }}>{CONNECTION[apiStatus].label}</span>
           </div>
-          <div style={{ marginTop: 8, color: 'var(--ink-3)' }}>Updates Sunday, 22:00 AEST</div>
         </div>
       </nav>
 

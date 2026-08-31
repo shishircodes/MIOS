@@ -12,6 +12,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from api.digest_service import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, build_feed_payload
+from delivery.digest import infer_geography
 from loader.db import connect
 from loader.ingest import init_db
 
@@ -33,15 +34,18 @@ def db(tmp_path, watchlist):
 
 
 def _add(db, signal_id, *, days_ago=1, company="BHP", geo="AU", cycle="weekly",
-         raw=None, classified=True):
+         source="seek", raw=None, classified=True):
     captured = (datetime.now(timezone.utc) - timedelta(days=days_ago)).isoformat(timespec="seconds")
     with connect(db) as conn:
         conn.execute(
             "INSERT INTO signals (signal_id, source_type, source_name, source_url, "
-            "captured_at, geography, sector, company_name, watchlist_tier, "
+            "captured_at, geography, region, sector, company_name, watchlist_tier, "
             "signal_category, review_cycle, raw_content, analysis_notes, "
-            "is_new_prospect, classified_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            (signal_id, "job_board", "seek", f"https://x/{signal_id}", captured, geo,
+            "is_new_prospect, classified_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            # `region` is resolved the same way loader.ingest resolves it, so
+            # these rows look like rows the pipeline actually wrote.
+            (signal_id, "job_board", source, f"https://x/{signal_id}", captured, geo,
+             infer_geography(raw if raw is not None else "", default=geo),
              "mining", company, "A", "hiring_velocity", cycle,
              raw or f"{company} is hiring a Maintenance Planner", "note", 0,
              captured if classified else None),
@@ -169,6 +173,16 @@ def test_cycle_filter(db):
     assert [s["id"] for s in build_feed_payload(db, cycle="MONTHLY")["signals"]] == ["m"]
 
 
+def test_source_filter_updates_count(db):
+    _add(db, "seek", source="seek")
+    _add(db, "news", source="newsfeed")
+
+    p = build_feed_payload(db, source="NEWSFEED")
+    assert [s["id"] for s in p["signals"]] == ["news"]
+    assert p["total"] == 1
+    assert p["totalClassified"] == 2
+
+
 def test_search_requires_every_term(db):
     """Both rows match "bhp"; only one also matches "pilbara"."""
     _add(db, "bhp-pilbara", company="BHP", raw="BHP Maintenance Planner Pilbara")
@@ -192,20 +206,21 @@ def test_search_is_case_insensitive(db):
 
 
 def test_filters_combine(db):
-    _add(db, "au-weekly", geo="AU", cycle="weekly", company="BHP")
-    _add(db, "au-monthly", geo="AU", cycle="monthly", company="BHP")
-    _add(db, "png-weekly", geo="PNG", cycle="weekly", company="BHP",
+    _add(db, "au-weekly-seek", geo="AU", cycle="weekly", source="seek", company="BHP")
+    _add(db, "au-weekly-news", geo="AU", cycle="weekly", source="newsfeed", company="BHP")
+    _add(db, "au-monthly-seek", geo="AU", cycle="monthly", source="seek", company="BHP")
+    _add(db, "png-weekly-seek", geo="PNG", cycle="weekly", source="seek", company="BHP",
          raw="BHP Operator at Lihir, Papua New Guinea")
 
-    p = build_feed_payload(db, region="AU", cycle="WEEKLY", q="bhp")
-    assert [s["id"] for s in p["signals"]] == ["au-weekly"]
+    p = build_feed_payload(db, region="AU", cycle="WEEKLY", source="SEEK", q="bhp")
+    assert [s["id"] for s in p["signals"]] == ["au-weekly-seek"]
 
 
 def test_blank_filters_are_ignored(db):
     """The UI sends nothing for 'ALL', but an empty string must not filter
     everything out if one slips through."""
     _add(db, "s1")
-    assert build_feed_payload(db, region="", cycle="", q="  ")["total"] == 1
+    assert build_feed_payload(db, region="", cycle="", source="", q="  ")["total"] == 1
 
 
 # ---------- shape ----------
@@ -225,3 +240,156 @@ def test_missing_database_returns_an_empty_page_rather_than_failing(tmp_path):
     assert p["signals"] == []
     assert p["total"] == 0
     assert p["scrapedAllTime"] == 0
+
+
+# ---------- pagination is done in SQL now ----------
+#
+# The feed used to load every classified row and filter in Python. These pin the
+# behaviour that had to survive moving it into the database.
+
+
+def test_paging_never_repeats_or_drops_a_row(db):
+    """`captured_at` is not unique — one scrape writes dozens of rows in the
+    same second. LIMIT/OFFSET over a non-total order can show a row on two
+    pages and none on the third, so the query orders by a tiebreaker too."""
+    same_second = 3.0
+    for i in range(25):
+        _add(db, f"s{i:02d}", days_ago=same_second, company=f"Co {i}")
+
+    seen: list[str] = []
+    for offset in range(0, 25, 5):
+        seen += [s["id"] for s in build_feed_payload(db, limit=5, offset=offset)["signals"]]
+
+    assert len(seen) == 25
+    assert len(set(seen)) == 25, "a row appeared on two pages, or none"
+
+
+def test_a_page_costs_the_same_whatever_the_table_holds(db):
+    """The row count returned must not grow with the table. This is the whole
+    reason the filtering moved into SQL — the old version loaded everything."""
+    for i in range(120):
+        _add(db, f"s{i:03d}", days_ago=1 + i * 0.001, company=f"Co {i}")
+
+    p = build_feed_payload(db, limit=20, offset=0)
+    assert len(p["signals"]) == 20, "a page is a page, not the whole table"
+    assert p["total"] == 120, "but the count still describes everything matching"
+
+
+def test_the_total_counts_matches_not_the_page(db):
+    for i in range(30):
+        _add(db, f"s{i:02d}", days_ago=1 + i * 0.001, cycle="weekly" if i < 12 else "monthly")
+
+    p = build_feed_payload(db, limit=5, offset=0, cycle="WEEKLY")
+    assert len(p["signals"]) == 5
+    assert p["total"] == 12
+    assert p["totalClassified"] == 30, "unfiltered classified rows"
+
+
+def test_search_covers_only_the_text_the_row_displays(db):
+    """`desc` is raw_content cut to 237 characters. Searching the whole column
+    would match text the reader cannot see on the row and cannot explain."""
+    tail = "x" * 300 + " unicorn"
+    _add(db, "long", raw=f"BHP is hiring a Planner | {tail}")
+
+    assert build_feed_payload(db, q="planner")["total"] == 1
+    assert build_feed_payload(db, q="unicorn")["total"] == 0, "matched hidden text"
+
+
+def test_every_search_term_must_appear(db):
+    _add(db, "a", company="BHP", raw="BHP needs a Rigger")
+    _add(db, "b", company="Newmont", raw="Newmont needs a Planner")
+
+    assert build_feed_payload(db, q="bhp")["total"] == 1
+    assert build_feed_payload(db, q="bhp rigger")["total"] == 1
+    assert build_feed_payload(db, q="bhp planner")["total"] == 0, "terms must narrow, not widen"
+
+
+def test_a_sector_typed_as_it_is_displayed_still_matches(db):
+    """The row shows "Oil & Gas"; the column stores "oil_gas". A reader searches
+    for what they can see, so the query maps the one to the other."""
+    _add(db, "og")
+    with connect(db) as conn:
+        conn.execute("UPDATE signals SET sector = 'oil_gas' WHERE signal_id = 'og'")
+
+    assert build_feed_payload(db, q="oil")["total"] == 1
+    assert build_feed_payload(db, q="oil & gas")["total"] == 1
+    assert build_feed_payload(db, q="mining")["total"] == 0
+
+
+def test_region_and_search_combine(db):
+    _add(db, "au-bhp", geo="AU", company="BHP")
+    _add(db, "png-bhp", geo="PNG", company="BHP",
+         raw="BHP in Papua New Guinea needs a Planner")
+    _add(db, "png-other", geo="PNG", company="Newmont",
+         raw="Newmont in Papua New Guinea needs a Planner")
+
+    p = build_feed_payload(db, region="PNG", q="bhp")
+    assert [s["id"] for s in p["signals"]] == ["png-bhp"]
+
+
+def test_an_offset_past_the_end_is_empty_not_an_error(db):
+    _add(db, "only")
+    p = build_feed_payload(db, limit=50, offset=500)
+    assert p["signals"] == []
+    assert p["total"] == 1, "the count still describes the whole match set"
+
+
+# ---------- the filter options come from the data ----------
+#
+# The UI used to keep its own list of source names. A hardcoded copy of
+# `SOURCE_NAMES` goes stale the moment a scraper is added or renamed, and the
+# failure is silent — an option that matches nothing, or a source with no way
+# to reach it. These pin the payload the buttons are now built from.
+
+
+def test_the_payload_lists_the_sources_present_in_the_data(db):
+    _add(db, "a", source="seek")
+    _add(db, "b", source="newsfeed")
+    _add(db, "c", source="seek")
+
+    assert build_feed_payload(db)["sources"] == ["newsfeed", "seek"]
+
+
+def test_a_retired_source_stays_filterable(db):
+    """Its scraper is gone but its signals remain, so the feed must still be
+    able to reach them. A list built from the registry could not."""
+    _add(db, "old", source="oldboard")
+    _add(db, "new", source="seek")
+
+    p = build_feed_payload(db)
+    assert "oldboard" in p["sources"]
+    assert [s["id"] for s in build_feed_payload(db, source="OLDBOARD")["signals"]] == ["old"]
+
+
+def test_every_listed_source_actually_matches_something(db):
+    """The point of deriving the list: no option can come back empty."""
+    _add(db, "a", source="seek")
+    _add(db, "b", source="adzuna")
+
+    p = build_feed_payload(db)
+    for name in p["sources"]:
+        assert build_feed_payload(db, source=name.upper())["total"] > 0, name
+
+
+def test_unclassified_rows_do_not_add_a_dead_option(db):
+    """The feed only ever shows classified rows, so a source with nothing but
+    pending rows would be an option that matches nothing."""
+    _add(db, "pending", source="newsfeed", classified=False)
+    _add(db, "shown", source="seek")
+
+    assert build_feed_payload(db)["sources"] == ["seek"]
+
+
+def test_an_empty_database_lists_no_sources(db):
+    assert build_feed_payload(db)["sources"] == []
+
+
+def test_the_options_do_not_narrow_when_a_filter_is_applied(db):
+    """The list describes what is filterable, not what the current page holds.
+    Narrowing it would remove every other button the moment you pressed one,
+    leaving no way back."""
+    _add(db, "a", source="seek")
+    _add(db, "b", source="adzuna")
+
+    assert build_feed_payload(db, source="SEEK")["sources"] == ["adzuna", "seek"]
+    assert build_feed_payload(db, q="nothing matches this")["sources"] == ["adzuna", "seek"]

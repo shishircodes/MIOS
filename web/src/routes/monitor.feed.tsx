@@ -1,8 +1,9 @@
 import { useQuery } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
-import { useEffect, useState } from 'react'
-import { Icons, Loading, Section, TierChip } from '~/components/ui'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { CapturedAt, Icons, Loading, Section, TierChip } from '~/components/ui'
 import { signalsQueryOptions } from '~/lib/api'
+import { useFigure, useReveal } from '~/lib/motion'
 
 export const Route = createFileRoute('/monitor/feed')({
   head: () => ({ meta: [{ title: 'Signal Feed · MIOS' }] }),
@@ -26,6 +27,7 @@ function useDebounced<T>(value: T, ms = 300): T {
 function SignalFeed() {
   const [region, setRegion] = useState<string>('ALL')
   const [cycle, setCycle] = useState<string>('ALL')
+  const [source, setSource] = useState<string>('ALL')
   const [query, setQuery] = useState('')
   const [page, setPage] = useState(0)
 
@@ -35,7 +37,7 @@ function SignalFeed() {
   // list is not page 4 of a filtered one, and can be past the end entirely.
   useEffect(() => {
     setPage(0)
-  }, [region, cycle, debouncedQuery])
+  }, [region, cycle, source, debouncedQuery])
 
   // Filtering and paging both happen on the server. Doing either in the browser
   // would only ever see the loaded page, so a search would report "3 results"
@@ -46,21 +48,39 @@ function SignalFeed() {
       offset: page * PAGE_SIZE,
       region: region === 'ALL' ? undefined : region,
       cycle: cycle === 'ALL' ? undefined : cycle,
+      source: source === 'ALL' ? undefined : source,
       q: debouncedQuery.trim() || undefined,
     }),
   )
 
+  // Before any early return. Re-keyed on the page and filters, so paging
+  // replays the reveal; the hook caps how many rows actually animate.
+  const scope = useRef<HTMLDivElement>(null)
+  const scrapedRef = useFigure(data?.scrapedAllTime ?? 0)
+  useReveal(scope, '.signal', {
+    key: `${page}-${region}-${cycle}-${source}-${debouncedQuery}`,
+    delay: 0.08,
+  })
+
+  // Built from the payload rather than a list kept here. A hardcoded copy
+  // drifts the moment a scraper is added or renamed, and the failure is silent
+  // — an option matching nothing, or a source with no way to reach it.
+  const sourceOptions = useMemo(
+    () => ['ALL', ...(data?.sources ?? []).map((s) => s.toUpperCase())],
+    [data?.sources],
+  )
+
   const signals = data?.signals ?? []
   const total = data?.total ?? 0
-  const anyFilterActive = region !== 'ALL' || cycle !== 'ALL' || query.trim() !== ''
+  const anyFilterActive = region !== 'ALL' || cycle !== 'ALL' || source !== 'ALL' || query.trim() !== ''
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE))
   const firstShown = total === 0 ? 0 : page * PAGE_SIZE + 1
   const lastShown = page * PAGE_SIZE + signals.length
 
-  const reset = () => { setRegion('ALL'); setCycle('ALL'); setQuery('') }
+  const reset = () => { setRegion('ALL'); setCycle('ALL'); setSource('ALL'); setQuery('') }
 
   return (
-    <div className="page">
+    <div className="page" ref={scope}>
       <div className="page-header">
         <div>
           <div className="kicker">Mode Monitor · Signal Feed</div>
@@ -71,7 +91,7 @@ function SignalFeed() {
               ever collected?" is a different question from "what am I looking
               at?", and the latter is answered above the list. */}
           <div>
-            <strong className="tnum" style={{ fontSize: 18, color: 'var(--ink)' }}>
+            <strong className="tnum" style={{ fontSize: 18, color: 'var(--ink)' }} ref={scrapedRef}>
               {(data?.scrapedAllTime ?? 0).toLocaleString()}
             </strong>{' '}
             signals collected all time
@@ -87,6 +107,11 @@ function SignalFeed() {
           <span className="mono muted" style={{ fontSize: 10.5, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Filter</span>
           <FilterGroup label="Region" value={region} options={[...REGIONS]} onChange={setRegion} />
           <FilterGroup label="Cycle" value={cycle} options={[...CYCLES]} onChange={setCycle} />
+          {/* Hidden until the first payload arrives; rendering a lone "All"
+              button would offer a filter that cannot filter. */}
+          {sourceOptions.length > 1 && (
+            <FilterGroup label="Source" value={source} options={sourceOptions} onChange={setSource} />
+          )}
 
           <div className="feed-search">
             <span className="feed-search-icon" aria-hidden="true">{Icons.search}</span>
@@ -140,6 +165,7 @@ function SignalFeed() {
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 4 }}>
                   <TierChip tier={s.tier} />
                   <span className="chip">{s.sector.toUpperCase()}</span>
+                  <CapturedAt at={s.capturedAt} />
                   <span className="chip">{s.cycle}</span>
                   <span className="chip">{s.region}</span>
                 </div>

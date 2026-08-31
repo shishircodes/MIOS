@@ -25,24 +25,33 @@ from typing import Any, Callable
 
 from agents.signal_analyst import classify_pending
 from config.settings import configure_logging, settings
+from api.digest_service import build_digest_payload
 from delivery.digest import build_digest
+from delivery.pulse import generate_pulse, save_pulse
 from delivery.slack import post_digest
 from loader.db import describe, resolve_target
 from loader.ingest import ingest, init_db
+from loader.source_settings import enabled_sources
 from scraper import SOURCE_NAMES, scrape_all
 
 log = logging.getLogger(__name__)
 
+#: Records to take from each source per run. Per-source rather than a total
+#: budget, so one prolific board cannot crowd out a quiet one. The admin screen
+#: quotes this figure, so it lives here rather than being repeated.
+DEFAULT_SCRAPE_LIMIT = 50
+
 
 def run_live_cycle(
     *,
-    scrape_limit: int = 50,
+    scrape_limit: int = DEFAULT_SCRAPE_LIMIT,
     digest_window_days: int = 7,
     base_url: str | None = None,
     sources: list[str] | None = None,
     db_path: str | Path | None = None,
     do_scrape: bool = True,
     do_slack: bool = True,
+    do_pulse: bool = True,
     gemini_caller: Callable[[str, str], dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Run one production-style cycle.
@@ -60,7 +69,26 @@ def run_live_cycle(
     inserted = 0
     scraped_by_source: dict[str, int] = {}
     if do_scrape:
-        records = scrape_all(limit=scrape_limit, sources=sources, base_url=base_url)
+        # An explicit --source wins over the stored selection: asking for a
+        # specific source on the command line is a deliberate override, not a
+        # default to be second-guessed.
+        chosen = sources if sources else enabled_sources(db_path)
+
+        if not chosen:
+            # Deliberately not passed down to `scrape_all`, which reads an empty
+            # list as falsy and would fall back to *every* source — the exact
+            # opposite of what an administrator asked for by switching them all
+            # off. Skipping here is the only safe reading of "none enabled".
+            log.warning(
+                "live: every source is switched off in the Admin panel — skipping the "
+                "fetch. Re-enable one under Admin > Sources, or pass --source to override."
+            )
+            records = []
+        else:
+            if sources is None and set(chosen) != set(SOURCE_NAMES):
+                log.info("live: collecting from %s (others switched off in Admin)",
+                         ", ".join(chosen))
+            records = scrape_all(limit=scrape_limit, sources=chosen, base_url=base_url)
         scraped = len(records)
         scraped_by_source = dict(Counter(r.get("source_name", "unknown") for r in records))
         log.info("live: scraped %d postings %s", scraped, scraped_by_source)
@@ -81,7 +109,35 @@ def run_live_cycle(
     classified = int(classify_counts.get("classified", 0))
 
     since = datetime.now(timezone.utc) - timedelta(days=digest_window_days)
-    digest_text = build_digest(db_path, since=since)
+
+    # Market Pulse costs a Gemini call, so it is produced here — once per run —
+    # and stored. The dashboard reads the stored row; it never generates.
+    #
+    # Built from the same payload the dashboard renders, so the bullets cannot
+    # end up arguing with the table beside them, and so both agree on the window
+    # key without computing it twice.
+    pulse = None
+    if do_pulse:
+        payload = build_digest_payload(db_path, days=digest_window_days)
+        outcome = generate_pulse(payload, target=db_path)
+        save_pulse(
+            outcome,
+            window_from=payload.get("collectedFrom") or since.isoformat(timespec="seconds"),
+            window_to=payload.get("collectedTo")
+            or datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            target=db_path,
+        )
+        if outcome.ok:
+            pulse = outcome.bullets
+            log.info("live: Market Pulse generated (%d bullets)", len(pulse))
+        else:
+            # Deliberately not fatal, and deliberately not replaced with computed
+            # bullets: the section is simply absent this week.
+            log.warning("live: Market Pulse not generated — %s", outcome.note)
+    else:
+        log.info("live: --no-pulse; skipping Market Pulse generation")
+
+    digest_text = build_digest(db_path, since=since, pulse=pulse)
 
     slack_ok = False
     if do_slack:
@@ -116,7 +172,8 @@ def run_live_cycle(
 
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description="MIOS live production cycle")
-    p.add_argument("--limit", type=int, default=50, help="per-source scrape limit (default 50)")
+    p.add_argument("--limit", type=int, default=DEFAULT_SCRAPE_LIMIT,
+                   help=f"per-source scrape limit (default {DEFAULT_SCRAPE_LIMIT})")
     p.add_argument(
         "--source", action="append", choices=list(SOURCE_NAMES), default=None,
         help="scrape only this source (repeatable; default: all)",
@@ -124,6 +181,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--days", type=int, default=7, help="digest window in days (default 7)")
     p.add_argument("--no-scrape", action="store_true", help="skip scraping; classify pending only")
     p.add_argument("--no-slack", action="store_true", help="skip Slack delivery")
+    p.add_argument("--no-pulse", action="store_true",
+                   help="skip the Market Pulse generation (saves one Gemini call)")
     p.add_argument("--db", type=str, default=None, help="override DB path")
     p.add_argument("--base-url", type=str, default=None, help="override scraper base URL")
     args = p.parse_args(argv)
@@ -137,6 +196,7 @@ def main(argv: list[str] | None = None) -> int:
         db_path=args.db,
         do_scrape=not args.no_scrape,
         do_slack=not args.no_slack,
+        do_pulse=not args.no_pulse,
     )
 
     by_source = ",".join(f"{k}={v}" for k, v in sorted(summary["scraped_by_source"].items()))

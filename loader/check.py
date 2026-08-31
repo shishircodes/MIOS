@@ -41,7 +41,7 @@ def main(argv: list[str] | None = None) -> int:
 
     started = time.perf_counter()
     try:
-        with connect() as conn:
+        with connect(readonly=True) as conn:
             elapsed = (time.perf_counter() - started) * 1000
             print(f"connect : OK in {elapsed:.0f} ms")
             print(f"server  : {_server_version(conn)}")
