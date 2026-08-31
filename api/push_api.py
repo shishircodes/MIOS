@@ -25,7 +25,7 @@ from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, Upload
 from api.auth import require_user
 from push.cv_extract import MAX_BYTES, CVExtractionError, extract_text
 from push.matcher import match_profile
-from push.rationale import annotate
+from push.rationale import ANNOTATE_TOP_N, annotate
 from push.profile_parser import parse_profile
 from push.store import (
     DEFAULT_MATCH_WINDOW_DAYS,
@@ -191,3 +191,78 @@ def match_unsaved(
 #: Re-exported so the web app can enforce the same limit before uploading and
 #: give an instant error instead of a round trip.
 UPLOAD_LIMIT_BYTES = MAX_BYTES
+
+
+@router.get("/scoring")
+def scoring_model(user: dict[str, Any] = Depends(require_user)) -> dict[str, Any]:
+    """How a match score is arrived at.
+
+    Served from the scorer's own constants rather than written out in the
+    interface. A description of the model kept separately from the model drifts
+    the first time a weight is tuned, and it drifts silently — the screen would
+    keep explaining a calculation that no longer happens.
+    """
+    from llm import PURPOSE_PUSH, available_providers, resolve
+    from push import matcher
+
+    provider, model = resolve(PURPOSE_PUSH)
+    # The human label, not the internal key: "gemini · gemini-2.5-flash" reads
+    # like a stutter on screen.
+    label = next((p["label"] for p in available_providers() if p["name"] == provider), provider)
+    return {
+        "total": (matcher.W_ROLE + matcher.W_SKILLS + matcher.W_SIGNAL_QUALITY
+                  + matcher.W_SECTOR + matcher.W_MOMENTUM + matcher.W_VOLUME
+                  + matcher.W_RELATIONSHIP + matcher.W_SENIORITY + matcher.W_REGION
+                  + matcher.W_RECENCY),
+        "contributors": [
+            {"key": "role", "weight": matcher.W_ROLE, "label": "Role demand",
+             "what": "How closely the roles they are advertising match the candidate's job "
+                     "title. Compared loosely, so “Snr Maint. Planner” and “Senior "
+                     "Maintenance Planner” count as the same discipline."},
+            {"key": "skills", "weight": matcher.W_SKILLS, "label": "Skills overlap",
+             "what": "How many of the candidate's skills actually appear in the adverts. "
+                     "Matched as whole words: a skill is something an employer either asked "
+                     "for or did not."},
+            {"key": "signalQuality", "weight": matcher.W_SIGNAL_QUALITY,
+             "label": "Signal quality",
+             "what": "What kind of signals these are, not just how many. A new project or a "
+                     "leadership change is a decision point; routine vacancies mean the "
+                     "company is ticking over."},
+            {"key": "sector", "weight": matcher.W_SECTOR, "label": "Sector fit",
+             "what": "How much of their hiring is in the candidate's sector."},
+            {"key": "momentum", "weight": matcher.W_MOMENTUM, "label": "Momentum",
+             "what": "Whether their hiring is accelerating against their own recent average — "
+                     "the difference between a good account and a good week to call one."},
+            {"key": "volume", "weight": matcher.W_VOLUME, "label": "Hiring volume",
+             "what": "How much they are hiring right now, levelling off past a handful of "
+                     "roles."},
+            {"key": "relationship", "weight": matcher.W_RELATIONSHIP, "label": "Relationship",
+             "what": "Whether they are already a watchlist client. A new name still scores — "
+                     "it is a genuine opportunity, just a colder one."},
+            {"key": "seniority", "weight": matcher.W_SENIORITY, "label": "Seniority fit",
+             "what": "Whether the level being advertised matches the candidate's experience. "
+                     "Silent when either is unknown rather than assuming a fit."},
+            {"key": "region", "weight": matcher.W_REGION, "label": "Region fit",
+             "what": "Whether they are hiring in the candidate's market."},
+            {"key": "recency", "weight": matcher.W_RECENCY, "label": "Recency",
+             "what": "How fresh the signals are, fading to nothing over a month."},
+        ],
+        "confidence": [
+            {"level": "high", "what": "Eight or more signals across more than one collection."},
+            {"level": "medium", "what": "At least three signals."},
+            {"level": "low", "what": "One or two signals — a lead, not a finding."},
+        ],
+        "llm": {
+            "provider": label,
+            "model": model,
+            "annotatesTop": ANNOTATE_TOP_N,
+            "what": "A model writes the rationale and gives its own read of the fit. It "
+                    "cannot change the score or the order — the ranking has to stay "
+                    "reproducible, so where the model disagrees it is shown as a flag "
+                    "for you to look at rather than applied to the number.",
+        },
+        "caveat": "The weights are judgement, not calibration: nobody has been placed "
+                  "through this yet. Every score is shown broken down so the judgement can "
+                  "be argued with, and the weights are expected to change once the team can "
+                  "say what actually predicts a placement.",
+    }

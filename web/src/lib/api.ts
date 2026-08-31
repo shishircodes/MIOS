@@ -11,8 +11,10 @@ import type {
   ParsedCV,
   ProfileDraft,
   Report,
+  LlmSettingsPayload,
   ReportSummary,
   SchedulePayload,
+  ScoringModel,
   SourcesPayload,
   StoredProfile,
   WatchlistResponse,
@@ -296,3 +298,39 @@ export async function runPipelineNow(): Promise<{ started: boolean; runId: strin
   return postOrExplain('/api/admin/schedule/run', { method: 'POST' })
 }
 
+/** Model routing, provider status and today's usage. Admin only. */
+export const llmSettingsQueryOptions = queryOptions({
+  queryKey: ['admin', 'llm'],
+  queryFn: () => fetchJson<LlmSettingsPayload>('/api/admin/llm'),
+  retry: false,
+})
+
+export async function setLlmRoute(
+  purpose: string,
+  provider: string,
+  model: string,
+): Promise<LlmSettingsPayload> {
+  return postOrExplain<LlmSettingsPayload>(`/api/admin/llm/${encodeURIComponent(purpose)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ provider, model }),
+  })
+}
+
+/** Return a purpose to the server setting, or the built-in default. */
+export async function clearLlmRoute(purpose: string): Promise<LlmSettingsPayload> {
+  return postOrExplain<LlmSettingsPayload>(`/api/admin/llm/${encodeURIComponent(purpose)}`, {
+    method: 'DELETE',
+  })
+}
+
+/** How the match score is calculated. Read from the scorer, not written out in
+ *  the interface, so the two cannot disagree. */
+export const scoringModelQueryOptions = queryOptions({
+  queryKey: ['push', 'scoring'],
+  queryFn: () => fetchJson<ScoringModel>('/api/push/scoring'),
+  retry: false,
+  // The weights change when somebody tunes them, which is rare; there is no
+  // reason to re-ask on every mount.
+  staleTime: 10 * 60 * 1000,
+})

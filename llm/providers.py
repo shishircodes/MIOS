@@ -185,13 +185,24 @@ _PROVIDERS: dict[str, Any] = {
 # --------------------------------------------------------------------------
 
 
-def _configured_route(purpose: str) -> tuple[str, str]:
+def _configured_route(purpose: str,
+                      stored: dict[str, dict[str, Any]] | None = None) -> tuple[str, str]:
     """Which provider and model serve this purpose.
 
-    Read from settings per purpose, falling back to the global default, and
-    finally to Gemini — which is what every purpose used before this package
-    existed, so an unconfigured deployment behaves exactly as it did.
+    Three layers, most deliberate first: an administrator's choice in the Admin
+    panel, then `LLM_ROUTING` for a deployment that pins a model, then Gemini —
+    which is what every purpose used before this package existed, so an
+    unconfigured deployment behaves exactly as it did.
     """
+    if stored is None:
+        from loader.llm_settings import stored_routing
+        stored = stored_routing()
+
+    chosen = stored.get(purpose)
+    if chosen and chosen.get("provider") in _PROVIDERS:
+        provider = str(chosen["provider"])
+        return provider, str(chosen.get("model") or "") or _PROVIDERS[provider].default_model
+
     per_purpose = (getattr(settings, "llm_routing", None) or {}).get(purpose)
     if per_purpose:
         provider, _, model = per_purpose.partition(":")
@@ -201,12 +212,16 @@ def _configured_route(purpose: str) -> tuple[str, str]:
     return GeminiProvider.name, settings.gemini_model or GeminiProvider.default_model
 
 
-def resolve(purpose: str) -> tuple[str, str]:
-    """The provider name and model for a purpose, without building anything."""
+def resolve(purpose: str, stored: dict[str, dict[str, Any]] | None = None) -> tuple[str, str]:
+    """The provider name and model for a purpose, without building anything.
+
+    `stored` lets a caller listing every purpose read the settings table once
+    rather than once per purpose.
+    """
     if purpose not in PURPOSES:
         raise LLMError(f"'{purpose}' is not a known purpose. "
                        f"Known: {', '.join(sorted(PURPOSES))}.")
-    return _configured_route(purpose)
+    return _configured_route(purpose, stored)
 
 
 def caller_for(purpose: str) -> Caller:
@@ -259,10 +274,28 @@ def available_providers() -> list[dict[str, Any]]:
 
 
 def describe_routing() -> list[dict[str, Any]]:
-    """What each purpose currently resolves to, for the admin screen."""
+    """What each purpose resolves to, and where that came from.
+
+    `source` matters as much as the answer. Somebody wondering why Market Pulse
+    is using a model they did not pick needs to see whether it came from the
+    panel, from an environment variable, or from the built-in default — without
+    that, a model choice is an hour of debugging.
+    """
+    from loader.llm_settings import stored_routing
+
+    # Read once, not once per purpose.
+    stored = stored_routing()
+    env = getattr(settings, "llm_routing", None) or {}
+
     out = []
     for purpose in PURPOSES.values():
-        provider, model = resolve(purpose.name)
+        provider, model = resolve(purpose.name, stored)
+        if purpose.name in stored:
+            source = "admin"
+        elif purpose.name in env:
+            source = "environment"
+        else:
+            source = "default"
         out.append({
             "purpose": purpose.name,
             "label": purpose.label,
@@ -271,5 +304,11 @@ def describe_routing() -> list[dict[str, Any]]:
             "provider": provider,
             "model": model,
             "configured": _PROVIDERS[provider].configured(),
+            "source": source,
+            "changedBy": (stored.get(purpose.name) or {}).get("changed_by"),
+            "changedAt": (stored.get(purpose.name) or {}).get("changed_at"),
+            #: Present when the panel is overriding a pinned deployment value,
+            #: so that is visible rather than mysterious.
+            "overriddenEnv": env.get(purpose.name) if source == "admin" else None,
         })
     return out
