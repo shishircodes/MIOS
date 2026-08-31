@@ -9,16 +9,28 @@ decide who gets in, and check the machine is still collecting.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException
 
-from api import access
+from api import access, scheduler
 from api.auth import require_admin
 from config.settings import settings
+from loader import run_log
 from loader.db import connect
+from loader.schedule import (
+    DAY_NAMES,
+    DEFAULT_GRACE_HOURS,
+    Schedule,
+    ScheduleError,
+    due_occurrence,
+    get_schedule,
+    next_due,
+    set_schedule,
+)
 from loader.source_settings import UnknownSource, list_settings, set_enabled
 from scraper import SOURCE_NAMES
 
@@ -272,3 +284,121 @@ def set_source_enabled(
     except UnknownSource as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return source_health(user)
+
+
+# --------------------------------------------------------------------------
+# The scheduled run
+# --------------------------------------------------------------------------
+
+
+def _schedule_payload(sched: Schedule) -> dict[str, Any]:
+    upcoming = next_due(sched, datetime.now(timezone.utc))
+    return {
+        "enabled": sched.enabled,
+        "dayOfWeek": sched.day_of_week,
+        "hour": sched.hour,
+        "minute": sched.minute,
+        "timezone": sched.timezone,
+        "changedBy": sched.changed_by,
+        "changedAt": sched.changed_at,
+        "describe": sched.describe(),
+        #: Computed here rather than in the browser: the answer depends on the
+        #: IANA zone and the daylight-saving rules for it, and the browser's
+        #: idea of "Monday 05:00 in Sydney" is its own timezone's.
+        "nextRunAt": upcoming.isoformat() if upcoming else None,
+        "dayNames": list(DAY_NAMES),
+        "graceHours": DEFAULT_GRACE_HOURS,
+        #: Whether any process is actually watching this schedule. A time set on
+        #: a server with SCHEDULER_ENABLED unset would sit there looking correct
+        #: and never fire, which is the worst possible failure for this feature.
+        "schedulerRunning": settings.scheduler_enabled,
+        "activeRun": run_log.active_run(),
+        "history": run_log.recent(8),
+    }
+
+
+@router.get("/schedule")
+def read_schedule(user: dict[str, Any] = Depends(require_admin)) -> dict[str, Any]:
+    """When the pipeline runs by itself, and how the recent runs went."""
+    return _schedule_payload(get_schedule())
+
+
+@router.put("/schedule")
+def write_schedule(
+    payload: dict[str, Any] = Body(...),
+    user: dict[str, Any] = Depends(require_admin),
+) -> dict[str, Any]:
+    """Change the day, time or timezone of the automatic run.
+
+    Takes effect within a minute — the ticker re-reads this on every pass rather
+    than caching it at startup, so a change does not wait for a redeploy.
+    """
+    try:
+        sched = set_schedule(
+            enabled=bool(payload.get("enabled", True)),
+            day_of_week=int(payload.get("dayOfWeek", 0)),
+            hour=int(payload.get("hour", 5)),
+            minute=int(payload.get("minute", 0)),
+            tz_name=str(payload.get("timezone") or "Australia/Sydney"),
+            changed_by=user["email"],
+        )
+    except ScheduleError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail="Day, hour and minute must be numbers.") from exc
+    return _schedule_payload(sched)
+
+
+@router.post("/schedule/run", status_code=202)
+async def run_now(user: dict[str, Any] = Depends(require_admin)) -> dict[str, Any]:
+    """Start a pipeline run immediately, without waiting for the schedule.
+
+    Deliberately does not wait for it to finish: a full cycle is minutes of
+    scraping and Gemini calls, far longer than any sensible HTTP timeout. The
+    response says it started; the history says how it went.
+
+    This goes through the same lease as the scheduled run, so pressing it during
+    the Monday run is refused rather than starting a second scrape.
+
+    It also *satisfies* a scheduled run that is still owed. If the server was
+    down at 05:00 and an administrator presses this at 08:00, the occurrence is
+    still inside its catch-up window and the ticker would otherwise start a
+    second scrape a minute later — collecting the same week twice and spending
+    the Gemini quota twice. Recording which occurrence this run served is what
+    prevents that; the trigger stays "manual", because that is who started it.
+    """
+    def _claim() -> str:
+        due = due_occurrence(get_schedule(), datetime.now(timezone.utc))
+        if due is not None and run_log.has_run_for(due):
+            # Already served, so this is an extra run somebody deliberately
+            # asked for rather than the week's scheduled one.
+            due = None
+        try:
+            return run_log.claim(trigger=run_log.TRIGGER_MANUAL, due_at=due,
+                                 started_by=user["email"])
+        except run_log.AlreadyRan:
+            # Another process claimed the occurrence between the check and the
+            # insert. The administrator still asked for a run, so give them one
+            # that is not tied to an occurrence.
+            return run_log.claim(trigger=run_log.TRIGGER_MANUAL,
+                                 started_by=user["email"])
+
+    try:
+        # Claim synchronously so a refusal is a 409 the administrator sees,
+        # rather than a failure that only appears in the log a second later.
+        run_id = await asyncio.to_thread(_claim)
+    except run_log.RunInProgress as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    asyncio.create_task(_finish_manual_run(run_id))
+    return {"started": True, "runId": run_id,
+            "note": "The run has started. It takes a few minutes; this page shows how it went."}
+
+
+async def _finish_manual_run(run_id: str) -> None:
+    """Run an already-claimed manual run. Failures are recorded by
+    `execute_run`; this only stops the exception reaching an unwatched task."""
+    try:
+        await scheduler.execute_run(run_id)
+    except Exception:  # noqa: BLE001 - already recorded against the run
+        log.warning("admin: manual run %s ended in failure", run_id)

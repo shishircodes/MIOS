@@ -43,6 +43,7 @@ from api.digest_service import (
     build_digest_payload,
     build_feed_payload,
 )
+from api import scheduler
 from api.admin_api import router as admin_router
 from api.publish_api import router as publish_router
 from api.push_api import router as push_router
@@ -61,7 +62,12 @@ async def lifespan(_app: FastAPI):
     # No-op once an admin exists. Without it a fresh database has no admin and
     # no way to create one from inside the app.
     access.ensure_bootstrap_admin()
+    # The weekly pipeline. A no-op unless SCHEDULER_ENABLED is set, so only the
+    # deployed server runs it — a developer with the production DSN in their
+    # .env would otherwise start scraping the moment they ran the API.
+    task = scheduler.start(_app.state)
     yield
+    await scheduler.stop(task)
     # Returns the pooled database connections rather than leaving the far end to
     # time them out.
     close_pool()
@@ -94,9 +100,13 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
-    # DELETE is here for /api/push/profiles/{id}: these rows describe real
-    # people, so removing one has to be possible from the UI.
-    allow_methods=["GET", "POST", "PATCH", "DELETE"],
+    # Listed explicitly rather than "*", so each one is here for a reason:
+    # DELETE for /api/push/profiles/{id}, because those rows describe real
+    # people and removing one has to be possible from the UI; PUT for
+    # /api/admin/schedule, which replaces the single settings row rather than
+    # patching a field of it. A method missing from this list fails as a
+    # rejected preflight — visible only in the browser, never in the tests.
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
     allow_headers=["*"],
 )
 

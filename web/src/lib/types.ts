@@ -306,3 +306,38 @@ export interface SourcesPayload {
    *  week reads as a broken pipeline. */
   enabledCount: number
 }
+
+/** One pipeline run, however it was started. */
+export interface PipelineRun {
+  id: string
+  trigger: 'schedule' | 'manual' | 'cli'
+  dueAt: string | null
+  startedAt: string
+  finishedAt: string | null
+  status: 'running' | 'ok' | 'failed'
+  startedBy: string | null
+  collected: number | null
+  note: string | null
+}
+
+export interface SchedulePayload {
+  enabled: boolean
+  dayOfWeek: number
+  hour: number
+  minute: number
+  timezone: string
+  changedBy: string | null
+  changedAt: string | null
+  describe: string
+  /** Computed on the server: "Monday 05:00 in Sydney" depends on that zone's
+   *  daylight-saving rules, not on the rules of the browser's own zone. */
+  nextRunAt: string | null
+  dayNames: string[]
+  graceHours: number
+  /** Whether any process is actually watching this schedule. A time set on a
+   *  server with SCHEDULER_ENABLED unset looks right and never fires. */
+  schedulerRunning: boolean
+  activeRun: PipelineRun | null
+  history: PipelineRun[]
+}
+
