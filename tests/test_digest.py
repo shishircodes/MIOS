@@ -9,7 +9,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from delivery.digest import build_digest, infer_geography
+import api.digest_service as digest_service
+from delivery.digest import _hiring_velocity_section, build_digest, infer_geography
 from delivery.slack import post_digest
 from loader.ingest import init_db
 
@@ -17,14 +18,33 @@ from loader.ingest import init_db
 @pytest.fixture
 def watchlist_file(tmp_path: Path) -> Path:
     p = tmp_path / "wl.json"
-    p.write_text(json.dumps([
-        {"company_name": "BHP", "tier": "A", "sector": "mining",
-         "notes": "", "aliases": []},
-        {"company_name": "Newmont", "tier": "A", "sector": "mining",
-         "notes": "", "aliases": []},
-        {"company_name": "Downer", "tier": "A", "sector": "construction",
-         "notes": "", "aliases": []},
-    ]))
+    p.write_text(
+        json.dumps(
+            [
+                {
+                    "company_name": "BHP",
+                    "tier": "A",
+                    "sector": "mining",
+                    "notes": "",
+                    "aliases": [],
+                },
+                {
+                    "company_name": "Newmont",
+                    "tier": "A",
+                    "sector": "mining",
+                    "notes": "",
+                    "aliases": [],
+                },
+                {
+                    "company_name": "Downer",
+                    "tier": "A",
+                    "sector": "construction",
+                    "notes": "",
+                    "aliases": [],
+                },
+            ]
+        )
+    )
     return p
 
 
@@ -35,12 +55,25 @@ def db(tmp_path: Path, watchlist_file: Path) -> Path:
     return p
 
 
-def _insert_classified(db: Path, *, sid: str, company: str | None, tier: str | None,
-                       sector: str, category: str, cycle: str = "weekly",
-                       new_prospect: bool = False, raw: str = "x" * 80,
-                       captured_at: str | None = None, notes: str = "auto") -> None:
-    captured_at = captured_at or datetime.now(timezone.utc).isoformat(timespec="seconds")
+def _insert_classified(
+    db: Path,
+    *,
+    sid: str,
+    company: str | None,
+    tier: str | None,
+    sector: str,
+    category: str,
+    cycle: str = "weekly",
+    new_prospect: bool = False,
+    raw: str = "x" * 80,
+    captured_at: str | None = None,
+    notes: str = "auto",
+) -> None:
+    captured_at = captured_at or datetime.now(timezone.utc).isoformat(
+        timespec="seconds"
+    )
     classified_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+
     with sqlite3.connect(db) as c:
         c.execute(
             """INSERT INTO signals (
@@ -48,13 +81,26 @@ def _insert_classified(db: Path, *, sid: str, company: str | None, tier: str | N
                 sector, company_name, watchlist_tier, signal_category, review_cycle,
                 raw_content, analysis_notes, is_new_prospect, classified_at
             ) VALUES (?, 'job_board', 'syn', ?, ?, 'PNG', ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (sid, f"u/{sid}", captured_at, sector, company, tier, category, cycle,
-             raw, notes, int(new_prospect), classified_at),
+            (
+                sid,
+                f"u/{sid}",
+                captured_at,
+                sector,
+                company,
+                tier,
+                category,
+                cycle,
+                raw,
+                notes,
+                int(new_prospect),
+                classified_at,
+            ),
         )
         c.commit()
 
 
 # ---------- geography inference ----------
+
 
 def test_infer_geography_png():
     assert infer_geography("Process Operator at Lihir gold mine, PNG") == "PNG"
@@ -67,104 +113,336 @@ def test_infer_geography_au_default():
 
 # ---------- digest sections ----------
 
+
+def test_hiring_velocity_renders_payload_movement():
+    out = _hiring_velocity_section(
+        [
+            {
+                "co": "BHP",
+                "wk": 10,
+                "change": 100,
+                "sector": "mining",
+            },
+            {
+                "co": "Newmont",
+                "wk": 3,
+                "change": -75,
+                "sector": "mining",
+            },
+            {
+                "co": "Downer",
+                "wk": 4,
+                "change": None,
+                "sector": "construction",
+            },
+        ]
+    )
+
+    assert "Movement" in out
+    assert "+100%" in out
+    assert "-75%" in out
+    assert "new" in out
+
+
 def test_build_digest_includes_every_computed_section(db):
     """Four sections, not five.
 
     Market Pulse is the exception: it is written by a model rather than counted,
-    is generated once per pipeline run, and is *omitted* when that generation
+    is generated once per pipeline run, and is omitted when that generation
     fails — there is deliberately no computed fallback. So it is absent here,
     where no pulse was passed in, and its presence is covered separately in
     tests/test_pulse.py.
     """
-    # Both PNG so they fall in the same geography bucket; leadership should rank first.
-    _insert_classified(db, sid="s1", company="Newmont", tier="A", sector="mining",
-                       category="hiring_velocity",
-                       raw="Process operators Newmont Lihir PNG, FIFO from Cairns.")
-    _insert_classified(db, sid="s2", company="Newmont", tier="A", sector="mining",
-                       category="leadership",
-                       raw="GM Lihir Operations - Newmont, PNG. Site GM oversees ~3500 personnel.",
-                       notes="GM succession at Lihir")
-    _insert_classified(db, sid="s3", company="Kumul Petroleum", tier=None, sector="oil_gas",
-                       category="hiring_velocity", new_prospect=True,
-                       raw="Reservoir engineer Kumul Petroleum Port Moresby, PNG state operator.")
 
-    out = build_digest(db, since=datetime.now(timezone.utc) - timedelta(days=7))
+    # Both PNG so they fall in the same geography bucket;
+    # leadership should rank first.
+    _insert_classified(
+        db,
+        sid="s1",
+        company="Newmont",
+        tier="A",
+        sector="mining",
+        category="hiring_velocity",
+        raw="Process operators Newmont Lihir PNG, FIFO from Cairns.",
+    )
+
+    _insert_classified(
+        db,
+        sid="s2",
+        company="Newmont",
+        tier="A",
+        sector="mining",
+        category="leadership",
+        raw=(
+            "GM Lihir Operations - Newmont, PNG. "
+            "Site GM oversees ~3500 personnel."
+        ),
+        notes="GM succession at Lihir",
+    )
+
+    _insert_classified(
+        db,
+        sid="s3",
+        company="Kumul Petroleum",
+        tier=None,
+        sector="oil_gas",
+        category="hiring_velocity",
+        new_prospect=True,
+        raw=(
+            "Reservoir engineer Kumul Petroleum Port Moresby, "
+            "PNG state operator."
+        ),
+    )
+
+    out = build_digest(
+        db,
+        since=datetime.now(timezone.utc) - timedelta(days=7),
+    )
 
     assert "MIOS Weekly Intelligence" in out and "Week of" in out
     assert "Key Signals This Week" in out
-    assert "Market Pulse" not in out, "no pulse was passed, so the section must be absent"
+    assert (
+        "Market Pulse" not in out
+    ), "no pulse was passed, so the section must be absent"
     assert "Hiring Velocity" in out and "Top 10 Watchlist Clients" in out
     assert "New Names (Not in Watchlist)" in out
+
     # Within the PNG bucket, leadership ranks above hiring_velocity.
     assert out.index("leadership") < out.index("hiring velocity")
 
 
 def test_build_digest_groups_by_geography(db):
-    _insert_classified(db, sid="au1", company="BHP", tier="A", sector="mining",
-                       category="hiring_velocity",
-                       raw="Maintenance role BHP Newman Pilbara WA, FIFO ex-Perth.")
-    _insert_classified(db, sid="png1", company="Newmont", tier="A", sector="mining",
-                       category="hiring_velocity",
-                       raw="Process operator Newmont Lihir, PNG. FIFO ex-Cairns.")
-    out = build_digest(db, since=datetime.now(timezone.utc) - timedelta(days=7))
+    _insert_classified(
+        db,
+        sid="au1",
+        company="BHP",
+        tier="A",
+        sector="mining",
+        category="hiring_velocity",
+        raw="Maintenance role BHP Newman Pilbara WA, FIFO ex-Perth.",
+    )
+
+    _insert_classified(
+        db,
+        sid="png1",
+        company="Newmont",
+        tier="A",
+        sector="mining",
+        category="hiring_velocity",
+        raw="Process operator Newmont Lihir, PNG. FIFO ex-Cairns.",
+    )
+
+    out = build_digest(
+        db,
+        since=datetime.now(timezone.utc) - timedelta(days=7),
+    )
+
     assert "AUSTRALIA" in out
     assert "PAPUA NEW GUINEA" in out
-    # AU shown first per builder ordering
+
+    # AU shown first per builder ordering.
     assert out.index("AUSTRALIA") < out.index("PAPUA NEW GUINEA")
 
 
 def test_build_digest_excludes_unclassified(db):
-    # raw insert without classified_at -> should not appear in digest
+    # Raw insert without classified_at -> should not appear in digest.
     with sqlite3.connect(db) as c:
         c.execute(
-            "INSERT INTO signals (signal_id, source_type, source_name, source_url, "
+            "INSERT INTO signals "
+            "(signal_id, source_type, source_name, source_url, "
             "captured_at, geography, raw_content) VALUES "
-            "('u-pending','job_board','syn','u/p',?,'PNG','some pending content')",
-            (datetime.now(timezone.utc).isoformat(timespec="seconds"),),
+            "('u-pending','job_board','syn','u/p',?,'PNG',"
+            "'some pending content')",
+            (
+                datetime.now(timezone.utc).isoformat(
+                    timespec="seconds"
+                ),
+            ),
         )
         c.commit()
-    _insert_classified(db, sid="ok", company="BHP", tier="A", sector="mining",
-                       category="hiring_velocity",
-                       raw="BHP Pilbara maintenance hiring this week, multiple roles open.")
-    out = build_digest(db, since=datetime.now(timezone.utc) - timedelta(days=7))
+
+    _insert_classified(
+        db,
+        sid="ok",
+        company="BHP",
+        tier="A",
+        sector="mining",
+        category="hiring_velocity",
+        raw=(
+            "BHP Pilbara maintenance hiring this week, "
+            "multiple roles open."
+        ),
+    )
+
+    out = build_digest(
+        db,
+        since=datetime.now(timezone.utc) - timedelta(days=7),
+    )
+
     assert "some pending content" not in out
     assert "BHP" in out
 
 
 def test_build_digest_respects_since_window(db):
-    old_ts = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat(timespec="seconds")
-    _insert_classified(db, sid="old", company="BHP", tier="A", sector="mining",
-                       category="hiring_velocity", captured_at=old_ts,
-                       raw="Old BHP signal from a month ago.")
-    out = build_digest(db, since=datetime.now(timezone.utc) - timedelta(days=7))
+    old_ts = (
+        datetime.now(timezone.utc) - timedelta(days=30)
+    ).isoformat(timespec="seconds")
+
+    _insert_classified(
+        db,
+        sid="old",
+        company="BHP",
+        tier="A",
+        sector="mining",
+        category="hiring_velocity",
+        captured_at=old_ts,
+        raw="Old BHP signal from a month ago.",
+    )
+
+    out = build_digest(
+        db,
+        since=datetime.now(timezone.utc) - timedelta(days=7),
+    )
+
     assert "_No classified signals in the reporting window._" in out
 
 
 def test_build_digest_new_prospect_table(db):
-    _insert_classified(db, sid="np1", company="Pilbara Minerals", tier=None,
-                       sector="mining", category="project", new_prospect=True,
-                       raw="Pilbara Minerals expanding Pilgangoora WA spodumene flotation circuit.")
-    out = build_digest(db, since=datetime.now(timezone.utc) - timedelta(days=7))
+    _insert_classified(
+        db,
+        sid="np1",
+        company="Pilbara Minerals",
+        tier=None,
+        sector="mining",
+        category="project",
+        new_prospect=True,
+        raw=(
+            "Pilbara Minerals expanding Pilgangoora WA "
+            "spodumene flotation circuit."
+        ),
+    )
+
+    out = build_digest(
+        db,
+        since=datetime.now(timezone.utc) - timedelta(days=7),
+    )
+
     assert "Pilbara Minerals" in out
     assert "New Names (Not in Watchlist)" in out
 
 
+def test_digest_payload_excludes_competitors_from_new_names(
+    db,
+    tmp_path,
+    monkeypatch,
+):
+    # Create a temporary competitor list for this test.
+    competitors_file = tmp_path / "competitors.json"
+
+    competitors_file.write_text(
+        json.dumps(
+            [
+                "PeopleConnexion",
+                "Kiwi Niugini Recruitment",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        digest_service,
+        "COMPETITORS_PATH",
+        competitors_file,
+    )
+
+    # Competitors are marked as new prospects by the classifier.
+    _insert_classified(
+        db,
+        sid="comp1",
+        company="PeopleConnexion",
+        tier=None,
+        sector="other",
+        category="hiring_velocity",
+        new_prospect=True,
+        raw="PeopleConnexion recruiting multiple roles in Australia.",
+    )
+
+    _insert_classified(
+        db,
+        sid="comp2",
+        company="Kiwi Niugini Recruitment",
+        tier=None,
+        sector="other",
+        category="hiring_velocity",
+        new_prospect=True,
+        raw=(
+            "Kiwi Niugini Recruitment advertising multiple "
+            "PNG vacancies."
+        ),
+    )
+
+    # A genuine new prospect should still appear.
+    _insert_classified(
+        db,
+        sid="real1",
+        company="Pilbara Minerals",
+        tier=None,
+        sector="mining",
+        category="project",
+        new_prospect=True,
+        raw=(
+            "Pilbara Minerals expanding operations and hiring "
+            "new staff."
+        ),
+    )
+
+    payload = digest_service.build_digest_payload(db)
+
+    new_names = {
+        item["co"]
+        for item in payload["newNames"]
+    }
+
+    assert "PeopleConnexion" not in new_names
+    assert "Kiwi Niugini Recruitment" not in new_names
+    assert "Pilbara Minerals" in new_names
+
+
 # ---------- slack post ----------
+
 
 def test_post_digest_success():
     with patch("delivery.slack.requests.post") as mock_post:
-        mock_post.return_value = MagicMock(status_code=200, text="ok")
-        ok = post_digest("https://hooks.slack.com/services/X/Y/Z", "*hello*")
+        mock_post.return_value = MagicMock(
+            status_code=200,
+            text="ok",
+        )
+
+        ok = post_digest(
+            "https://hooks.slack.com/services/X/Y/Z",
+            "*hello*",
+        )
+
     assert ok is True
     mock_post.assert_called_once()
+
     payload = mock_post.call_args.kwargs["json"]
+
     assert payload["text"] == "*hello*"
 
 
 def test_post_digest_non_200_returns_false():
     with patch("delivery.slack.requests.post") as mock_post:
-        mock_post.return_value = MagicMock(status_code=500, text="server error")
-        ok = post_digest("https://hooks.slack.com/services/X/Y/Z", "x")
+        mock_post.return_value = MagicMock(
+            status_code=500,
+            text="server error",
+        )
+
+        ok = post_digest(
+            "https://hooks.slack.com/services/X/Y/Z",
+            "x",
+        )
+
     assert ok is False
 
 
@@ -174,22 +452,51 @@ def test_post_digest_empty_url_returns_false():
 
 def test_post_digest_swallows_request_exception():
     import requests as r
-    with patch("delivery.slack.requests.post", side_effect=r.ConnectionError("boom")):
-        assert post_digest("https://x", "x") is False
+
+    with patch(
+        "delivery.slack.requests.post",
+        side_effect=r.ConnectionError("boom"),
+    ):
+        assert post_digest(
+            "https://x",
+            "x",
+        ) is False
 
 
 def test_a_generated_pulse_slots_in_between_key_signals_and_velocity(db):
     """Order matters: the written read belongs after the signals it describes
-    and before the tables that quantify them."""
-    _insert_classified(db, sid="s1", company="Newmont", tier="A", sector="mining",
-                       category="hiring_velocity",
-                       raw="Process operators Newmont Lihir PNG, FIFO from Cairns.")
+    and before the tables that quantify them.
+    """
+
+    _insert_classified(
+        db,
+        sid="s1",
+        company="Newmont",
+        tier="A",
+        sector="mining",
+        category="hiring_velocity",
+        raw="Process operators Newmont Lihir PNG, FIFO from Cairns.",
+    )
 
     out = build_digest(
         db,
         since=datetime.now(timezone.utc) - timedelta(days=7),
-        pulse=[{"text": "PNG mining hiring is concentrated at Lihir.", "kind": "fact"}],
+        pulse=[
+            {
+                "text": (
+                    "PNG mining hiring is concentrated at Lihir."
+                ),
+                "kind": "fact",
+            }
+        ],
     )
 
-    assert out.index("Key Signals This Week") < out.index("Market Pulse")
-    assert out.index("Market Pulse") < out.index("Hiring Velocity")
+    assert (
+        out.index("Key Signals This Week")
+        < out.index("Market Pulse")
+    )
+
+    assert (
+        out.index("Market Pulse")
+        < out.index("Hiring Velocity")
+    )
