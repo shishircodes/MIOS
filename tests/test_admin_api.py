@@ -35,6 +35,11 @@ def db(tmp_path, monkeypatch):
     monkeypatch.setenv("DB_PATH", str(path))
     monkeypatch.setattr("api.admin_api.connect", lambda t=None, **kw: connect(path, **kw))
     monkeypatch.setattr("api.access.connect", lambda t=None, **kw: connect(path, **kw))
+    # The endpoints write through loader.source_settings, which holds its own
+    # `connect` reference and resolves its own target. Without this, toggling a
+    # source from a test reached whatever DATABASE_URL names.
+    monkeypatch.setattr("loader.source_settings.connect",
+                        lambda t=None, **kw: connect(path, **kw))
     # init_db seeds the bootstrap admin; these tests build the exact access
     # situation under test, so they start from an empty list.
     with connect(path) as conn:
