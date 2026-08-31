@@ -1472,3 +1472,28 @@ overflow-x: auto;
   line-height: 1.5;
   max-width: 46em;
 }
+
+/* Choosing which past week to read. Sits in the digest page header. */
+.digest-pick {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.digest-pick select {
+  font: inherit;
+  font-size: 13px;
+  padding: 4px 8px;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+
+/* A stored digest, as opposed to one computed on the spot. */
+.mode-banner.archived {
+  background: var(--navy-bg);
+  color: var(--navy);
+  border-color: var(--line-2);
+}

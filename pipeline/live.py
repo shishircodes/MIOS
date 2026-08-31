@@ -29,7 +29,9 @@ from api.digest_service import build_digest_payload
 from delivery.digest import build_digest
 from delivery.pulse import generate_pulse, save_pulse
 from delivery.slack import post_digest
-from loader.db import describe, resolve_target
+from loader import run_log
+from loader.db import connect, describe, resolve_target
+from loader.digest_archive import save_digest
 from loader.ingest import ingest, init_db
 from loader.source_settings import enabled_sources
 from scraper import SOURCE_NAMES, scrape_all
@@ -42,6 +44,26 @@ log = logging.getLogger(__name__)
 DEFAULT_SCRAPE_LIMIT = 50
 
 
+def _classified_for_run(db_path: str | Path, run_id: str | None) -> int:
+    """How many classified signals this run collected.
+
+    Counted rather than inferred from the ingest total: a run can insert rows
+    that never get classified — a spent Gemini quota does exactly that — and
+    those cannot appear in a digest.
+    """
+    if not run_id:
+        return 0
+    try:
+        with connect(db_path, readonly=True) as conn:
+            return int(conn.execute(
+                "SELECT count(*) FROM signals WHERE run_id = ? AND classified_at IS NOT NULL",
+                (run_id,),
+            ).fetchone()[0] or 0)
+    except Exception as exc:  # noqa: BLE001 - treat as "nothing of its own"
+        log.warning("live: could not count this run's signals (%s)", exc)
+        return 0
+
+
 def run_live_cycle(
     *,
     scrape_limit: int = DEFAULT_SCRAPE_LIMIT,
@@ -52,9 +74,16 @@ def run_live_cycle(
     do_scrape: bool = True,
     do_slack: bool = True,
     do_pulse: bool = True,
+    run_id: str | None = None,
     gemini_caller: Callable[[str, str], dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Run one production-style cycle.
+
+    `run_id` identifies the pipeline run this cycle belongs to. The scheduler
+    and the Admin panel already claim one before calling, and pass it in; a
+    command-line run claims its own here so that every cycle is recorded and
+    every signal can be traced to the run that collected it. That is what lets
+    a digest cover exactly one run.
 
     `gemini_caller` exists for tests — leave None to use the real Gemini client.
     Returns a summary dict with scraped/ingested/classified counts and the
@@ -64,6 +93,20 @@ def run_live_cycle(
     # (nonsensical) file path and silently write to SQLite instead.
     db_path = resolve_target(db_path)
     init_db(db_path)
+
+    # A cycle started from the command line has no run behind it, so it opens
+    # one. Tolerated rather than required: an unwritable run log should not stop
+    # a scrape, it should only cost this cycle its place in the archive.
+    own_run = False
+    if run_id is None:
+        try:
+            run_id = run_log.claim(trigger=run_log.TRIGGER_CLI, target=db_path)
+            own_run = True
+        except run_log.RunInProgress:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            log.warning("live: could not open a run record (%s) — this cycle will not "
+                        "be archived", exc)
 
     scraped = 0
     inserted = 0
@@ -93,7 +136,7 @@ def run_live_cycle(
         scraped_by_source = dict(Counter(r.get("source_name", "unknown") for r in records))
         log.info("live: scraped %d postings %s", scraped, scraped_by_source)
         if records:
-            inserted = ingest(records, db_path)
+            inserted = ingest(records, db_path, run_id=run_id)
         else:
             log.warning("live: scraper returned 0 records — continuing on existing pending rows")
     else:
@@ -110,15 +153,31 @@ def run_live_cycle(
 
     since = datetime.now(timezone.utc) - timedelta(days=digest_window_days)
 
-    # Market Pulse costs a Gemini call, so it is produced here — once per run —
-    # and stored. The dashboard reads the stored row; it never generates.
+    # Did this run produce anything publishable? Collecting is not enough — rows
+    # that were never classified cannot appear in a digest, which is exactly
+    # what a spent Gemini quota leaves behind.
+    own_signals = _classified_for_run(db_path, run_id)
+
+    # A run with nothing of its own is not archived, and its digest falls back to
+    # the window. Two failures reach here — the scrape returned nothing, or
+    # nothing could be classified — and in both the team should still get the
+    # week's figures rather than a blank message. What must not happen is an
+    # archive entry claiming this run published a week it had no part in.
+    digest_run = run_id if own_signals else None
+    if run_id and not own_signals:
+        log.warning("live: run %s produced no classified signals — posting the rolling "
+                    "window instead, and archiving nothing for it", run_id)
+
+    # One payload, feeding the Market Pulse, the stored digest and the Slack
+    # message — so the three cannot disagree about what the week contained, or
+    # about the window key they file it under.
     #
-    # Built from the same payload the dashboard renders, so the bullets cannot
-    # end up arguing with the table beside them, and so both agree on the window
-    # key without computing it twice.
+    # Market Pulse costs a Gemini call, so it is produced here, once per run, and
+    # stored. The dashboard reads the stored row; it never generates.
+    payload = build_digest_payload(db_path, days=digest_window_days, run_id=digest_run)
+
     pulse = None
     if do_pulse:
-        payload = build_digest_payload(db_path, days=digest_window_days)
         outcome = generate_pulse(payload, target=db_path)
         save_pulse(
             outcome,
@@ -137,7 +196,23 @@ def run_live_cycle(
     else:
         log.info("live: --no-pulse; skipping Market Pulse generation")
 
-    digest_text = build_digest(db_path, since=since, pulse=pulse)
+    digest_text = build_digest(db_path, since=since, pulse=pulse, run_id=digest_run)
+
+    # The archive entry. Written after the digest text so the stored payload and
+    # the message that went to Slack describe the same signals.
+    if digest_run is not None:
+        try:
+            save_digest(
+                run_id=digest_run,
+                payload=payload,
+                window_from=payload.get("collectedFrom") or since.isoformat(timespec="seconds"),
+                window_to=(payload.get("collectedTo")
+                           or datetime.now(timezone.utc).isoformat(timespec="seconds")),
+                digest_text=digest_text,
+                target=db_path,
+            )
+        except Exception as exc:  # noqa: BLE001 - the run still succeeded
+            log.error("live: could not store the digest for run %s (%s)", run_id, exc)
 
     slack_ok = False
     if do_slack:
@@ -161,12 +236,21 @@ def run_live_cycle(
         "digest_chars": len(digest_text),
         "slack_ok": slack_ok,
         "digest": digest_text,
+        "run_id": run_id,
+        #: False when the run produced nothing of its own, so the digest above
+        #: is the rolling window rather than this run's work.
+        "archived": digest_run is not None,
     }
     log.info(
         "live: cycle done — scraped=%d ingested=%d classified=%d digest=%d chars slack=%s",
         scraped, inserted, classified, summary["digest_chars"],
         "ok" if slack_ok else ("skipped" if not do_slack else "failed"),
     )
+    # Only a run this function opened is closed here. One handed in belongs to
+    # the caller, which records the outcome including any failure this cannot
+    # see.
+    if own_run and run_id:
+        run_log.finish(run_id, status=run_log.STATUS_OK, collected=scraped, target=db_path)
     return summary
 
 

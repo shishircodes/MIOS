@@ -228,8 +228,14 @@ def build_digest(
     db_path: str | Path | None,
     since: datetime,
     pulse: list[dict[str, str]] | None = None,
+    run_id: str | None = None,
 ) -> str:
-    """Build a Slack-flavoured weekly digest covering classified signals since `since`.
+    """Build a Slack-flavoured weekly digest.
+
+    With `run_id`, it covers exactly the signals that pipeline run collected, so
+    the message posted to Slack contains the same signals as the digest stored
+    for that run. Without it, it covers everything captured since `since`, which
+    is the behaviour every existing caller relies on.
 
     `db_path` may be a SQLite path, a Postgres DSN, or None to use configuration.
 
@@ -242,15 +248,18 @@ def build_digest(
         since = since.replace(tzinfo=timezone.utc)
     since_iso = since.isoformat(timespec="seconds")
 
+    COLUMNS = ("SELECT signal_id, company_name, sector, signal_category, review_cycle, "
+               "watchlist_tier, is_new_prospect, raw_content, analysis_notes, captured_at "
+               "FROM signals WHERE classified_at IS NOT NULL ")
     with connect(db_path) as conn:
-        signals = conn.execute(
-            "SELECT signal_id, company_name, sector, signal_category, review_cycle, "
-            "watchlist_tier, is_new_prospect, raw_content, analysis_notes, captured_at "
-            "FROM signals "
-            "WHERE classified_at IS NOT NULL AND captured_at >= ? "
-            "ORDER BY captured_at DESC",
-            (since_iso,),
-        ).fetchall()
+        if run_id is not None:
+            signals = conn.execute(
+                COLUMNS + "AND run_id = ? ORDER BY captured_at DESC", (run_id,)
+            ).fetchall()
+        else:
+            signals = conn.execute(
+                COLUMNS + "AND captured_at >= ? ORDER BY captured_at DESC", (since_iso,)
+            ).fetchall()
 
     week_of = since + timedelta(days=0)
     sections = [

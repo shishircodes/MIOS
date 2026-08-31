@@ -256,3 +256,40 @@ CREATE TABLE IF NOT EXISTS pipeline_runs (
 CREATE INDEX IF NOT EXISTS idx_pipeline_runs_started ON pipeline_runs(started_at);
 CREATE UNIQUE INDEX IF NOT EXISTS ux_pipeline_runs_due ON pipeline_runs(due_at);
 
+
+-- ---------------------------------------------------------------------------
+-- One digest per run, kept
+-- ---------------------------------------------------------------------------
+
+-- The digest used to be recomputed from a rolling seven-day window on every
+-- page load, which meant two things at once. It blended runs: a digest built
+-- the day after a Monday scrape showed the previous Monday's signals beside
+-- it, under a heading claiming to be one week. And it had no past: a new run
+-- simply changed what the single page said, so last week's digest could not be
+-- read back.
+--
+-- So a digest is now a snapshot, written once when the run that produced it
+-- finishes, and kept.
+--
+-- `payload` is the rendered dashboard payload as JSON. Storing the finished
+-- shape rather than re-deriving it is deliberate: signals get re-classified,
+-- watchlists change, and competitor lists are edited. Re-deriving would let any
+-- of those silently rewrite a digest that was published weeks ago and possibly
+-- acted on. What is stored is what was sent.
+CREATE TABLE IF NOT EXISTS digests (
+    -- The run this digest belongs to. One run, one digest.
+    run_id       TEXT PRIMARY KEY,
+    -- The capture window this run actually covered, from its own signals.
+    window_from  TEXT NOT NULL,
+    window_to    TEXT NOT NULL,
+    generated_at TEXT NOT NULL,
+    -- How many classified signals the digest was built from, so the archive
+    -- list can be useful without parsing every payload.
+    signal_count INTEGER NOT NULL DEFAULT 0,
+    payload      TEXT NOT NULL,
+    -- The Slack text as posted, so the archive can show what was actually sent
+    -- rather than a re-render of it.
+    digest_text  TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_digests_window_to ON digests(window_to);
+
