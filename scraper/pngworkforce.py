@@ -149,12 +149,16 @@ def _parse_pngworkforce_cards(cards, base_url: str, source_url: str) -> list[dic
 async def _crawl_async(base_url: str, limit: int) -> list[dict[str, Any]]:
     from crawlee.crawlers import BeautifulSoupCrawler, BeautifulSoupCrawlingContext
 
+    from scraper._diagnostics import CrawlWatch
+
     collected: list[dict[str, Any]] = []
+    watch = CrawlWatch("pngworkforce")
 
     crawler = BeautifulSoupCrawler(
         max_requests_per_crawl=max(1, min(limit, 20)),
         request_handler_timeout=__import__("datetime").timedelta(seconds=20),
     )
+    watch.attach(crawler)
 
     @crawler.router.default_handler
     async def _handle(context: BeautifulSoupCrawlingContext) -> None:
@@ -165,7 +169,9 @@ async def _crawl_async(base_url: str, limit: int) -> list[dict[str, Any]]:
                 return
             collected.append(r)
 
-    await crawler.run([base_url])
+    stats = await crawler.run([base_url])
+    # Without this an empty result is indistinguishable from an empty listing.
+    watch.report(stats, len(collected))
     return collected
 
 

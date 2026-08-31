@@ -60,7 +60,14 @@ async def scrape_all_async(
     out: list[dict[str, Any]] = []
     for name in _resolve(sources, base_url):
         records = await registry[name](limit=limit, base_url=base_url)
-        log.info("scrape_all: %s returned %d records", name, len(records))
+        if records:
+            log.info("scrape_all: %s returned %d records", name, len(records))
+        else:
+            # A source that was asked to collect and returned nothing is a
+            # problem, not a routine outcome. The source itself has already
+            # logged why; this makes the run summary say that it happened.
+            log.warning("scrape_all: %s returned NO records — see the reason logged above",
+                        name)
         for r in records:
             # Sources may set their own; default to the registry key so ingest
             # and the digest can attribute every row.

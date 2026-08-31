@@ -165,13 +165,17 @@ def _text(card, selector: str) -> str | None:
 async def _crawl_async(targets: list[str], base_url: str, limit: int) -> list[dict[str, Any]]:
     from crawlee.crawlers import BeautifulSoupCrawler, BeautifulSoupCrawlingContext
 
+    from scraper._diagnostics import CrawlWatch
+
     collected: list[dict[str, Any]] = []
     seen: set[str] = set()
+    watch = CrawlWatch("seek")
 
     crawler = BeautifulSoupCrawler(
         max_requests_per_crawl=max(1, min(len(targets), 20)),
         request_handler_timeout=timedelta(seconds=30),
     )
+    watch.attach(crawler)
 
     @crawler.router.default_handler
     async def _handle(context: BeautifulSoupCrawlingContext) -> None:
@@ -188,7 +192,9 @@ async def _crawl_async(targets: list[str], base_url: str, limit: int) -> list[di
             seen.add(key)
             collected.append(r)
 
-    await crawler.run(targets)
+    stats = await crawler.run(targets)
+    # Without this an empty result is indistinguishable from an empty listing.
+    watch.report(stats, len(collected))
     return collected
 
 
