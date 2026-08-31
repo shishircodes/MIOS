@@ -127,7 +127,12 @@ def load_settings() -> Settings:
         database_url=_get("DATABASE_URL"),
         log_level=_get("LOG_LEVEL", "INFO"),
         apify_token=_get("APIFY_TOKEN"),
-        pngworkforce_base_url=_get("PNGWORKFORCE_BASE_URL", "https://www.pngworkforce.com"),
+        # The listings page, not the homepage. The homepage carries no job
+        # cards, so the default silently scraped nothing wherever
+        # PNGWORKFORCE_BASE_URL was unset — which was every deployed
+        # container, while every developer had it in their .env.
+        pngworkforce_base_url=_get("PNGWORKFORCE_BASE_URL",
+                                   "https://www.pngworkforce.com/jobs/view-latest-jobs"),
         seek_base_url=_get("SEEK_BASE_URL", "https://au.seek.com"),
         seek_paths=_get_list("SEEK_PATHS"),
         adzuna_app_id=_get("ADZUNA_APP_ID"),

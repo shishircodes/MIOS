@@ -31,6 +31,13 @@ services:
       ADZUNA_COUNTRY: ${ADZUNA_COUNTRY:-au}
       ADZUNA_QUERIES: ${ADZUNA_QUERIES:-}
 
+      # Scrape targets. Defaulted in config/settings.py, listed here because a
+      # source silently collecting nothing because the container never received
+      # a URL is exactly the failure this file should make visible.
+      PNGWORKFORCE_BASE_URL: ${PNGWORKFORCE_BASE_URL:-}
+      SEEK_BASE_URL: ${SEEK_BASE_URL:-}
+      SEEK_PATHS: ${SEEK_PATHS:-}
+
       # Whether this process runs the weekly pipeline by itself. Deliberately
       # an environment variable and not a database setting: it answers "is this
       # the process that runs it?", which is a property of the deployment, not
