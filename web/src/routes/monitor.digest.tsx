@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { flushSync } from 'react-dom'
 import { CapturedAt, Drawer, Icons, Loading, Section, SparkBar, TierChip, Trend } from '~/components/ui'
 import { digestQueryOptions } from '~/lib/api'
 import { UnauthenticatedError } from '~/lib/auth'
@@ -45,6 +46,15 @@ function WeeklyDigest() {
   useEffect(() => {
     setQuery(urlQuery ?? '')
   }, [urlQuery])
+
+  // Print must include every collected signal, not the on-screen preview of
+  // twelve. `beforeprint` covers the header button and Cmd/Ctrl+P; flushSync
+  // commits the extra rows before the browser snapshots the page.
+  useEffect(() => {
+    const expand = () => flushSync(() => setShowAll(true))
+    window.addEventListener('beforeprint', expand)
+    return () => window.removeEventListener('beforeprint', expand)
+  }, [])
 
   // Same rule as `matched` below: these run before any early return, so they
   // tolerate `data` being undefined while the query is in flight. Keyed on what
@@ -149,11 +159,14 @@ function WeeklyDigest() {
           <h1>{data.weekLabel}</h1>
         </div>
         <div className="meta">
-          <div style={{ marginTop: 6, display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+          <div style={{ marginTop: 6, display: 'flex', gap: 6, justifyContent: 'flex-end', alignItems: 'center' }}>
             <span className={`mode-banner ${data.sourceMode}`}>
               <span className={data.sourceMode === 'live' ? 'dot-ok' : 'dot-warn'} />
               {data.sourceMode === 'live' ? 'Live data' : 'Sample data'}
             </span>
+            <button type="button" className="btn sm" onClick={() => window.print()}>
+              Print / Save as PDF
+            </button>
           </div>
         </div>
       </div>
