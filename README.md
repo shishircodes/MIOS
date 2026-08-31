@@ -548,7 +548,9 @@ production and never in development:
   would double-spend it. A container killed mid-scrape leaves a lease that goes
   stale after 90 minutes rather than blocking the pipeline for good.
 
-`Run now` starts a cycle immediately through the same lease, and the run history
+`Run now` starts a cycle immediately through the same lease, and satisfies a
+scheduled run that is still owed — pressing it at 08:00 after the server missed
+05:00 collects the week once, not twice — and the run history
 under the panel says how the last few went — which is what makes "why is there no
 digest this week?" answerable.
 

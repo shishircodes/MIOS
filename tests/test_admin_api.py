@@ -9,6 +9,7 @@ from __future__ import annotations
 import itertools
 import json
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -252,3 +253,84 @@ def test_every_method_the_client_uses_is_allowed_cross_origin():
         if method not in {"HEAD", "OPTIONS"}
     }
     assert used <= allowed, f"the browser cannot reach: {sorted(used - allowed)}"
+
+
+# ---------- "Run now" and the run the schedule still owes ----------
+#
+# The window these cover is real and narrow: the server was down at 05:00, it
+# comes back at 08:00, and an administrator presses Run now before the ticker's
+# next pass. Both want to run the same week.
+
+
+def _run_now_claim(db, monkeypatch, *, now, email="boss@easyskill.com"):
+    """The claim half of POST /schedule/run, at a chosen moment."""
+    import api.admin_api as mod
+    from loader import run_log
+    from loader.schedule import Schedule, due_occurrence
+
+    class _Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return now
+
+    monkeypatch.setattr(mod, "datetime", _Clock)
+    monkeypatch.setattr(mod, "get_schedule", lambda *a, **k: Schedule())
+
+    due = due_occurrence(Schedule(), now)
+    if due is not None and run_log.has_run_for(due, db):
+        due = None
+    return run_log.claim(trigger=run_log.TRIGGER_MANUAL, due_at=due,
+                         started_by=email, target=db)
+
+
+def test_run_now_satisfies_a_scheduled_run_that_is_still_owed(db, monkeypatch):
+    """Otherwise the ticker starts a second scrape a minute later: the same week
+    collected twice, and the daily Gemini quota spent twice."""
+    from loader import run_log
+    from loader.schedule import Schedule, due_occurrence
+
+    syd = ZoneInfo("Australia/Sydney")
+    eight_am = datetime(2026, 9, 7, 8, 0, tzinfo=syd)          # Monday, 3h late
+    due = due_occurrence(Schedule(), eight_am)
+    assert due is not None, "the fixture moment must be inside the catch-up window"
+
+    run_id = _run_now_claim(db, monkeypatch, now=eight_am)
+    run_log.finish(run_id, status=run_log.STATUS_OK, collected=146, target=db)
+
+    # What the ticker asks a minute later.
+    assert run_log.has_run_for(due, db), "the ticker would start a second scrape"
+
+
+def test_run_now_is_still_allowed_once_the_week_has_run(db, monkeypatch):
+    """Satisfying the occurrence must not turn Run now into a once-a-week
+    button — an administrator may deliberately collect twice."""
+    from loader import run_log
+    from loader.schedule import Schedule, due_occurrence
+
+    syd = ZoneInfo("Australia/Sydney")
+    eight_am = datetime(2026, 9, 7, 8, 0, tzinfo=syd)
+    due = due_occurrence(Schedule(), eight_am)
+
+    scheduled = run_log.claim(trigger=run_log.TRIGGER_SCHEDULE, due_at=due, target=db)
+    run_log.finish(scheduled, status=run_log.STATUS_OK, collected=146, target=db)
+
+    second = _run_now_claim(db, monkeypatch, now=eight_am)
+    run_log.finish(second, status=run_log.STATUS_OK, collected=12, target=db)
+
+    assert len(run_log.recent(5, db)) == 2
+
+
+def test_run_now_outside_the_catch_up_window_owes_nothing(db, monkeypatch):
+    """Pressed on a Thursday it is simply a manual run, and must not consume
+    the coming Monday."""
+    from loader import run_log
+    from loader.schedule import Schedule, next_due
+
+    syd = ZoneInfo("Australia/Sydney")
+    thursday = datetime(2026, 9, 10, 14, 0, tzinfo=syd)
+
+    run_id = _run_now_claim(db, monkeypatch, now=thursday)
+    run_log.finish(run_id, status=run_log.STATUS_OK, target=db)
+
+    coming_monday = next_due(Schedule(), thursday)
+    assert not run_log.has_run_for(coming_monday, db), "it ate next week's run"

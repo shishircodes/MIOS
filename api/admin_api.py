@@ -26,6 +26,7 @@ from loader.schedule import (
     DEFAULT_GRACE_HOURS,
     Schedule,
     ScheduleError,
+    due_occurrence,
     get_schedule,
     next_due,
     set_schedule,
@@ -358,13 +359,34 @@ async def run_now(user: dict[str, Any] = Depends(require_admin)) -> dict[str, An
 
     This goes through the same lease as the scheduled run, so pressing it during
     the Monday run is refused rather than starting a second scrape.
+
+    It also *satisfies* a scheduled run that is still owed. If the server was
+    down at 05:00 and an administrator presses this at 08:00, the occurrence is
+    still inside its catch-up window and the ticker would otherwise start a
+    second scrape a minute later — collecting the same week twice and spending
+    the Gemini quota twice. Recording which occurrence this run served is what
+    prevents that; the trigger stays "manual", because that is who started it.
     """
+    def _claim() -> str:
+        due = due_occurrence(get_schedule(), datetime.now(timezone.utc))
+        if due is not None and run_log.has_run_for(due):
+            # Already served, so this is an extra run somebody deliberately
+            # asked for rather than the week's scheduled one.
+            due = None
+        try:
+            return run_log.claim(trigger=run_log.TRIGGER_MANUAL, due_at=due,
+                                 started_by=user["email"])
+        except run_log.AlreadyRan:
+            # Another process claimed the occurrence between the check and the
+            # insert. The administrator still asked for a run, so give them one
+            # that is not tied to an occurrence.
+            return run_log.claim(trigger=run_log.TRIGGER_MANUAL,
+                                 started_by=user["email"])
+
     try:
         # Claim synchronously so a refusal is a 409 the administrator sees,
         # rather than a failure that only appears in the log a second later.
-        run_id = await asyncio.to_thread(
-            lambda: run_log.claim(trigger=run_log.TRIGGER_MANUAL, started_by=user["email"])
-        )
+        run_id = await asyncio.to_thread(_claim)
     except run_log.RunInProgress as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
