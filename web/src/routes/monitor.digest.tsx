@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { CapturedAt, Drawer, Icons, Loading, Section, SparkBar, TierChip, Trend } from '~/components/ui'
-import { digestQueryOptions } from '~/lib/api'
+import { digestArchiveQueryOptions, digestByRunQueryOptions, digestQueryOptions } from '~/lib/api'
 import { UnauthenticatedError } from '~/lib/auth'
 import { useAuth } from '~/lib/auth-context'
 import { useFigure, useGrowBar, useGrowBars, useReveal } from '~/lib/motion'
@@ -34,7 +34,15 @@ export const Route = createFileRoute('/monitor/digest')({
 })
 
 function WeeklyDigest() {
-  const { data, isLoading, isError, error } = useQuery(digestQueryOptions)
+  // Empty means "the latest", which is what the page opens on. Picking an
+  // earlier week swaps in that run's stored digest.
+  const [runId, setRunId] = useState('')
+  const latest = useQuery(digestQueryOptions)
+  const chosen = useQuery(digestByRunQueryOptions(runId))
+  const archive = useQuery(digestArchiveQueryOptions)
+
+  const active = runId === '' ? latest : chosen
+  const { data, isLoading, isError, error } = active
   const { refresh } = useAuth()
   const [drawer, setDrawer] = useState<Signal | null>(null)
   const { q: urlQuery } = Route.useSearch()
@@ -149,7 +157,34 @@ function WeeklyDigest() {
           <h1>{data.weekLabel}</h1>
         </div>
         <div className="meta">
+          {/* Past digests. Each entry is one pipeline run, so choosing a week
+              shows exactly what that run collected and what was published from
+              it — not a recomputation, which later re-classification or a
+              watchlist edit would quietly change. */}
+          {(archive.data?.digests.length ?? 0) > 1 && (
+            <label className="digest-pick">
+              <span className="fld">Week</span>
+              <select value={runId} onChange={(e) => setRunId(e.target.value)}>
+                <option value="">Latest</option>
+                {archive.data?.digests.map((d) => (
+                  <option key={d.runId} value={d.runId}>
+                    {new Date(d.windowTo).toLocaleDateString('en-AU', {
+                      day: 'numeric', month: 'short', year: 'numeric',
+                    })} · {d.signalCount} signals
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           <div style={{ marginTop: 6, display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+            {/* An archived digest is a snapshot; a live one is being computed
+                now because nothing has been stored yet. Saying which stops a
+                live computation being read as a published digest. */}
+            {data.archived && (
+              <span className="mode-banner archived" title={`Run ${data.archived.runId.slice(0, 8)}`}>
+                Archived
+              </span>
+            )}
             <span className={`mode-banner ${data.sourceMode}`}>
               <span className={data.sourceMode === 'live' ? 'dot-ok' : 'dot-warn'} />
               {data.sourceMode === 'live' ? 'Live data' : 'Sample data'}

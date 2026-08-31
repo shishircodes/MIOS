@@ -31,6 +31,10 @@ ADDED_COLUMNS: tuple[tuple[str, str, str], ...] = (
     ("reports", "prose_note", "TEXT"),
     ("report_sections", "computed_body", "TEXT"),
     ("signals", "region", "TEXT"),
+    # Which pipeline run collected the row. Nullable: rows gathered before
+    # digests were kept per run have no run to point at, and inventing one
+    # would fabricate an archive entry that never existed.
+    ("signals", "run_id", "TEXT"),
 )
 
 #: Indexes that depend on a migrated column, so they cannot live in schema.sql —
@@ -39,6 +43,9 @@ ADDED_INDEXES: tuple[tuple[str, str], ...] = (
     ("idx_signals_region", "CREATE INDEX IF NOT EXISTS idx_signals_region ON signals(region)"),
     ("idx_signals_feed",
      "CREATE INDEX IF NOT EXISTS idx_signals_feed ON signals(classified_at, captured_at)"),
+    # Every digest read scopes by run, so this is the archive's hot path.
+    ("idx_signals_run",
+     "CREATE INDEX IF NOT EXISTS idx_signals_run ON signals(run_id)"),
     # `window_to` is the newest capture in the window — i.e. which scrape this
     # is — so it identifies a Market Pulse on its own. The table's primary key
     # also carries `window_from`, which moves by itself as older signals age
@@ -213,8 +220,15 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
-def ingest(records: Iterable[dict], target: str | Path | None = None) -> int:
-    """Insert raw scraped records into signals. Dedupe on source_url. Return inserted count."""
+def ingest(records: Iterable[dict], target: str | Path | None = None,
+           run_id: str | None = None) -> int:
+    """Insert raw scraped records into signals. Dedupe on source_url. Return inserted count.
+
+    `run_id` stamps every row with the pipeline run that collected it, which is
+    what lets a digest cover exactly one run rather than a rolling window. It is
+    optional so that a bare `ingest()` — tests, one-off imports — still works;
+    those rows simply never belong to a digest.
+    """
     inserted = 0
     skipped = 0
     with connect(target) as conn:
@@ -247,6 +261,7 @@ def ingest(records: Iterable[dict], target: str | Path | None = None) -> int:
                 rec.get("analysis_notes"),
                 int(bool(rec.get("is_new_prospect", 0))),
                 rec.get("classified_at"),
+                run_id,
             )
             # ON CONFLICT DO NOTHING rather than catching a duplicate-key error:
             # Postgres aborts the whole transaction on a constraint violation, so
@@ -259,8 +274,8 @@ def ingest(records: Iterable[dict], target: str | Path | None = None) -> int:
                     signal_id, source_type, source_name, source_url, captured_at,
                     geography, region, sector, company_name, watchlist_tier,
                     signal_category, review_cycle, raw_content, analysis_notes,
-                    is_new_prospect, classified_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    is_new_prospect, classified_at, run_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT DO NOTHING
                 RETURNING signal_id""",
                 row,

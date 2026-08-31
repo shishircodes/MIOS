@@ -13,7 +13,9 @@ Endpoints:
     GET  /auth/login   -> start Google Sign-In
     GET  /auth/callback-> OAuth redirect target
     POST /auth/logout  -> clear the session
-    GET  /api/digest   -> structured weekly digest  [AUTH REQUIRED]
+    GET  /api/digest   -> the latest stored weekly digest  [AUTH REQUIRED]
+    GET  /api/digests  -> the archive: every past digest, newest first
+    GET  /api/digest/{run_id} -> one past digest
     GET  /api/signals  -> the full signal list, paginated  [AUTH REQUIRED]
 
 The Admin section lives at /api/admin/* and is gated by `require_admin`, not
@@ -30,7 +32,7 @@ import logging
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import Depends, FastAPI, Query
+from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -50,6 +52,7 @@ from api.push_api import router as push_router
 from api.watchlist_api import router as watchlist_router
 from config.settings import configure_logging, settings
 from loader.db import backend_label, close_pool
+from loader.digest_archive import latest_digest, list_digests, load_digest
 
 configure_logging()
 log = logging.getLogger("api.server")
@@ -151,12 +154,64 @@ def digest(
     days: int = Query(DEFAULT_WINDOW_DAYS, ge=1, le=365, description="capture window in days"),
     user: dict[str, Any] = Depends(require_user),
 ) -> dict:
-    log.info("api: /api/digest served to %s (window=%dd)", user["email"], days)
+    """The most recent stored digest.
+
+    A digest belongs to the pipeline run that produced it and is written when
+    that run finishes, so this serves a snapshot rather than recomputing one.
+    That is what stops a page load blending two runs into a single "week".
+
+    Falls back to computing over the rolling window when nothing has been
+    archived yet — a fresh database, or one whose signals predate the archive.
+    The response says which of the two it is, so the dashboard can tell the
+    reader rather than passing a live computation off as a published digest.
+    """
+    stored = latest_digest()
+    if stored is not None:
+        stored["backend"] = backend_label()
+        stored["live"] = False
+        log.info("api: /api/digest served to %s (archived run %s)",
+                 user["email"], stored.get("archived", {}).get("runId"))
+        return stored
+
+    log.info("api: /api/digest served to %s (no archive yet; live window=%dd)",
+             user["email"], days)
     payload = build_digest_payload(days=days)
     # Name the engine, never the DSN — a Neon connection string embeds the
     # password, so it must not reach the browser or a log line.
     payload["backend"] = backend_label()
+    payload["live"] = True
+    payload["archived"] = None
     return payload
+
+
+@app.get("/api/digests")
+def digest_archive(
+    limit: int = Query(26, ge=1, le=200),
+    user: dict[str, Any] = Depends(require_user),
+) -> dict:
+    """Every stored digest, newest first, without payloads.
+
+    This is a picker, not a reader: it carries the window and the signal count
+    so somebody can choose which week to open, and nothing else.
+    """
+    entries = list_digests(limit)
+    log.info("api: /api/digests served to %s (%d entries)", user["email"], len(entries))
+    return {"digests": entries}
+
+
+@app.get("/api/digest/{run_id}")
+def digest_by_run(
+    run_id: str,
+    user: dict[str, Any] = Depends(require_user),
+) -> dict:
+    """One past digest, exactly as it was published."""
+    stored = load_digest(run_id)
+    if stored is None:
+        raise HTTPException(status_code=404, detail="No digest is stored for that run.")
+    stored["backend"] = backend_label()
+    stored["live"] = False
+    log.info("api: /api/digest/%s served to %s", run_id, user["email"])
+    return stored
 
 @app.get("/api/signals")
 def signals(

@@ -79,8 +79,15 @@ SELECT_SIGNALS = (
 def _rows_from_db(
     target: str | Path | None = None,
     since: datetime | None = None,
+    run_id: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Classified rows, newest first. `since` restricts to a capture window.
+    """Classified rows, newest first.
+
+    `run_id` restricts to the signals one pipeline run collected, which is what
+    a stored digest covers. `since` restricts to a capture window instead, which
+    is what the live dashboard uses before any run has been archived. They are
+    alternatives: a run already defines its own window, so combining them could
+    only ever remove rows the run did collect.
 
     Returns [] rather than raising when the database isn't usable yet: the caller
     falls back to the synthetic dataset, so a fresh checkout with no database
@@ -94,7 +101,12 @@ def _rows_from_db(
         return []
     try:
         with connect(resolved, readonly=True) as conn:
-            if since is not None:
+            if run_id is not None:
+                rows = conn.execute(
+                    SELECT_SIGNALS + "AND run_id = ? ORDER BY captured_at DESC",
+                    (run_id,),
+                ).fetchall()
+            elif since is not None:
                 rows = conn.execute(
                     SELECT_SIGNALS + "AND captured_at >= ? ORDER BY captured_at DESC",
                     (since.isoformat(timespec="seconds"),),
@@ -345,14 +357,30 @@ def shape_signal(r: dict[str, Any], index: int) -> dict[str, Any]:
 def build_digest_payload(
     db_path: str | Path | None = None,
     days: int = DEFAULT_WINDOW_DAYS,
+    run_id: str | None = None,
 ) -> dict[str, Any]:
-    """Build the dashboard payload for the last `days` of captured signals.
+    """Build the dashboard payload.
+
+    With `run_id`, the payload covers exactly the signals that run collected —
+    one run, one digest. Without it, the payload covers the last `days` of
+    captures, which is what the live dashboard shows until a run has been
+    archived.
+
+    Note what stays unscoped either way: the velocity baselines below read the
+    full history on purpose. The signals a digest *reports* belong to one run;
+    the figure it compares them against is everything before. Scoping the
+    baseline to the run too would make every company look new every week.
 
     Three outcomes, reported so the UI can be honest about which it got:
 
     * signals in the window          -> sourceMode="live",      windowEmpty=False
     * none in the window, some older -> sourceMode="live",      windowEmpty=True
     * nothing classified at all      -> sourceMode="synthetic", windowEmpty=False
+
+    Neither fallback applies when `run_id` is given: a run that collected
+    nothing reports nothing, because both alternatives would misattribute — one
+    files another run's signals under this one, the other stores the demo
+    dataset as a published digest.
 
     The middle case is why this isn't a plain time filter. A strict window would
     blank the dashboard in any week the pipeline hasn't run; falling back to the
@@ -370,16 +398,22 @@ def build_digest_payload(
     # have produced different headline figures from identical data.
     since = _day_after(datetime.now(timezone.utc)) - timedelta(days=days)
 
-    rows = _rows_from_db(db_path, since=since)
+    rows = (_rows_from_db(db_path, run_id=run_id) if run_id is not None
+            else _rows_from_db(db_path, since=since))
     source_mode = "live"
     window_empty = False
 
-    if not rows:
+    # Neither fallback applies to a run-scoped digest, and both would be wrong.
+    # A run collected what it collected: showing older signals instead would
+    # file another run's rows under this one, and showing the synthetic demo set
+    # would store fabricated companies as a published digest that somebody could
+    # act on. An empty run is a real outcome and is reported as one.
+    if not rows and run_id is None:
         # Nothing captured in the window — show the latest we do have, flagged.
         rows = _rows_from_db(db_path)
         window_empty = bool(rows)
 
-    if not rows:
+    if not rows and run_id is None:
         rows = _rows_from_synthetic(settings.synthetic_postings_path)
         source_mode = "synthetic"
         window_empty = False

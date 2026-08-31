@@ -554,6 +554,42 @@ scheduled run that is still owed — pressing it at 08:00 after the server misse
 under the panel says how the last few went — which is what makes "why is there no
 digest this week?" answerable.
 
+### One digest per run, and an archive
+
+A digest belongs to the pipeline run that produced it. It is built when that run
+finishes, stored, and kept.
+
+Before this it was recomputed from a rolling seven-day window on every page
+load, which caused two problems at once. It **blended runs**: a page load the
+day after a Monday scrape showed the previous Monday's signals beside that one,
+under a heading claiming to cover a single week. And it had **no past**: a new
+run simply changed what the one page said, so the digest that had been sent to
+Slack could not be read back.
+
+Every signal now carries the `run_id` of the run that collected it, and
+`/api/digest` serves the latest stored snapshot rather than recomputing.
+`/api/digests` lists the archive and `/api/digest/{run_id}` opens one; the
+weekly digest page has a week picker when more than one exists.
+
+Three decisions worth knowing:
+
+- **The payload is stored, not re-derived.** Re-deriving would let a later
+  re-classification, a watchlist edit or a new competitor silently rewrite a
+  digest published weeks ago and possibly acted on. What is stored is what was
+  published.
+- **Velocity baselines still read the whole history.** The signals a digest
+  *reports* belong to one run; the figures it compares them against are
+  everything before. Scoping the baseline too would make every company look new
+  every week.
+- **A run that produced nothing is not archived.** Both a failed scrape and a
+  spent Gemini quota leave a run with nothing publishable. Those still post the
+  rolling window to Slack, so a failure does not mean a blank message — but no
+  archive entry is written claiming that run published a week it had no part in.
+
+Signals collected before this change carry no run id, so the archive begins with
+the next run. `/api/digest` falls back to computing over the window until then,
+and says so with `live: true`.
+
 ### Market Pulse
 
 Everything else in the weekly digest is arithmetic. Market Pulse (spec §9.1) is

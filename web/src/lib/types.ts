@@ -224,7 +224,25 @@ export interface FeedPayload {
   offset: number
 }
 
+/** One entry in the digest archive — enough to choose a week, no payload. */
+export interface DigestArchiveEntry {
+  runId: string
+  windowFrom: string
+  windowTo: string
+  generatedAt: string
+  signalCount: number
+}
+
 export interface DigestPayload {
+  /** Set when this digest was read from the archive: which run produced it and
+   *  what it covered. Null when the payload was computed live because nothing
+   *  has been archived yet. */
+  archived?: DigestArchiveEntry | null
+  /** True only for that live fallback. A stored digest is a snapshot of what
+   *  was published; a live one is being computed right now. */
+  live?: boolean
+  /** The Slack message as posted for this run, when one was stored. */
+  digestText?: string | null
   sourceMode: 'live' | 'synthetic'
   /** Which engine served this — e.g. "Neon PostgreSQL". Absent on older payloads. */
   backend?: string

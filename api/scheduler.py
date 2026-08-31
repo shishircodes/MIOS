@@ -81,7 +81,10 @@ async def execute_run(run_id: str) -> dict[str, Any]:
 
     beat = asyncio.create_task(_beat(run_id))
     try:
-        summary = await asyncio.to_thread(run_live_cycle)
+        # The run id goes down with it: the cycle stamps every signal with it
+        # and stores the digest under it. Without this the cycle would try to
+        # open a second run and be refused by the lease this one holds.
+        summary = await asyncio.to_thread(lambda: run_live_cycle(run_id=run_id))
     except Exception as exc:  # noqa: BLE001 - recorded, then re-raised
         await asyncio.to_thread(
             run_log.finish, run_id, status=run_log.STATUS_FAILED, note=repr(exc)

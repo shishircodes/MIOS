@@ -3,6 +3,7 @@ import { API_BASE } from './config'
 import { fetchJson } from './auth'
 import type {
   AccessPayload,
+  DigestArchiveEntry,
   DigestPayload,
   FeedPayload,
   FeedQuery,
@@ -29,6 +30,24 @@ export const digestQueryOptions = queryOptions({
   // A 401 means "sign in", not "retry" — the auth gate handles it.
   retry: false,
 })
+
+/** The archive: every past digest, newest first, without payloads. */
+export const digestArchiveQueryOptions = queryOptions({
+  queryKey: ['digest', 'archive'],
+  queryFn: () => fetchJson<{ digests: DigestArchiveEntry[] }>('/api/digests'),
+  retry: false,
+})
+
+/** One past digest, exactly as it was published. `runId` empty means "latest",
+ *  which is what the page shows until somebody picks an earlier week. */
+export function digestByRunQueryOptions(runId: string) {
+  return queryOptions({
+    queryKey: ['digest', 'run', runId],
+    queryFn: () => fetchJson<DigestPayload>(`/api/digest/${encodeURIComponent(runId)}`),
+    enabled: runId !== '',
+    retry: false,
+  })
+}
 
 // ---------- Signal Feed ----------
 
