@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 import api.digest_service as digest_service
-from delivery.digest import build_digest, infer_geography
+from delivery.digest import _hiring_velocity_section, build_digest, infer_geography
 from delivery.slack import post_digest
 from loader.ingest import init_db
 
@@ -67,6 +67,19 @@ def test_infer_geography_au_default():
 
 
 # ---------- digest sections ----------
+
+def test_hiring_velocity_renders_payload_movement():
+    out = _hiring_velocity_section([
+        {"co": "BHP", "wk": 10, "change": 100, "sector": "mining"},
+        {"co": "Newmont", "wk": 3, "change": -75, "sector": "mining"},
+        {"co": "Downer", "wk": 4, "change": None, "sector": "construction"},
+    ])
+
+    assert "Movement" in out
+    assert "+100%" in out
+    assert "-75%" in out
+    assert "new" in out
+
 
 def test_build_digest_includes_all_five_sections(db):
     # Both PNG so they fall in the same geography bucket; leadership should rank first.

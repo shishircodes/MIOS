@@ -169,28 +169,21 @@ def _market_pulse_section(signals: list[Any]) -> str:
     return "\n".join(bullets)
 
 
-def _hiring_velocity_section(signals: list[Any], top_n: int = 10) -> str:
-    counter: Counter[str] = Counter()
-    sector_by_company: dict[str, str] = {}
-    for r in signals:
-        if not r["watchlist_tier"]:
-            continue  # only watchlist clients in this table
-        name = r["company_name"]
-        if not name:
-            continue
-        counter[name] += 1
-        sector_by_company.setdefault(name, r["sector"] or "")
-    rows = counter.most_common(top_n)
+def _hiring_velocity_section(velocity: list[dict[str, Any]], top_n: int = 10) -> str:
+    rows = velocity[:top_n]
     lines = [":bar_chart: *Hiring Velocity — Top 10 Watchlist Clients*"]
     if not rows:
         lines.append("_No watchlist activity this week._")
         return "\n".join(lines)
     lines.append("```")
-    lines.append(f"{'Company':<24} {'This Week':>10}  {'Sector':<14}")
-    lines.append("-" * 52)
-    for company, n in rows:
-        sector = SECTOR_PRETTY.get(sector_by_company.get(company, ""), "—")
-        lines.append(f"{company[:24]:<24} {n:>10}  {sector:<14}")
+    lines.append(f"{'Company':<24} {'This Week':>10}  {'Movement':>10}  {'Sector':<14}")
+    lines.append("-" * 64)
+    for row in rows:
+        company = row["co"]
+        change = row["change"]
+        movement = "new" if change is None else f"{change:+d}%"
+        sector = SECTOR_PRETTY.get(row.get("sector", ""), "—")
+        lines.append(f"{company[:24]:<24} {row['wk']:>10}  {movement:>10}  {sector:<14}")
     lines.append("```")
     return "\n".join(lines)
 
@@ -247,12 +240,18 @@ def build_digest(db_path: str | Path | None, since: datetime) -> str:
             (since_iso,),
         ).fetchall()
 
+    # Imported here because digest_service reuses ranking helpers from this module.
+    from api.digest_service import build_digest_payload
+
+    days = max(1, (datetime.now(timezone.utc) - since).days)
+    velocity = build_digest_payload(db_path, days=days)["velocity"]
+
     week_of = since + timedelta(days=0)
     sections = [
         f":large_blue_circle: *MIOS Weekly Intelligence — Week of {_format_week_of(week_of)}*",
         _key_signals_section(signals),
         _market_pulse_section(signals),
-        _hiring_velocity_section(signals),
+        _hiring_velocity_section(velocity),
         _new_names_section(signals),
     ]
     return "\n\n".join(sections)
