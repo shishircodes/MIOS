@@ -226,3 +226,22 @@ def test_a_run_that_produced_nothing_is_not_archived(db, monkeypatch, tmp_path):
     # The digest still carries the earlier signal, so a failed scrape does not
     # produce a blank weekly message.
     assert "BHP" in summary["digest"]
+
+
+def test_the_archive_records_what_was_collected_not_what_was_shown(db):
+    """`signals` is capped at MAX_SIGNALS_SHOWN for display. Counting it would
+    label every week in the picker "40 signals" however much was gathered,
+    making the one number that distinguishes the entries useless."""
+    payload = {"signals": [{"id": f"s{i}"} for i in range(40)],
+               "collection": {"collected": 137}}
+    save_digest(run_id="run-a", payload=payload, window_from=iso(7),
+                window_to=iso(6), target=db)
+
+    assert list_digests(target=db)[0]["signalCount"] == 137
+
+
+def test_a_payload_without_a_collection_block_falls_back_to_the_list(db):
+    save_digest(run_id="run-a", payload={"signals": [{"id": "a"}, {"id": "b"}]},
+                window_from=iso(7), window_to=iso(6), target=db)
+
+    assert list_digests(target=db)[0]["signalCount"] == 2

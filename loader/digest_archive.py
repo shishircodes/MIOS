@@ -69,7 +69,11 @@ def save_digest(
     primary key precisely so that "one run, one digest" is the database's
     guarantee and not a convention the code has to remember.
     """
-    signal_count = len(payload.get("signals") or [])
+    # The collected total, not the length of `signals` — that list is capped at
+    # MAX_SIGNALS_SHOWN for display, so using it would label every week in the
+    # archive "40 signals" however much was actually gathered.
+    collection = payload.get("collection") or {}
+    signal_count = int(collection.get("collected") or len(payload.get("signals") or []))
     body = json.dumps(payload, separators=(",", ":"))
     stamp = _now()
 
