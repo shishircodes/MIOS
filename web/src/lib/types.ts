@@ -276,6 +276,12 @@ export interface AccessPayload {
 export type SourceStatus = 'ok' | 'stale' | 'never_run' | 'not_configured' | 'retired'
 
 export interface SourceHealth {
+  /** Whether this source ships switched on. A source that is off for a
+   *  documented reason must not look like one switched off by accident. */
+  defaultEnabled: boolean
+  /** Why it ships off, when it does. Shown beside the toggle and repeated as a
+   *  warning if somebody switches it on. */
+  offReason: string | null
   name: string
   label: string
   market: string
@@ -305,6 +311,9 @@ export interface SourcesPayload {
    *  — it is how collection is paused — but the UI must say so, or an empty
    *  week reads as a broken pipeline. */
   enabledCount: number
+  /** Set after switching on a source that ships off, explaining what was just
+   *  turned on. Not an error — the request succeeded. */
+  warning?: string | null
 }
 
 /** One pipeline run, however it was started. */

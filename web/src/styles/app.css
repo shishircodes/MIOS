@@ -1072,6 +1072,9 @@ overflow-x: auto;
 }
 .notice.ok  { background: var(--moss-bg);  color: var(--moss);   border-left-color: var(--moss); }
 .notice.err { background: var(--crimson-bg); color: var(--crimson); border-left-color: var(--crimson); }
+/* Succeeded, but the reader needs to know what they just did — e.g. switching
+   on a source that ships off. Amber rather than red: nothing went wrong. */
+.notice.warn { background: var(--amber-bg); color: var(--amber-ink); border-left-color: var(--amber-line); }
 
 /* Shown when a member reaches an Admin URL directly. */
 .empty-state { text-align: center; padding: 72px 24px; max-width: 46ch; margin: 0 auto; }
@@ -1435,4 +1438,37 @@ overflow-x: auto;
     grid-template-columns: 1fr 1fr;
     row-gap: 4px;
   }
+}
+
+/* Why a source ships switched off. Collapsed by default — the explanation is
+   long, and only matters to whoever is about to change the setting. */
+.src-why {
+  /* A direct child of the .src-row grid, spanning every column: the toggle
+     cell it used to live in is 80px wide. */
+  grid-column: 1 / -1;
+  margin-top: 4px;
+  font-size: 12px;
+}
+
+.src-why summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.src-why summary:hover {
+  color: var(--ink);
+}
+
+.src-why p {
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  background: var(--amber-bg);
+  border-left: 2px solid var(--amber-line);
+  color: var(--ink);
+  line-height: 1.5;
+  max-width: 46em;
 }

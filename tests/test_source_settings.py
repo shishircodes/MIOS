@@ -2,8 +2,10 @@
 
 The design rests on two decisions, and the tests are mostly about those:
 
-* **A source with no row is enabled.** Only deviations are stored, so a scraper
-  added later is collected from by default and needs no migration or seed.
+* **A source with no row sits at its default.** Only deviations are stored, so a
+  scraper added later is collected from without a migration or a seed. Most
+  sources default to on; SEEK defaults to off, because it refuses the deployed
+  server's IP outright.
 * **An empty selection means "none", never "all".** `scrape_all` reads an empty
   list as falsy and falls back to every source, so switching everything off has
   to be handled before it gets that far — otherwise pausing collection would
@@ -40,8 +42,11 @@ def db(tmp_path):
 # ---------- the default is on ----------
 
 
-def test_every_source_is_enabled_before_anyone_changes_anything(db):
-    assert enabled_sources(db) == list(SOURCE_NAMES)
+def test_sources_start_at_their_default(db):
+    """Every source that works is on; SEEK is not, because it cannot collect
+    from where MIOS is deployed."""
+    assert enabled_sources(db) == [n for n in SOURCE_NAMES if n != "seek"]
+    assert "seek" not in enabled_sources(db)
 
 
 def test_a_source_nobody_has_touched_still_appears_in_the_listing(db):
@@ -49,45 +54,90 @@ def test_a_source_nobody_has_touched_still_appears_in_the_listing(db):
     source would be invisible in the panel until somebody toggled it."""
     settings = list_settings(db)
     assert set(settings) == set(SOURCE_NAMES)
-    assert all(v["enabled"] for v in settings.values())
+    assert all(v["enabled"] for k, v in settings.items() if k != "seek")
 
 
-def test_enabling_removes_the_row_rather_than_storing_a_true(db):
-    """"No row means on" only stays true if re-enabling deletes."""
-    set_enabled("seek", False, changed_by="admin", target=db)
-    set_enabled("seek", True, changed_by="admin", target=db)
+def test_a_source_that_ships_off_explains_itself(db):
+    """A default nobody can explain is one the next person quietly reverts,
+    waits a week, and then re-diagnoses from scratch."""
+    row = list_settings(db)["seek"]
+
+    assert row["enabled"] is False
+    assert row["defaultEnabled"] is False
+    assert row["offReason"], "SEEK is off with no stated reason"
+    assert "403" in row["offReason"], "the reason should name the observed cause"
+
+
+def test_a_working_source_carries_no_reason(db):
+    """The field is for explaining an exception, so it must be empty for every
+    source that is not one."""
+    row = list_settings(db)["adzuna"]
+    assert row["defaultEnabled"] is True
+    assert row["offReason"] is None
+
+
+def test_returning_to_the_default_removes_the_row(db):
+    """The table records deviations, so agreeing with the default is stored as
+    nothing. That is what lets a default be revised later without rewriting
+    every row that happened to agree with the old one."""
+    set_enabled("adzuna", False, changed_by="admin", target=db)
+    set_enabled("adzuna", True, changed_by="admin", target=db)
 
     with connect(db, readonly=True) as conn:
         n = conn.execute(
-            "SELECT count(*) FROM source_settings WHERE source_name = 'seek'"
+            "SELECT count(*) FROM source_settings WHERE source_name = 'adzuna'"
         ).fetchone()[0]
     assert n == 0
+    assert "adzuna" in enabled_sources(db)
+
+
+def test_switching_on_a_source_that_ships_off_is_stored_as_a_deviation(db):
+    """The mirror image: for SEEK, "on" is the deviation, and the absence of a
+    row cannot express it."""
+    set_enabled("seek", True, changed_by="boss@easyskill.com", target=db)
+
+    with connect(db, readonly=True) as conn:
+        row = conn.execute(
+            "SELECT enabled FROM source_settings WHERE source_name = 'seek'"
+        ).fetchone()
+    assert row is not None, "an explicit 'on' was not recorded"
+    assert bool(row["enabled"]) is True
     assert "seek" in enabled_sources(db)
+
+
+def test_an_admin_can_switch_a_shipped_off_source_back_off(db):
+    set_enabled("seek", True, changed_by="a", target=db)
+    set_enabled("seek", False, changed_by="a", target=db)
+
+    assert "seek" not in enabled_sources(db)
+    with connect(db, readonly=True) as conn:
+        n = conn.execute("SELECT count(*) FROM source_settings").fetchone()[0]
+    assert n == 0, "back at the default, so nothing should be stored"
 
 
 # ---------- turning things off ----------
 
 
 def test_a_disabled_source_drops_out_of_the_selection(db):
-    set_enabled("seek", False, changed_by="admin", target=db)
-    assert "seek" not in enabled_sources(db)
+    set_enabled("adzuna", False, changed_by="admin", target=db)
+    assert "adzuna" not in enabled_sources(db)
     assert "pngworkforce" in enabled_sources(db)
 
 
 def test_the_selection_keeps_registry_order(db):
     """The order the pipeline scrapes in should not depend on what happens to
     be in the settings table."""
-    set_enabled("seek", False, changed_by="admin", target=db)
-    remaining = [n for n in SOURCE_NAMES if n != "seek"]
-    assert enabled_sources(db) == remaining
+    set_enabled("seek", True, changed_by="admin", target=db)
+    set_enabled("adzuna", False, changed_by="admin", target=db)
+    assert enabled_sources(db) == [n for n in SOURCE_NAMES if n != "adzuna"]
 
 
 def test_who_switched_it_off_is_recorded(db):
     """The question this table exists to answer is "why did we collect nothing
-    from SEEK last week?", which a bare boolean cannot."""
-    set_enabled("seek", False, changed_by="boss@easyskill.com", note="too noisy", target=db)
+    from this source last week?", which a bare boolean cannot."""
+    set_enabled("adzuna", False, changed_by="boss@easyskill.com", note="too noisy", target=db)
 
-    row = list_settings(db)["seek"]
+    row = list_settings(db)["adzuna"]
     assert row["enabled"] is False
     assert row["changedBy"] == "boss@easyskill.com"
     assert row["note"] == "too noisy"
@@ -95,13 +145,13 @@ def test_who_switched_it_off_is_recorded(db):
 
 
 def test_toggling_twice_updates_rather_than_duplicating(db):
-    set_enabled("seek", False, changed_by="a", target=db)
-    set_enabled("seek", False, changed_by="b", note="second", target=db)
+    set_enabled("adzuna", False, changed_by="a", target=db)
+    set_enabled("adzuna", False, changed_by="b", note="second", target=db)
 
     with connect(db, readonly=True) as conn:
         n = conn.execute("SELECT count(*) FROM source_settings").fetchone()[0]
     assert n == 1
-    assert list_settings(db)["seek"]["changedBy"] == "b"
+    assert list_settings(db)["adzuna"]["changedBy"] == "b"
 
 
 def test_an_unregistered_source_is_refused(db):
@@ -167,7 +217,7 @@ def test_a_command_line_source_overrides_the_stored_selection(db, monkeypatch):
 def test_only_the_enabled_sources_are_scraped(db, monkeypatch):
     import pipeline.live as live
 
-    set_enabled("seek", False, changed_by="admin", target=db)
+    # seek is already off by default; switch off one more.
     set_enabled("adzuna", False, changed_by="admin", target=db)
 
     seen: list[list[str] | None] = []
@@ -196,4 +246,4 @@ def test_an_unreadable_table_leaves_every_source_enabled(db, monkeypatch):
         raise RuntimeError("connection refused")
 
     monkeypatch.setattr(ss, "connect", _broken)
-    assert enabled_sources(db) == list(SOURCE_NAMES)
+    assert enabled_sources(db) == [n for n in SOURCE_NAMES if n != "seek"]
