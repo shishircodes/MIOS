@@ -25,6 +25,7 @@ from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, Upload
 from api.auth import require_user
 from push.cv_extract import MAX_BYTES, CVExtractionError, extract_text
 from push.matcher import match_profile
+from push.rationale import annotate
 from push.profile_parser import parse_profile
 from push.store import (
     DEFAULT_MATCH_WINDOW_DAYS,
@@ -43,12 +44,25 @@ router = APIRouter(prefix="/api/push", tags=["push"])
 MAX_RESULTS = 25
 
 
-def _matches_for(profile: dict[str, Any], *, days: int, limit: int) -> dict[str, Any]:
+def _matches_for(profile: dict[str, Any], *, days: int, limit: int,
+                 explain: bool = True) -> dict[str, Any]:
     signals = signals_for_matching(days=days)
     results = match_profile(profile, signals, limit=limit)
+    matches = [m.to_dict(rank=i + 1) for i, m in enumerate(results)]
+
+    # The written half. Deliberately after the ranking is fixed and unable to
+    # change it — see push/rationale.py. Every failure here returns the ranking
+    # unannotated, so a spent quota costs the prose and not the result.
+    note = None
+    if explain:
+        matches, note = annotate(profile, matches)
+
     return {
         "profile": profile,
-        "matches": [m.to_dict(rank=i + 1) for i, m in enumerate(results)],
+        "matches": matches,
+        #: Why there is no written rationale, when there is none. Absent when
+        #: the annotation worked.
+        "rationaleNote": note,
         "windowDays": days,
         #: How much evidence the ranking is standing on. A short list of matches
         #: means something different when it came from 12 signals than from 900,
