@@ -1472,3 +1472,101 @@ overflow-x: auto;
   line-height: 1.5;
   max-width: 46em;
 }
+
+/* ---------- Print / Save as PDF ----------
+   The digest is the document Easy Skill would email or attach to a capstone
+   report. Without this block the browser prints the dashboard chrome — topbar,
+   sidebar, buttons — and clips the signal list to the on-screen viewport. */
+@media print {
+  @page { margin: 14mm 12mm; }
+
+  :root {
+    color-scheme: light;
+    --paper: #FFFFFF;
+    --paper-2: #F2F4F1;
+    --surface: #FFFFFF;
+    --surface-2: #F8F9F6;
+    --ink: #1A2837;
+    --ink-2: #2C3B4E;
+    --ink-3: #4B5A6E;
+    --muted: #656E7C;
+  }
+
+  html, body, .app, .main {
+    background: #FFFFFF !important;
+    color: #1A2837 !important;
+    height: auto !important;
+    overflow: visible !important;
+    zoom: 1 !important;
+  }
+
+  /* Shell becomes a single flowing column so every collected signal prints. */
+  .app {
+    display: block;
+    min-height: 0;
+  }
+  .main { display: block; }
+  .page {
+    max-width: none;
+    padding: 0 0 12mm;
+    margin: 0;
+  }
+
+  .topbar,
+  .sidebar,
+  .auth-off-bar,
+  .nav-toggle,
+  .drawer,
+  .drawer-mask,
+  .btn,
+  .section-search,
+  .feed-more,
+  .who-menu {
+    display: none !important;
+  }
+
+  /* Motion leaves opacity/transform inline; print must not snapshot a tween. */
+  .signal,
+  .vel-item,
+  .nn-item,
+  .pulse-item,
+  .collection-facts li,
+  .split-bar .fill,
+  .vel-rail > span {
+    opacity: 1 !important;
+    transform: none !important;
+  }
+
+  .section,
+  .collection,
+  .pulse,
+  .digest-rail {
+    overflow: visible !important;
+    background: #FFFFFF !important;
+  }
+
+  /* A row split across a page break is unreadable in a handout. */
+  .signal,
+  .vel-item,
+  .nn-item,
+  .pulse-item,
+  .collection,
+  .pulse,
+  .section {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .nn-sig {
+    display: block;
+    -webkit-line-clamp: unset;
+    overflow: visible;
+  }
+
+  .digest-grid { grid-template-columns: minmax(0, 1fr); }
+
+  * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}
