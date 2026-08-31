@@ -31,7 +31,13 @@ from loader.schedule import (
     next_due,
     set_schedule,
 )
-from loader.source_settings import UnknownSource, list_settings, set_enabled
+from loader.source_settings import (
+    OFF_BY_DEFAULT_REASON,
+    UnknownSource,
+    default_enabled,
+    list_settings,
+    set_enabled,
+)
 from scraper import SOURCE_NAMES
 
 log = logging.getLogger(__name__)
@@ -233,6 +239,12 @@ def source_health(user: dict[str, Any] = Depends(require_admin)) -> dict[str, An
             "enabled": bool(chosen.get("enabled", True)),
             "changedBy": chosen.get("changedBy"),
             "changedAt": chosen.get("changedAt"),
+            #: Whether this source ships off, and why. The panel shows the
+            #: reason beside the toggle: a source that is off for a good reason
+            #: looks identical to one somebody switched off by accident, and
+            #: the difference is the whole point.
+            "defaultEnabled": chosen.get("defaultEnabled", True),
+            "offReason": chosen.get("offReason"),
         })
 
     # Sources that have rows but are no longer registered — a renamed or removed
@@ -248,6 +260,7 @@ def source_health(user: dict[str, Any] = Depends(require_admin)) -> dict[str, An
             "pending": s.get("pending", 0), "runDays": s.get("runDays", 0),
             # A retired source is not selectable; it has no scraper to run.
             "enabled": False, "changedBy": None, "changedAt": None,
+            "defaultEnabled": False, "offReason": None,
         })
 
     return {
@@ -283,7 +296,19 @@ def set_source_enabled(
         )
     except UnknownSource as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return source_health(user)
+
+    result = source_health(user)
+    # Switching on a source that ships off is allowed — the reason may no longer
+    # hold, and an administrator is entitled to decide that. But it is not done
+    # silently: without this the panel would show SEEK on, collect nothing all
+    # week, and give nobody a way to connect the two.
+    turned_on = bool(payload.get("enabled", True))
+    if turned_on and not default_enabled(source_name):
+        result["warning"] = OFF_BY_DEFAULT_REASON.get(
+            source_name,
+            f"{source_name} is switched off by default. Turning it on may not collect anything.",
+        )
+    return result
 
 
 # --------------------------------------------------------------------------

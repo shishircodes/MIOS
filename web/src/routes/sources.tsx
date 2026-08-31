@@ -47,6 +47,9 @@ function SourceRow({
   busy: boolean
 }) {
   const st = STATUS[s.status] ?? STATUS.retired
+  // A source that ships off looks identical to one somebody switched off by
+  // accident unless the row says which it is.
+  const shipsOff = s.defaultEnabled === false && s.offReason
   // A run that came back exactly at the cap was almost certainly truncated —
   // worth flagging, because the number is a limit, not a measurement.
   const capped = s.lastRunRecords >= limit
@@ -95,6 +98,20 @@ function SourceRow({
           </label>
         )}
       </div>
+
+      {/* Spans the whole row rather than sitting in the toggle column, which is
+          80px wide and rendered this one letter per line.
+
+          Visible, not a tooltip: the reason a source ships off is what stops
+          somebody switching it on, waiting a week and rediscovering the block
+          from scratch. A `title` is invisible on touch and undiscoverable on
+          desktop. */}
+      {shipsOff && !s.enabled && (
+        <details className="src-why">
+          <summary>Why is this off?</summary>
+          <p>{s.offReason}</p>
+        </details>
+      )}
     </div>
   )
 }
@@ -103,12 +120,18 @@ function SourcesScreen() {
   const qc = useQueryClient()
   const { data, isPending, error } = useQuery(sourceHealthQueryOptions)
   const [problem, setProblem] = useState<string | null>(null)
+  const [caution, setCaution] = useState<string | null>(null)
 
   const toggle = useMutation({
     mutationFn: (v: { name: string; enabled: boolean }) => setSourceEnabled(v.name, v.enabled),
     onSuccess: (payload) => {
       qc.setQueryData(sourceHealthQueryOptions.queryKey, payload)
       setProblem(null)
+      // Returned when a source that ships off has just been switched on. The
+      // request succeeded, so this is not an error — but turning SEEK on and
+      // collecting nothing for a week with no explanation would be worse than
+      // an error, because nobody would know to look.
+      setCaution(payload.warning ?? null)
     },
     onError: (e: Error) => setProblem(e.message),
   })
@@ -146,6 +169,15 @@ function SourcesScreen() {
       </div>
 
       {problem && <div className="notice err" role="alert">{problem}</div>}
+
+      {caution && (
+        <div className="notice warn" role="status">
+          <strong>Switched on, but read this.</strong>
+          <p style={{ margin: '6px 0 0' }}>{caution}</p>
+          <button className="btn sm ghost" style={{ marginTop: 8 }}
+                  onClick={() => setCaution(null)}>Dismiss</button>
+        </div>
+      )}
 
       {/* Zero enabled is a legitimate choice — it is how collection is paused —
           but an empty week would otherwise look like a broken pipeline. */}

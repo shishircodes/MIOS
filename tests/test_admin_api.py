@@ -334,3 +334,59 @@ def test_run_now_outside_the_catch_up_window_owes_nothing(db, monkeypatch):
 
     coming_monday = next_due(Schedule(), thursday)
     assert not run_log.has_run_for(coming_monday, db), "it ate next week's run"
+
+
+# ---------- a source that ships switched off ----------
+#
+# SEEK returns 403 to the deployed server's IP, so it defaults to off. The risk
+# is not the default — it is somebody seeing an off toggle, assuming it was a
+# mistake, switching it on, and collecting nothing for a week with no way to
+# connect the two. So switching it on has to say what it is.
+
+
+def test_seek_ships_switched_off_with_a_reason(db):
+    payload = admin_api.source_health(ADMIN)
+    seek = next(s for s in payload["sources"] if s["name"] == "seek")
+
+    assert seek["enabled"] is False
+    assert seek["defaultEnabled"] is False
+    assert "403" in (seek["offReason"] or "")
+
+
+def test_the_other_sources_are_unaffected(db):
+    payload = admin_api.source_health(ADMIN)
+    for s in payload["sources"]:
+        if s["name"] in {"seek"} or s["status"] == "retired":
+            continue
+        assert s["defaultEnabled"] is True, s["name"]
+        assert s["offReason"] is None, s["name"]
+
+
+def test_switching_seek_on_returns_the_reason_as_a_warning(db):
+    result = admin_api.set_source_enabled("seek", {"enabled": True}, ADMIN)
+
+    assert result["warning"], "turning on a source that ships off said nothing"
+    assert "403" in result["warning"]
+    seek = next(s for s in result["sources"] if s["name"] == "seek")
+    assert seek["enabled"] is True, "the request should still succeed"
+
+
+def test_switching_seek_off_again_carries_no_warning(db):
+    admin_api.set_source_enabled("seek", {"enabled": True}, ADMIN)
+    result = admin_api.set_source_enabled("seek", {"enabled": False}, ADMIN)
+
+    assert not result.get("warning")
+
+
+def test_switching_on_a_normal_source_carries_no_warning(db):
+    admin_api.set_source_enabled("adzuna", {"enabled": False}, ADMIN)
+    result = admin_api.set_source_enabled("adzuna", {"enabled": True}, ADMIN)
+
+    assert not result.get("warning"), "a routine toggle should not lecture the admin"
+
+
+def test_seek_is_left_out_of_the_next_scrape_by_default(db):
+    """The point of the default, stated where the pipeline reads it."""
+    from loader.source_settings import enabled_sources
+
+    assert "seek" not in enabled_sources(db)
