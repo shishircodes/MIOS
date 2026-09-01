@@ -167,9 +167,9 @@ def rewrite(
                         "have it rewritten."),
             )
         try:
-            from agents.signal_analyst import _build_gemini_caller
+            from llm import PURPOSE_PUBLISH, caller_for
 
-            gemini_caller = _build_gemini_caller()
+            gemini_caller = caller_for(PURPOSE_PUBLISH)
         except Exception as exc:  # noqa: BLE001
             return RewriteOutcome(sections, used_llm=False,
                                   reason=f"Gemini is unavailable ({exc}).")

@@ -454,3 +454,27 @@ export interface ScoringModel {
   }
   caveat: string
 }
+
+/** One collection run's counts. A point on the trend chart is one of these —
+ *  not one calendar week, because a missed run leaves a gap no honest chart can
+ *  fill. */
+export interface CollectionPoint {
+  date: string
+  total: number
+  au: number
+  png: number
+}
+
+export interface DashboardPayload {
+  collections: CollectionPoint[]
+  latest: CollectionPoint | null
+  /** Movement against the previous collection. Null where there was none, so
+   *  the UI shows nothing rather than a direction it cannot justify. */
+  change: { total?: number | null; au?: number | null; png?: number | null }
+  sectors: { key: string; label: string; count: number }[]
+  watchlist: { total: number; byTier: Record<string, number> }
+  /** What the charts actually stand on, rather than what they promise. */
+  coverage: { collections: number; from: string | null; to: string | null }
+  trendWindow: number
+}
+

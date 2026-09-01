@@ -46,6 +46,7 @@ from api.digest_service import (
     build_feed_payload,
 )
 from api import scheduler
+from api.dashboard_service import build_dashboard_payload
 from api.admin_api import router as admin_router
 from api.publish_api import router as publish_router
 from api.push_api import router as push_router
@@ -181,6 +182,21 @@ def digest(
     payload["backend"] = backend_label()
     payload["live"] = True
     payload["archived"] = None
+    return payload
+
+
+@app.get("/api/dashboard")
+def dashboard(user: dict[str, Any] = Depends(require_user)) -> dict:
+    """Hiring trends, counted from the signals themselves.
+
+    A point per collection rather than per calendar week: the pipeline runs
+    weekly so they usually coincide, but a missed run leaves a gap a calendar
+    series would have to fill, and every way of filling it asserts something
+    nobody measured.
+    """
+    payload = build_dashboard_payload()
+    log.info("api: /api/dashboard served to %s (%d collections)",
+             user["email"], payload["coverage"]["collections"])
     return payload
 
 
