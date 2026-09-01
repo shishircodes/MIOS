@@ -1,9 +1,11 @@
 import { useQuery } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { CapturedAt, Icons, Loading, Section, TierChip } from '~/components/ui'
+import { SignalDetail } from '~/components/SignalDetail'
+import { CapturedAt, Drawer, Icons, Loading, Section, TierChip } from '~/components/ui'
 import { signalsQueryOptions } from '~/lib/api'
 import { useFigure, useReveal } from '~/lib/motion'
+import type { Signal } from '~/lib/types'
 
 export const Route = createFileRoute('/monitor/feed')({
   head: () => ({ meta: [{ title: 'Signal Feed · MIOS' }] }),
@@ -30,6 +32,7 @@ function SignalFeed() {
   const [source, setSource] = useState<string>('ALL')
   const [query, setQuery] = useState('')
   const [page, setPage] = useState(0)
+  const [drawer, setDrawer] = useState<Signal | null>(null)
 
   const debouncedQuery = useDebounced(query)
 
@@ -159,7 +162,7 @@ function SignalFeed() {
             so the list does not collapse and jump, but they are visibly stale. */}
         <div style={{ opacity: isPlaceholderData ? 0.55 : 1, transition: 'opacity 120ms' }}>
           {signals.map((s) => (
-            <div className="signal" key={s.id}>
+            <div className="signal" key={s.id} onClick={() => setDrawer(s)} style={{ cursor: 'pointer' }}>
               <div className="num mono">{s.n}</div>
               <div className="body">
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 4 }}>
@@ -203,6 +206,9 @@ function SignalFeed() {
           </nav>
         )}
       </Section>
+      <Drawer open={!!drawer} onClose={() => setDrawer(null)} title={drawer ? `Signal · ${drawer.id.slice(0, 12)}` : ''}>
+        {drawer && <SignalDetail s={drawer} />}
+      </Drawer>
     </div>
   )
 }
