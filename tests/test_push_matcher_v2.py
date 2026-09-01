@@ -86,9 +86,20 @@ def test_a_skill_must_match_as_a_whole_word():
     assert pts == 0
 
 
-def test_no_skills_on_the_profile_scores_nothing_silently():
-    assert _skills_overlap([], [sig()]) == (0, None)
-    assert _skills_overlap(None, [sig()]) == (0, None)
+def test_no_skills_on_the_profile_is_unassessable_not_zero():
+    """The distinction the normalisation rests on. Scoring zero would charge the
+    company for a gap in the candidate's profile; None removes the contributor's
+    weight from the denominator instead."""
+    assert _skills_overlap([], [sig()]) == (None, None)
+    assert _skills_overlap(None, [sig()]) == (None, None)
+
+
+def test_skills_that_are_known_and_absent_score_zero():
+    """The other side of it: we knew what to look for and none of it is there.
+    That is a real finding and must count against the company."""
+    pts, ev = _skills_overlap(["Autocad"], [sig(content="Planner | SAP only")])
+    assert pts == 0
+    assert ev, "an assessed zero should say so, or the reader cannot tell it apart"
 
 
 # ---------- signal quality ----------
@@ -138,10 +149,18 @@ def test_steady_hiring_scores_nothing():
     assert _momentum(_rows(4, 12), NOW)[0] == 0
 
 
-def test_a_company_with_no_history_has_no_momentum():
+def test_a_company_with_no_history_cannot_be_judged_on_momentum():
     """Inventing a trend from a single window is how the digest's velocity table
-    once reported every company as rising, including one never seen before."""
-    assert _momentum(_rows(9, 0), NOW) == (0, None)
+    once reported every company as rising, including one never seen before. Nor
+    is it a zero: a company we have not watched long enough is not a company
+    that failed to accelerate."""
+    assert _momentum(_rows(9, 0), NOW) == (None, None)
+
+
+def test_steady_hiring_is_an_assessed_zero():
+    pts, ev = _momentum(_rows(4, 12), NOW)
+    assert pts == 0
+    assert ev and "steady" in ev
 
 
 def test_a_tiny_baseline_is_described_rather_than_quoted_as_a_percentage():
@@ -171,11 +190,12 @@ def test_a_graduate_role_does_not_fit_a_twenty_year_career():
     assert "20" in ev
 
 
-def test_an_unknown_level_scores_nothing_and_claims_nothing():
-    """Silence rather than a default: an evidence line asserting a fit that was
-    never established is worse than no line."""
-    assert _seniority_fit(9, [sig(content="Maintenance Planner | BHP")]) == (0, None)
-    assert _seniority_fit(None, [sig(content="Senior Planner | BHP")]) == (0, None)
+def test_an_unknown_level_is_unassessable():
+    """Neither side states a level, so there is nothing to compare. Silence
+    rather than a default: an evidence line asserting a fit that was never
+    established is worse than no line, and a zero would be worse still."""
+    assert _seniority_fit(9, [sig(content="Maintenance Planner | BHP")]) == (None, None)
+    assert _seniority_fit(None, [sig(content="Senior Planner | BHP")]) == (None, None)
 
 
 # ---------- confidence ----------
@@ -223,16 +243,58 @@ def test_the_better_timed_company_outranks_the_busier_one():
     assert ranked[0].score > ranked[1].score
 
 
-def test_every_contributor_is_reported_in_the_breakdown():
-    """A score a consultant cannot take apart is one they cannot defend."""
+def test_the_breakdown_and_the_unassessed_list_cover_every_contributor():
+    """A score a consultant cannot take apart is one they cannot defend — and
+    what was *not* judged matters as much as what was."""
     profile = {"currentTitle": "Maintenance Planner", "sector": "mining",
                "region": "AU", "yearsExperience": 9, "skills": ["SAP"]}
-    ranked = match_profile(profile, [sig()], now=NOW)
+    m = match_profile(profile, [sig()], now=NOW)[0]
 
-    assert set(ranked[0].breakdown) == {
+    assert set(m.breakdown) | set(m.not_assessed) == {
         "role", "skills", "signalQuality", "sector", "momentum",
         "volume", "relationship", "seniority", "region", "recency",
     }
+    assert not (set(m.breakdown) & set(m.not_assessed)), "a contributor cannot be both"
+
+
+# ---------- scoring against what could be assessed ----------
+
+
+def test_the_score_is_earned_over_assessable_scaled_to_one_hundred():
+    """The arithmetic, stated plainly: 60 earned of 86 assessable is 70."""
+    profile = {"currentTitle": "Maintenance Planner", "sector": "mining",
+               "region": "AU", "skills": ["SAP"]}
+    m = match_profile(profile, [sig() for _ in range(4)], now=NOW)[0]
+
+    assert m.assessable <= 100
+    assert m.score == round(m.earned / m.assessable * 100)
+
+
+def test_a_missing_profile_field_does_not_cost_the_company_points():
+    """The defect this fixes. A candidate with no recorded skills should not
+    make every company look worse — that is our gap, not theirs."""
+    base = {"currentTitle": "Maintenance Planner", "sector": "mining", "region": "AU"}
+    rows = [sig() for _ in range(4)]
+
+    without = match_profile(base, rows, now=NOW)[0]
+    with_unmatched = match_profile({**base, "skills": ["Autocad"]}, rows, now=NOW)[0]
+
+    assert "skills" in without.not_assessed
+    assert without.assessable < 100
+    # Knowing the skills and finding none is a real finding, so it scores lower
+    # than not knowing them at all.
+    assert with_unmatched.score < without.score
+
+
+def test_a_narrow_assessment_is_reported_at_low_confidence():
+    """Normalising means a company judged on a third of the model can still
+    reach 90. Arithmetically right, and a poor thing to act on."""
+    thin = {"currentTitle": None, "sector": None, "region": None}
+    m = match_profile(thin, [sig()], now=NOW)[0]
+
+    assert m.assessable < 60
+    assert m.confidence == "low"
+    assert "of 100 points" in m.confidence_note
 
 
 def test_the_score_never_exceeds_one_hundred():

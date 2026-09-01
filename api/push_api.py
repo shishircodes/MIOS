@@ -247,10 +247,23 @@ def scoring_model(user: dict[str, Any] = Depends(require_user)) -> dict[str, Any
             {"key": "recency", "weight": matcher.W_RECENCY, "label": "Recency",
              "what": "How fresh the signals are, fading to nothing over a month."},
         ],
+        "normalisation": (
+            "A contributor that has nothing to judge — no skills recorded on the "
+            "profile, no seniority stated in the adverts, no earlier week to measure "
+            "a trend against — is left out of the total rather than scored zero. "
+            "Charging a company for a gap in our own data would make it look worse "
+            "than the evidence says. The points earned are then scaled to 100, so a "
+            "company judged on 86 points that earns 60 of them shows as 70. Each row "
+            "says what it was assessed on when that is not the whole model."
+        ),
         "confidence": [
             {"level": "high", "what": "Eight or more signals across more than one collection."},
             {"level": "medium", "what": "At least three signals."},
-            {"level": "low", "what": "One or two signals — a lead, not a finding."},
+            {"level": "low", "what": "One or two signals — a lead, not a finding. Also "
+                                     "used whenever less than 60 of the 100 points could "
+                                     "be judged, however many signals there are: a score "
+                                     "scaled up from a narrow assessment is arithmetically "
+                                     "right and a poor thing to act on."},
         ],
         "llm": {
             "provider": label,

@@ -1612,3 +1612,13 @@ overflow-x: auto;
 }
 .match-row .score .score-line .big { display: inline; margin-bottom: 0; }
 .match-row .score .out-of { font-size: 13px; color: var(--muted); }
+
+/* What the score was actually judged on, when that is not the whole model.
+   The headline number is scaled to 100; this says what it was scaled from. */
+.match-row .score .assessed-on {
+  margin-top: 3px;
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  color: var(--ink-3);
+  cursor: help;
+}

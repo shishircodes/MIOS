@@ -50,6 +50,9 @@ export function ScoringExplainer({ open, onClose }: { open: boolean; onClose: ()
             ))}
           </div>
 
+          <h4>When less than the whole model applies</h4>
+          <p>{data.normalisation}</p>
+
           <h4>Confidence is not the score</h4>
           <p>
             A thin case and a strong one can reach the same number. Confidence is shown

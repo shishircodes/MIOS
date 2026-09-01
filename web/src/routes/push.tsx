@@ -603,6 +603,18 @@ function PushScreen() {
                 <span className="out-of">/ {scoreTotal}</span>
               </div>
               match score
+              {/* Only when it is not the whole model. Saying "scored on 100 of
+                  100" on every row would be noise; saying nothing when it was
+                  86 would hide that the number is a scaling. */}
+              {m.assessable !== undefined && m.assessable < scoreTotal && (
+                <div className="assessed-on" title={
+                  `${m.earned} points earned out of the ${m.assessable} that could be ` +
+                  `judged, scaled to ${scoreTotal}. Not judged: ` +
+                  `${(m.notAssessed ?? []).join(', ')}.`
+                }>
+                  {m.earned}/{m.assessable} assessed
+                </div>
+              )}
               {/* Beside the score, never folded into it: a thin case and a
                   strong one can reach the same number. */}
               {m.confidence && (

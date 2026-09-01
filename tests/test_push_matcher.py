@@ -116,7 +116,10 @@ def test_every_match_explains_itself():
 
 def test_breakdown_sums_to_the_score():
     m = match_profile(PLANNER, [sig("BHP", tier="A") for _ in range(3)], now=NOW)[0]
-    assert sum(m.breakdown.values()) == m.score
+    # The breakdown sums to what was earned; the score is that scaled to 100
+    # over the contributors that could be assessed.
+    assert sum(m.breakdown.values()) == m.earned
+    assert m.score == round(m.earned / m.assessable * 100)
 
 
 def test_evidence_leads_with_role_demand():
@@ -162,7 +165,10 @@ def test_no_signals_yields_no_matches():
 
 def test_profile_without_a_title_still_matches_on_other_factors():
     m = match_profile({"sector": "mining", "region": "AU"}, [sig("BHP", tier="A")], now=NOW)[0]
-    assert m.breakdown["role"] == 0
+    # Not merely zero: with no title on the profile there is nothing to judge,
+    # so the contributor leaves the denominator rather than scoring nothing.
+    assert "role" in m.not_assessed
+    assert "role" not in m.breakdown
     assert m.score > 0
 
 
@@ -175,5 +181,5 @@ def test_malformed_capture_dates_are_ignored():
     bad = sig("A")
     bad["captured_at"] = "not-a-date"
     m = match_profile(PLANNER, [bad], now=NOW)[0]
-    assert m.breakdown["recency"] == 0
+    assert "recency" in m.not_assessed
     assert m.score > 0

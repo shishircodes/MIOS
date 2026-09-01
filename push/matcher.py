@@ -105,6 +105,12 @@ SENIORITY_MARKERS: tuple[tuple[str, int], ...] = (
 #: the fit stops counting. Wide, because titles are a blunt instrument.
 SENIORITY_TOLERANCE_YEARS = 6
 
+#: Below this much of the model being applicable, a score is reported at low
+#: confidence whatever it says. Normalising to 100 means a company judged on a
+#: third of the contributors can still reach 90; that is arithmetically correct
+#: and a poor thing to act on.
+NARROW_ASSESSMENT = 60
+
 #: A title this similar counts as the same discipline. rapidfuzz token_set_ratio
 #: already handles word order, so this is about tolerating "Snr"/"Senior" and
 #: "Maint." — not about matching unrelated roles.
@@ -149,6 +155,12 @@ class MatchResult:
     #: consultant should do next.
     confidence: str = "low"
     confidence_note: str = ""
+    #: Points earned, and the weight of the contributors that could be judged.
+    #: `score` is these two scaled to 100 — kept so a reader can see the working
+    #: rather than a number that appears from nowhere.
+    earned: int = 0
+    assessable: int = 100
+    not_assessed: list[str] = field(default_factory=list)
     evidence: list[str] = field(default_factory=list)
     breakdown: dict[str, int] = field(default_factory=dict)
 
@@ -177,6 +189,9 @@ class MatchResult:
             #: Beside the score, never folded into it.
             "confidence": self.confidence,
             "confidenceNote": self.confidence_note,
+            "earned": self.earned,
+            "assessable": self.assessable,
+            "notAssessed": self.not_assessed,
         }
 
 
@@ -200,10 +215,14 @@ def _parse_stamp(raw: Any) -> datetime | None:
     return d if d.tzinfo else d.replace(tzinfo=timezone.utc)
 
 
-def _role_demand(title: str | None, signals: list[dict]) -> tuple[int, str | None]:
-    """How strongly this company is hiring for the candidate's discipline."""
+def _role_demand(title: str | None, signals: list[dict]) -> tuple[int | None, str | None]:
+    """How strongly this company is hiring for the candidate's discipline.
+
+    `None` when the profile carries no job title: that is a gap in what we know
+    about the candidate, not a company that fails to match.
+    """
     if not title:
-        return 0, None
+        return None, None
     best = 0
     best_text = ""
     for s in signals:
@@ -228,15 +247,17 @@ def _role_demand(title: str | None, signals: list[dict]) -> tuple[int, str | Non
     return scaled, f"{matching} {plural} matching “{title}” — closest: {best_text}"
 
 
-def _sector_fit(sector: str | None, signals: list[dict]) -> tuple[int, str | None]:
+def _sector_fit(sector: str | None, signals: list[dict]) -> tuple[int | None, str | None]:
+    """`None` when either side is unknown; 0 when both are known and disagree."""
     if not sector:
-        return 0, None
+        return None, None
     sectors = [s.get("sector") for s in signals if s.get("sector")]
     if not sectors:
-        return 0, None
+        return None, None
     hits = sum(1 for s in sectors if s == sector)
     if not hits:
-        return 0, None
+        pretty = sector.replace("_", " ")
+        return 0, f"No {pretty} hiring — their activity is in other sectors"
     share = hits / len(sectors)
     pretty = sector.replace("_", " ")
     return round(W_SECTOR * share), f"{hits} of {len(sectors)} signals in {pretty}"
@@ -260,22 +281,22 @@ def _relationship(tier: str | None) -> tuple[int, str]:
     return round(W_RELATIONSHIP * 0.25), "Not currently on the watchlist — net-new opportunity"
 
 
-def _region_fit(region: str | None, signals: list[dict]) -> tuple[int, str | None]:
+def _region_fit(region: str | None, signals: list[dict]) -> tuple[int | None, str | None]:
     if not region:
-        return 0, None
+        return None, None
     regions = [s.get("geography") for s in signals if s.get("geography")]
     if not regions:
-        return 0, None
+        return None, None
     hits = sum(1 for r in regions if r == region)
     if not hits:
         return 0, f"No {region} activity — candidate would need to relocate"
     return round(W_REGION * hits / len(regions)), f"{hits} of {len(regions)} signals in {region}"
 
 
-def _recency(signals: list[dict], now: datetime) -> tuple[int, str | None]:
+def _recency(signals: list[dict], now: datetime) -> tuple[int | None, str | None]:
     stamps = [d for d in (_parse_stamp(s.get("captured_at")) for s in signals) if d]
     if not stamps:
-        return 0, None
+        return None, None
 
     age_days = (now - max(stamps)).total_seconds() / 86400
     if age_days >= RECENCY_HORIZON_DAYS:
@@ -286,7 +307,8 @@ def _recency(signals: list[dict], now: datetime) -> tuple[int, str | None]:
     return scaled, f"Most recent signal {int(age_days)} day(s) ago"
 
 
-def _skills_overlap(skills: list[str] | None, signals: list[dict]) -> tuple[int, str | None]:
+def _skills_overlap(skills: list[str] | None,
+                    signals: list[dict]) -> tuple[int | None, str | None]:
     """How many of the candidate's skills appear in what this company is hiring for.
 
     The most specific evidence held about a candidate, and the old model never
@@ -298,18 +320,21 @@ def _skills_overlap(skills: list[str] | None, signals: list[dict]) -> tuple[int,
     half-match "SAP-adjacent" reasoning the way a job title legitimately can.
     """
     if not skills:
-        return 0, None
+        # No skills recorded. Scoring zero here would charge the company for a
+        # gap in the candidate's profile.
+        return None, None
 
     blob = " ".join((s.get("raw_content") or "") for s in signals).lower()
     if not blob.strip():
-        return 0, None
+        return None, None
 
     matched = [
         skill for skill in skills
         if skill and re.search(rf"(?<!\w){re.escape(skill.lower())}(?!\w)", blob)
     ]
     if not matched:
-        return 0, None
+        # Assessed: we knew what to look for and none of it is there.
+        return 0, "None of the candidate's recorded skills appear in their adverts"
 
     share = len(matched) / len(skills)
     shown = ", ".join(matched[:4]) + ("…" if len(matched) > 4 else "")
@@ -317,7 +342,7 @@ def _skills_overlap(skills: list[str] | None, signals: list[dict]) -> tuple[int,
             f"{len(matched)} of {len(skills)} skills appear in their adverts: {shown}")
 
 
-def _signal_quality(signals: list[dict]) -> tuple[int, str | None]:
+def _signal_quality(signals: list[dict]) -> tuple[int | None, str | None]:
     """What kind of signals these are, not merely how many.
 
     Six routine vacancies and six postings around a new project are not the same
@@ -329,7 +354,7 @@ def _signal_quality(signals: list[dict]) -> tuple[int, str | None]:
     """
     cats = [s.get("signal_category") for s in signals if s.get("signal_category")]
     if not cats:
-        return 0, None
+        return None, None
 
     weights = [CATEGORY_WEIGHT.get(c, DEFAULT_CATEGORY_WEIGHT) for c in cats]
     mean = sum(weights) / len(weights)
@@ -346,7 +371,7 @@ def _signal_quality(signals: list[dict]) -> tuple[int, str | None]:
     return round(W_SIGNAL_QUALITY * mean), note
 
 
-def _momentum(signals: list[dict], now: datetime) -> tuple[int, str | None]:
+def _momentum(signals: list[dict], now: datetime) -> tuple[int | None, str | None]:
     """Whether hiring is accelerating against this company's own recent history.
 
     The difference between a good account and a good *week* to call one. Measured
@@ -369,15 +394,19 @@ def _momentum(signals: list[dict], now: datetime) -> tuple[int, str | None]:
             prior += 1
 
     if not prior:
-        return 0, None
+        # No earlier window to compare against. Not a company that failed to
+        # accelerate — a company we have not watched long enough to say.
+        return None, None
     baseline = prior / MOMENTUM_BASELINE_WINDOWS
-    if baseline <= 0 or recent <= baseline:
-        return 0, None
+    if baseline <= 0:
+        return None, None
+    if recent <= baseline:
+        return 0, "Hiring steady against their own recent average"
 
     growth = (recent - baseline) / baseline
     scaled = round(W_MOMENTUM * min(growth / MOMENTUM_SATURATION, 1.0))
     if not scaled:
-        return 0, None
+        return 0, "Hiring steady against their own recent average"
 
     # A percentage off a baseline below one signal a window is arithmetic, not a
     # trend: two signals against 0.3 reads as "up 567%", which is true and
@@ -391,7 +420,8 @@ def _momentum(signals: list[dict], now: datetime) -> tuple[int, str | None]:
                     f"({recent} this window against {baseline:.1f})")
 
 
-def _seniority_fit(years: int | None, signals: list[dict]) -> tuple[int, str | None]:
+def _seniority_fit(years: int | None,
+                   signals: list[dict]) -> tuple[int | None, str | None]:
     """Whether the candidate's experience matches the level being advertised.
 
     Stops a graduate and a twenty-year planner scoring alike on the same title.
@@ -399,7 +429,7 @@ def _seniority_fit(years: int | None, signals: list[dict]) -> tuple[int, str | N
     a fit that was never established.
     """
     if years is None:
-        return 0, None
+        return None, None
 
     levels: list[int] = []
     for s in signals:
@@ -409,7 +439,8 @@ def _seniority_fit(years: int | None, signals: list[dict]) -> tuple[int, str | N
                 levels.append(implied)
                 break
     if not levels:
-        return 0, None
+        # The adverts do not state a level, so there is nothing to compare with.
+        return None, None
 
     implied = sum(levels) / len(levels)
     gap = abs(years - implied)
@@ -420,17 +451,27 @@ def _seniority_fit(years: int | None, signals: list[dict]) -> tuple[int, str | N
     return scaled, f"Roles pitched around {implied:.0f} years — candidate has {years}"
 
 
-def _confidence(signals: list[dict], now: datetime) -> tuple[str, str]:
+def _confidence(signals: list[dict], now: datetime,
+                assessable: int = 100) -> tuple[str, str]:
     """How much evidence stands behind the score, reported beside it.
 
     Three signals from one week and forty across a month can produce the same
     number. A consultant deciding whether to make the call should be able to tell
     those apart, and the score alone cannot say so.
+
+    `assessable` is the other half of that. Normalising a score to 100 means a
+    company judged on a third of the model can still reach 90 — arithmetically
+    right, and a poor thing to act on. So a narrow assessment caps confidence
+    however many signals there are.
     """
     n = len(signals)
     days = {str(s.get("captured_at"))[:10] for s in signals if s.get("captured_at")}
     spread = len(days)
+    narrow = assessable < NARROW_ASSESSMENT
 
+    if narrow:
+        return "low", (f"scored on {assessable} of 100 points — too little of the model "
+                       f"applied to rely on the number")
     if n >= 8 and spread >= 2:
         return "high", f"{n} signals across {spread} collections"
     if n >= 3:
@@ -486,8 +527,29 @@ def match_profile(
         region_pts, region_ev = _region_fit(region, rows)
         recency_pts, recency_ev = _recency(rows, now)
 
-        total = (role_pts + skills_pts + quality_pts + sector_pts + momentum_pts
-                 + volume_pts + rel_pts + seniority_pts + region_pts + recency_pts)
+        # Earned out of assessable, then scaled to 100.
+        #
+        # A contributor returns None when it had nothing to judge — no skills on
+        # the profile, no seniority stated in the adverts, no earlier window to
+        # measure a trend against. Counting those as zero would charge the
+        # company for gaps in *our* data, which is the same mistake the velocity
+        # baseline was fixed for: a week nobody scraped is not a week nobody
+        # hired. So an unassessable contributor leaves the denominator instead.
+        parts = {
+            "role": (role_pts, W_ROLE),
+            "skills": (skills_pts, W_SKILLS),
+            "signalQuality": (quality_pts, W_SIGNAL_QUALITY),
+            "sector": (sector_pts, W_SECTOR),
+            "momentum": (momentum_pts, W_MOMENTUM),
+            "volume": (volume_pts, W_VOLUME),
+            "relationship": (rel_pts, W_RELATIONSHIP),
+            "seniority": (seniority_pts, W_SENIORITY),
+            "region": (region_pts, W_REGION),
+            "recency": (recency_pts, W_RECENCY),
+        }
+        earned = sum(pts for pts, _ in parts.values() if pts is not None)
+        assessable = sum(weight for pts, weight in parts.values() if pts is not None)
+        total = round(earned / assessable * 100) if assessable else 0
 
         # Ordered by how much a consultant would lead with it on a call, which
         # is not the same as by weight: momentum and signal quality answer "why
@@ -495,7 +557,7 @@ def match_profile(
         evidence = [e for e in (role_ev, momentum_ev, quality_ev, skills_ev, volume_ev,
                                 sector_ev, seniority_ev, rel_ev, region_ev, recency_ev) if e]
 
-        confidence, confidence_note = _confidence(rows, now)
+        confidence, confidence_note = _confidence(rows, now, assessable)
 
         dominant_region = max(
             {r.get("geography") for r in rows if r.get("geography")} or {None},
@@ -517,12 +579,13 @@ def match_profile(
             evidence=evidence,
             confidence=confidence,
             confidence_note=confidence_note,
-            breakdown={
-                "role": role_pts, "skills": skills_pts, "signalQuality": quality_pts,
-                "sector": sector_pts, "momentum": momentum_pts, "volume": volume_pts,
-                "relationship": rel_pts, "seniority": seniority_pts,
-                "region": region_pts, "recency": recency_pts,
-            },
+            earned=earned,
+            assessable=assessable,
+            breakdown={k: pts for k, (pts, _) in parts.items() if pts is not None},
+            #: Contributors that had no input to judge, so a reader can see what
+            #: the score does *not* account for rather than assuming it weighed
+            #: everything.
+            not_assessed=sorted(k for k, (pts, _) in parts.items() if pts is None),
         ))
 
     # Company name as the final key keeps the order stable when scores tie.

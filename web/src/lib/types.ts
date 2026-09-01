@@ -194,6 +194,14 @@ export interface Match {
    *  folded into it: a thin case and a strong one can reach the same number. */
   confidence?: string
   confidenceNote?: string
+  /** Points earned, and the weight of the contributors that could be judged.
+   *  `score` is these scaled to 100. Shown so a reader can see the working:
+   *  a contributor with nothing to judge leaves the denominator rather than
+   *  scoring zero, so the company is not charged for gaps in our own data. */
+  earned?: number
+  assessable?: number
+  /** Contributors that had no input to judge — what the score does not cover. */
+  notAssessed?: string[]
   /** Written by a model after the ranking was fixed. It cannot reorder. */
   rationale?: string
   fit?: string
@@ -435,6 +443,8 @@ export interface LlmSettingsPayload {
 export interface ScoringModel {
   total: number
   contributors: { key: string; weight: number; label: string; what: string }[]
+  /** Why a score can be out of fewer than the full set of points. */
+  normalisation: string
   confidence: { level: string; what: string }[]
   llm: {
     provider: string
