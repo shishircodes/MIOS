@@ -4,14 +4,7 @@ import { useRef, useState } from 'react'
 import { ScoringExplainer } from '~/components/ScoringExplainer'
 import { Icons, RegionChip, Section } from '~/components/ui'
 import { useCountUpAll, useReveal } from '~/lib/motion'
-import {
-  deleteProfile,
-  fetchMatches,
-  matchDraft,
-  parseCV,
-  profilesQueryOptions,
-  saveProfile,
-} from '~/lib/api'
+import { deleteProfile, fetchMatches, matchDraft, parseCV, profilesQueryOptions, saveProfile, scoringModelQueryOptions } from '~/lib/api'
 import { UnauthenticatedError } from '~/lib/auth'
 import { useAuth } from '~/lib/auth-context'
 import type { Confidence, Match, ParsedCV, ProfileDraft, StoredProfile } from '~/lib/types'
@@ -169,6 +162,11 @@ function PushScreen() {
     { source: 'manual_form', filename: null },
   )
   const [explainOpen, setExplainOpen] = useState(false)
+  // The denominator, read from the scorer rather than written as 100 here. The
+  // weights sum to 100 and a test keeps them there, but a number on screen
+  // should follow the calculation instead of restating a fact about it.
+  const scoring = useQuery(scoringModelQueryOptions)
+  const scoreTotal = scoring.data?.total ?? 100
   const [matches, setMatches] = useState<Match[] | null>(null)
   const [matchMeta, setMatchMeta] = useState<{ windowDays: number; considered: number } | null>(null)
   // Why the AI notes are missing, when they are. A silent absence would leave
@@ -598,7 +596,12 @@ function PushScreen() {
               )}
             </div>
             <div className="score">
-              <span className="big">{m.score}</span>
+              <div className="score-line">
+                {/* The number stays alone in .big: the count-up animation
+                    rewrites its text content. */}
+                <span className="big">{m.score}</span>
+                <span className="out-of">/ {scoreTotal}</span>
+              </div>
               match score
               {/* Beside the score, never folded into it: a thin case and a
                   strong one can reach the same number. */}

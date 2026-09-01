@@ -1600,3 +1600,15 @@ overflow-x: auto;
   margin-top: 22px; padding: 10px 12px; background: var(--amber-bg);
   border-left: 2px solid var(--amber-line); font-size: 12.5px; line-height: 1.55;
 }
+
+/* The match score with its denominator. `.big` keeps the number by itself —
+   the count-up animation rewrites its text content, so anything else inside it
+   would be erased on every render. */
+.match-row .score .score-line {
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 3px;
+}
+.match-row .score .score-line .big { display: inline; margin-bottom: 0; }
+.match-row .score .out-of { font-size: 13px; color: var(--muted); }
