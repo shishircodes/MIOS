@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
 import { useRef, useState } from 'react'
+import { ScoringExplainer } from '~/components/ScoringExplainer'
 import { Icons, RegionChip, Section } from '~/components/ui'
 import { useCountUpAll, useReveal } from '~/lib/motion'
 import {
@@ -27,6 +28,20 @@ const EMPTY: ProfileDraft = {
 }
 
 const SECTORS = ['mining', 'oil_gas', 'construction', 'defence', 'energy_transition', 'other']
+/** Why the AI notes are missing, in a sentence rather than a provider's raw
+ *  error. The full text is a JSON blob with a support URL in it; a consultant
+ *  needs to know whether to wait, ask an admin, or ignore it. */
+function explainNote(note: string): string {
+  const n = note.toLowerCase()
+  if (n.includes('429') || n.includes('quota') || n.includes('resource_exhausted')) {
+    return 'the daily model allowance is spent. The ranking below is unaffected.'
+  }
+  if (n.includes('api_key') || n.includes('not set') || n.includes('not configured')) {
+    return 'no model is configured. An administrator can set one under Models & cost.'
+  }
+  return 'the model could not be reached. The ranking below is unaffected.'
+}
+
 const SECTOR_LABEL: Record<string, string> = {
   mining: 'Mining', oil_gas: 'Oil & Gas', construction: 'Construction',
   defence: 'Defence', energy_transition: 'Energy Transition', other: 'Other',
@@ -153,8 +168,12 @@ function PushScreen() {
   const [origin, setOrigin] = useState<{ source: 'cv_upload' | 'manual_form'; filename: string | null }>(
     { source: 'manual_form', filename: null },
   )
+  const [explainOpen, setExplainOpen] = useState(false)
   const [matches, setMatches] = useState<Match[] | null>(null)
   const [matchMeta, setMatchMeta] = useState<{ windowDays: number; considered: number } | null>(null)
+  // Why the AI notes are missing, when they are. A silent absence would leave
+  // nobody able to tell a spent quota from a model that had nothing to say.
+  const [rationaleNote, setRationaleNote] = useState<string | null>(null)
   const [subject, setSubject] = useState<string>('')
   const [error, setError] = useState<string | null>(null)
 
@@ -172,9 +191,14 @@ function PushScreen() {
     setDraft((d) => ({ ...d, [key]: value }))
   }
 
-  function applyMatches(res: { matches: Match[]; windowDays: number; signalsConsidered: number }, who: string) {
+  function applyMatches(
+    res: { matches: Match[]; windowDays: number; signalsConsidered: number
+           rationaleNote?: string | null },
+    who: string,
+  ) {
     setMatches(res.matches)
     setMatchMeta({ windowDays: res.windowDays, considered: res.signalsConsidered })
+    setRationaleNote(res.rationaleNote ?? null)
     setSubject(who)
   }
 
@@ -513,6 +537,16 @@ function PushScreen() {
           </span>
         }
       >
+        {matches !== null && matches.length > 0 && (
+          <div className="scoring-hint">
+            <button className="btn sm ghost" onClick={() => setExplainOpen(true)}>
+              How is this scored?
+            </button>
+            {rationaleNote && (
+              <span className="muted">No AI notes this time — {explainNote(rationaleNote)}</span>
+            )}
+          </div>
+        )}
         {matches === null && (
           <div className="center-empty">
             Upload a CV or fill in the form above, then choose “Find matches”.
@@ -538,10 +572,37 @@ function PushScreen() {
               <ul className="ev-list">
                 {m.evidence.map((e, i) => <li key={i}>{e}</li>)}
               </ul>
+
+              {/* The written half. Marked as written by a model, because a
+                  sentence a consultant may repeat to a client should say where
+                  it came from. */}
+              {m.rationale && (
+                <div className={`match-note${m.disagrees ? ' flagged' : ''}`}>
+                  <div className="match-note-head">
+                    <span className="match-note-tag">AI note</span>
+                    {m.fit && <span className={`fit-chip ${m.fit}`}>{m.fit} fit</span>}
+                    {m.disagrees && (
+                      <span className="fit-chip disagrees" title="The model reads this
+                        differently from the score. The ranking is unchanged.">
+                        disagrees with the score
+                      </span>
+                    )}
+                  </div>
+                  <p>{m.rationale}</p>
+                  {m.caveat && <p className="match-caveat">Check first: {m.caveat}</p>}
+                </div>
+              )}
             </div>
             <div className="score">
               <span className="big">{m.score}</span>
               match score
+              {/* Beside the score, never folded into it: a thin case and a
+                  strong one can reach the same number. */}
+              {m.confidence && (
+                <div className={`conf-chip ${m.confidence}`} title={m.confidenceNote}>
+                  {m.confidence} confidence
+                </div>
+              )}
               <div style={{ marginTop: 10 }}>
                 <button className="btn rust sm">{Icons.push} {m.action}</button>
               </div>
@@ -551,6 +612,8 @@ function PushScreen() {
       </Section>
 
       {/* ---------- Saved profiles ---------- */}
+      <ScoringExplainer open={explainOpen} onClose={() => setExplainOpen(false)} />
+
       <Section title="Saved profiles" tools={<span>{profiles.data?.length ?? 0} STORED</span>}>
         <table className="tbl">
           <thead>

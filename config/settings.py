@@ -18,6 +18,14 @@ load_dotenv(REPO_ROOT / ".env")
 class Settings:
     gemini_api_key: str
     gemini_model: str
+    #: Anthropic, for when a purpose is routed to Claude. Empty until somebody
+    #: sets it, which is what `llm.providers` reports as
+    #: available-but-not-configured rather than hiding the provider.
+    anthropic_api_key: str
+    #: Which provider and model answer each purpose, as "purpose=provider:model"
+    #: pairs. Empty means every purpose goes to Gemini, exactly as before this
+    #: existed. See llm/purposes.py for the purpose names.
+    llm_routing: dict[str, str]
     slack_webhook_url: str
     db_path: Path
     #: Neon/PostgreSQL DSN. When set it wins over db_path everywhere.
@@ -56,7 +64,8 @@ class Settings:
     #: the session-signing secret into the log. CI logs are retained and, on a
     #: public repo, world-readable.
     _SECRET_FIELDS = frozenset({
-        "gemini_api_key", "slack_webhook_url", "database_url", "apify_token",
+        "gemini_api_key", "anthropic_api_key", "slack_webhook_url", "database_url",
+        "apify_token",
         "adzuna_app_key", "google_client_secret", "session_secret",
     })
 
@@ -122,6 +131,8 @@ def load_settings() -> Settings:
     return Settings(
         gemini_api_key=_get("GEMINI_API_KEY"),
         gemini_model=_get("GEMINI_MODEL", "gemini-2.5-flash"),
+        anthropic_api_key=_get("ANTHROPIC_API_KEY"),
+        llm_routing=_get_routing("LLM_ROUTING"),
         slack_webhook_url=_get("SLACK_WEBHOOK_URL"),
         db_path=db_path,
         database_url=_get("DATABASE_URL"),
@@ -152,6 +163,27 @@ def load_settings() -> Settings:
         auth_disabled=_get_bool("AUTH_DISABLED", False),
         scheduler_enabled=_get_bool("SCHEDULER_ENABLED", False),
     )
+
+
+def _get_routing(name: str) -> dict[str, str]:
+    """Parse LLM_ROUTING="classify=gemini:gemini-2.5-flash,pulse=anthropic:claude-sonnet-4-5".
+
+    A malformed entry is skipped with a warning rather than raising: a typo in
+    one purpose should not stop the API booting, it should leave that purpose on
+    its default.
+    """
+    raw = _get(name)
+    if not raw:
+        return {}
+    out: dict[str, str] = {}
+    for pair in raw.split(","):
+        purpose, sep, target = pair.strip().partition("=")
+        if not sep or not purpose.strip() or not target.strip():
+            logging.getLogger(__name__).warning(
+                "settings: ignoring malformed %s entry %r", name, pair)
+            continue
+        out[purpose.strip()] = target.strip()
+    return out
 
 
 def configure_logging(level: str | None = None) -> None:

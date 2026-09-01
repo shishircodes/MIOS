@@ -293,3 +293,22 @@ CREATE TABLE IF NOT EXISTS digests (
 );
 CREATE INDEX IF NOT EXISTS idx_digests_window_to ON digests(window_to);
 
+
+-- ---------------------------------------------------------------------------
+-- Which model answers which question
+-- ---------------------------------------------------------------------------
+
+-- Only deviations, like `source_settings`: a purpose with no row sits at
+-- whatever LLM_ROUTING or the built-in default says. So a default can be
+-- revised later without rewriting every row that merely agreed with the old
+-- one, and "reset this purpose" is a delete rather than a second kind of state.
+CREATE TABLE IF NOT EXISTS llm_settings (
+    purpose    TEXT PRIMARY KEY,
+    provider   TEXT NOT NULL,
+    model      TEXT NOT NULL,
+    -- Who chose it. A model choice changes what the pipeline costs and how it
+    -- reads, so "why is Market Pulse suddenly different?" needs an answer.
+    changed_by TEXT,
+    changed_at TEXT NOT NULL
+);
+

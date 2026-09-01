@@ -190,11 +190,24 @@ export interface Match {
   action: string
   signalCount: number
   breakdown: Record<string, number>
+  /** How much evidence stands behind the score — reported beside it, never
+   *  folded into it: a thin case and a strong one can reach the same number. */
+  confidence?: string
+  confidenceNote?: string
+  /** Written by a model after the ranking was fixed. It cannot reorder. */
+  rationale?: string
+  fit?: string
+  caveat?: string | null
+  /** True where the model's read and the score point different ways. A flag for
+   *  a human to look at, not a correction applied to the ranking. */
+  disagrees?: boolean
 }
 
 export interface MatchResponse {
   profile: ProfileDraft
   matches: Match[]
+  /** Why there are no AI notes, when there are none. Absent when they worked. */
+  rationaleNote?: string | null
   windowDays: number
   /** How many signals the ranking stood on — context for a short result list. */
   signalsConsidered: number
@@ -368,3 +381,66 @@ export interface SchedulePayload {
   history: PipelineRun[]
 }
 
+/** One job the pipeline asks a model to do, and what currently answers it. */
+export interface LlmRoute {
+  purpose: string
+  label: string
+  /** What this job needs from a model, in plain terms — so somebody choosing
+   *  does not have to read the pipeline to know what they are choosing for. */
+  needs: string
+  callsPerRun: number
+  provider: string
+  model: string
+  /** False when the chosen provider has no API key. */
+  configured: boolean
+  /** Where this choice came from: 'admin', 'environment' or 'default'. */
+  source: string
+  changedBy: string | null
+  changedAt: string | null
+  /** Set when an admin choice is overriding a value pinned on the server. */
+  overriddenEnv: string | null
+}
+
+export interface LlmProvider {
+  name: string
+  label: string
+  configured: boolean
+  defaultModel: string
+  models: string[]
+}
+
+export interface LlmUsage {
+  provider: string
+  label: string
+  configured: boolean
+  /** Attempts today, successful or not — a provider charges for a rejected
+   *  request the same as a served one. */
+  usedToday: number
+  dailyLimit: number | null
+  remaining: number | null
+}
+
+export interface LlmSettingsPayload {
+  routing: LlmRoute[]
+  providers: LlmProvider[]
+  usage: LlmUsage[]
+  history: { provider: string; date: string; calls: number }[]
+  you: string
+  /** Set after choosing a provider that has no key. Not an error. */
+  warning?: string | null
+}
+
+/** How a Mode Push score is arrived at. Served from the scorer's own constants,
+ *  so the explanation cannot drift from the calculation. */
+export interface ScoringModel {
+  total: number
+  contributors: { key: string; weight: number; label: string; what: string }[]
+  confidence: { level: string; what: string }[]
+  llm: {
+    provider: string
+    model: string
+    annotatesTop: number
+    what: string
+  }
+  caveat: string
+}

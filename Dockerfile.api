@@ -33,6 +33,11 @@ COPY push ./push
 # Mode Publish. Same rule as push/ above: a package missing here builds fine and
 # fails when uvicorn imports the app.
 COPY publish ./publish
+# Model routing and usage accounting. `api/admin_api.py` imports this at module
+# load, so the same rule applies again — and it caught me: the comments above
+# describe this exact failure and the package was still left out, because
+# nothing checks. tests/test_docker_image.py now does.
+COPY llm ./llm
 
 RUN pip install --no-cache-dir ".[api]"
 

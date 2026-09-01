@@ -19,7 +19,10 @@ from fastapi import APIRouter, Body, Depends, HTTPException
 from api import access, scheduler
 from api.auth import require_admin
 from config.settings import settings
+from llm import available_providers, describe_routing
+from llm.usage import budget, history
 from loader import run_log
+from loader.llm_settings import UnknownPurpose, clear_route, set_route
 from loader.db import connect
 from loader.schedule import (
     DAY_NAMES,
@@ -427,3 +430,75 @@ async def _finish_manual_run(run_id: str) -> None:
         await scheduler.execute_run(run_id)
     except Exception:  # noqa: BLE001 - already recorded against the run
         log.warning("admin: manual run %s ended in failure", run_id)
+
+
+# --------------------------------------------------------------------------
+# Which model answers which question
+# --------------------------------------------------------------------------
+
+
+@router.get("/llm")
+def llm_settings(user: dict[str, Any] = Depends(require_admin)) -> dict[str, Any]:
+    """Model routing, what each provider offers, and what has been spent today.
+
+    Usage sits beside the choice deliberately. Picking a stronger model is a
+    decision about cost, and on the free tier it is a decision about whether the
+    weekly run will complete at all — the pipeline has already exhausted a day's
+    allowance mid-cycle. Showing the two apart would let somebody make the first
+    decision without seeing the second.
+    """
+    return {
+        "routing": describe_routing(),
+        "providers": available_providers(),
+        "usage": budget(),
+        "history": history(14),
+        "you": user["email"],
+    }
+
+
+@router.put("/llm/{purpose}")
+def set_llm_route(
+    purpose: str,
+    payload: dict[str, Any] = Body(...),
+    user: dict[str, Any] = Depends(require_admin),
+) -> dict[str, Any]:
+    """Point one purpose at a provider and model.
+
+    Takes effect on the next call; nothing is cached across requests. Routing to
+    a provider with no key is allowed and reported rather than refused — a
+    deployment may be about to gain one, and refusing here would mean the
+    setting could not be made until the key existed.
+    """
+    provider = str(payload.get("provider") or "").strip()
+    model = str(payload.get("model") or "").strip()
+    if not provider or not model:
+        raise HTTPException(status_code=400, detail="Both a provider and a model are required.")
+
+    known = {p["name"] for p in available_providers()}
+    if provider not in known:
+        raise HTTPException(status_code=400,
+                            detail=f"'{provider}' is not a provider. Known: {', '.join(sorted(known))}.")
+    try:
+        set_route(purpose, provider, model, changed_by=user["email"])
+    except UnknownPurpose as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    result = llm_settings(user)
+    chosen = next((p for p in result["providers"] if p["name"] == provider), None)
+    if chosen and not chosen["configured"]:
+        result["warning"] = (
+            f"{chosen['label']} has no API key configured, so this purpose will fall back "
+            f"to reporting an error until one is set. The choice has been saved."
+        )
+    return result
+
+
+@router.delete("/llm/{purpose}")
+def clear_llm_route(
+    purpose: str,
+    user: dict[str, Any] = Depends(require_admin),
+) -> dict[str, Any]:
+    """Return a purpose to the environment setting, or the built-in default."""
+    clear_route(purpose)
+    log.info("admin: %s reset the model for %s", user["email"], purpose)
+    return llm_settings(user)
