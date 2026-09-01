@@ -314,6 +314,15 @@ function PushScreen() {
         <div className="meta">
           <div>{profiles.data?.length ?? 0} saved profile(s)</div>
           <div style={{ marginTop: 4 }}>Matched against the last 30 days of signals</div>
+          {/* In the header, not beside the results: "how does this decide who to
+              contact?" is a question somebody asks before trusting it with a
+              candidate, and answering it only after they already have a ranking
+              is answering it too late. */}
+          <div style={{ marginTop: 8 }}>
+            <button className="btn sm ghost" onClick={() => setExplainOpen(true)}>
+              How does the scoring work?
+            </button>
+          </div>
         </div>
       </div>
 
@@ -537,14 +546,9 @@ function PushScreen() {
           </span>
         }
       >
-        {matches !== null && matches.length > 0 && (
+        {matches !== null && matches.length > 0 && rationaleNote && (
           <div className="scoring-hint">
-            <button className="btn sm ghost" onClick={() => setExplainOpen(true)}>
-              How is this scored?
-            </button>
-            {rationaleNote && (
-              <span className="muted">No AI notes this time — {explainNote(rationaleNote)}</span>
-            )}
+            <span className="muted">No AI notes this time — {explainNote(rationaleNote)}</span>
           </div>
         )}
         {matches === null && (
