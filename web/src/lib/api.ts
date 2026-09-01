@@ -3,6 +3,7 @@ import { API_BASE } from './config'
 import { fetchJson } from './auth'
 import type {
   AccessPayload,
+  DashboardPayload,
   DigestArchiveEntry,
   DigestPayload,
   FeedPayload,
@@ -334,3 +335,11 @@ export const scoringModelQueryOptions = queryOptions({
   // reason to re-ask on every mount.
   staleTime: 10 * 60 * 1000,
 })
+
+/** Hiring trends, counted per collection. */
+export const dashboardQueryOptions = queryOptions({
+  queryKey: ['dashboard'],
+  queryFn: () => fetchJson<DashboardPayload>('/api/dashboard'),
+  retry: false,
+})
+

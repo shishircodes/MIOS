@@ -78,10 +78,20 @@ export function RegionChip({ region }: { region: string }) {
 }
 
 // ----- Sparkbar -----
-export function SparkBar({ data, color = 'var(--ink-3)', height = 24 }: { data: number[]; color?: string; height?: number }) {
+export function SparkBar({
+  data,
+  color = 'var(--ink-3)',
+  height = 24,
+  fill = false,
+}: { data: number[]; color?: string; height?: number; fill?: boolean }) {
   const max = Math.max(...data, 1)
+  // `fill` spreads the bars across the available width instead of drawing them
+  // at a fixed 6px. Inline in a table row, fixed width is right — the chart
+  // should not change size with the number of points. As a panel-width chart it
+  // is wrong: five collections rendered into 30px of a 700px card, which reads
+  // as a broken chart rather than as a short history.
   return (
-    <div className="spark" style={{ height }}>
+    <div className={`spark${fill ? ' fill' : ''}`} style={{ height }}>
       {data.map((v, i) => (
         <span key={i} style={{ background: color, height: `${(v / max) * 100}%` }} />
       ))}
