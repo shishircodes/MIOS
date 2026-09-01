@@ -12,7 +12,7 @@ export const Route = createFileRoute('/monitor/feed')({
 
 const REGIONS = ['ALL', 'AU', 'PNG'] as const
 const CYCLES = ['ALL', 'WEEKLY', 'MONTHLY', 'QUARTERLY'] as const
-const PAGE_SIZE = 50
+const PAGE_SIZES = ['25', '50', '100'] as const
 
 /** Debounce, so typing a search term is one request rather than one per key. */
 function useDebounced<T>(value: T, ms = 300): T {
@@ -30,6 +30,7 @@ function SignalFeed() {
   const [source, setSource] = useState<string>('ALL')
   const [query, setQuery] = useState('')
   const [page, setPage] = useState(0)
+  const [pageSize, setPageSize] = useState(50)
 
   const debouncedQuery = useDebounced(query)
 
@@ -37,15 +38,15 @@ function SignalFeed() {
   // list is not page 4 of a filtered one, and can be past the end entirely.
   useEffect(() => {
     setPage(0)
-  }, [region, cycle, source, debouncedQuery])
+  }, [region, cycle, source, debouncedQuery, pageSize])
 
   // Filtering and paging both happen on the server. Doing either in the browser
   // would only ever see the loaded page, so a search would report "3 results"
   // for a term with forty matches.
   const { data, isLoading, isPlaceholderData } = useQuery(
     signalsQueryOptions({
-      limit: PAGE_SIZE,
-      offset: page * PAGE_SIZE,
+      limit: pageSize,
+      offset: page * pageSize,
       region: region === 'ALL' ? undefined : region,
       cycle: cycle === 'ALL' ? undefined : cycle,
       source: source === 'ALL' ? undefined : source,
@@ -58,7 +59,7 @@ function SignalFeed() {
   const scope = useRef<HTMLDivElement>(null)
   const scrapedRef = useFigure(data?.scrapedAllTime ?? 0)
   useReveal(scope, '.signal', {
-    key: `${page}-${region}-${cycle}-${source}-${debouncedQuery}`,
+    key: `${page}-${pageSize}-${region}-${cycle}-${source}-${debouncedQuery}`,
     delay: 0.08,
   })
 
@@ -73,9 +74,9 @@ function SignalFeed() {
   const signals = data?.signals ?? []
   const total = data?.total ?? 0
   const anyFilterActive = region !== 'ALL' || cycle !== 'ALL' || source !== 'ALL' || query.trim() !== ''
-  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE))
-  const firstShown = total === 0 ? 0 : page * PAGE_SIZE + 1
-  const lastShown = page * PAGE_SIZE + signals.length
+  const pageCount = Math.max(1, Math.ceil(total / pageSize))
+  const firstShown = total === 0 ? 0 : page * pageSize + 1
+  const lastShown = page * pageSize + signals.length
 
   const reset = () => { setRegion('ALL'); setCycle('ALL'); setSource('ALL'); setQuery('') }
 
@@ -112,6 +113,12 @@ function SignalFeed() {
           {sourceOptions.length > 1 && (
             <FilterGroup label="Source" value={source} options={sourceOptions} onChange={setSource} />
           )}
+          <FilterGroup
+            label="Per page"
+            value={String(pageSize)}
+            options={[...PAGE_SIZES]}
+            onChange={(value) => setPageSize(Number(value))}
+          />
 
           <div className="feed-search">
             <span className="feed-search-icon" aria-hidden="true">{Icons.search}</span>
