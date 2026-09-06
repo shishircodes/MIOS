@@ -72,7 +72,25 @@ def _ensure_kv_store(conn) -> None:
 
 
 def _daily_api_call_key() -> str:
-    return f"gemini_api_calls_{datetime.now(timezone.utc).date().isoformat()}"
+    """The counter this run's model writes to.
+
+    Points at `llm.usage`'s key rather than the old `gemini_api_calls_*` one, so
+    the circuit breaker and the Admin screen read the same number. They did not:
+    this counter only ever recorded *successful* classification batches, while
+    the provider charges for every attempt, so it read zero on a day the free
+    tier was exhausted.
+
+    Keyed on the provider actually routed to this purpose — reading Gemini's
+    count while classifying through Claude would refuse a run for somebody
+    else's quota.
+    """
+    from llm import PURPOSE_CLASSIFY, resolve
+
+    try:
+        provider, _ = resolve(PURPOSE_CLASSIFY)
+    except Exception:  # noqa: BLE001 - fall back to the historical key
+        provider = "gemini"
+    return f"llm_calls:{provider}:{datetime.now(timezone.utc).date().isoformat()}"
 
 
 def _get_daily_api_calls(conn) -> int:
@@ -83,6 +101,13 @@ def _get_daily_api_calls(conn) -> int:
 
 
 def _increment_daily_api_calls(conn) -> None:
+    """Deprecated: the seam in `llm.providers` counts every attempt.
+
+    Kept because `evaluation/kpi_harness.py` still calls it, and because a test
+    that drives `classify_pending` with a fake caller never reaches the seam and
+    would otherwise see no counting at all. Calls made through a real provider
+    are counted there, not here — see `classify_pending`.
+    """
     key = _daily_api_call_key()
     # The counter lives in a TEXT column, so the incremented integer has to be
     # cast back to TEXT. SQLite's loose typing forgives the mismatch; Postgres
@@ -276,36 +301,10 @@ BATCH_RESPONSE_SCHEMA: dict[str, Any] = {
 }
 
 
-def _build_gemini_caller() -> Callable[..., dict[str, Any]]:
-    """Return a function (system_prompt, user_prompt, schema) -> parsed JSON."""
-    from google import genai
-    from google.genai import types
-
-    if not settings.gemini_api_key:
-        raise RuntimeError("GEMINI_API_KEY is not set in .env")
-
-    client = genai.Client(api_key=settings.gemini_api_key)
-    model = settings.gemini_model
-
-    def _call(
-        system_prompt: str,
-        user_prompt: str,
-        schema: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
-        response = client.models.generate_content(
-            model=model,
-            contents=user_prompt,
-            config=types.GenerateContentConfig(
-                system_instruction=system_prompt,
-                response_mime_type="application/json",
-                response_schema=schema or SINGLE_RESPONSE_SCHEMA,
-                temperature=0.1,
-                max_output_tokens=MAX_OUTPUT_TOKENS,
-            ),
-        )
-        return json.loads(response.text)
-
-    return _call
+# `_build_gemini_caller` lived here. Every caller now goes through
+# `llm.caller_for`, which picks the provider an administrator routed this
+# purpose to and counts the attempt. Keeping a second way to reach a model
+# is how three call sites came to be uncounted.
 
 
 def _call_with_retry(
@@ -437,8 +436,13 @@ def classify_pending(
     'quota_exhausted', 'api_calls_made'.
     """
     counts: Counter[str] = Counter()
+    supplied_caller = gemini_caller is not None
     if gemini_caller is None:
-        gemini_caller = _build_gemini_caller()
+        # Through the seam, so the call is counted and the model is whatever an
+        # administrator routed this purpose to.
+        from llm import PURPOSE_CLASSIFY, caller_for
+
+        gemini_caller = caller_for(PURPOSE_CLASSIFY)
 
     with connect(db_path) as conn:
         _ensure_kv_store(conn)
@@ -543,7 +547,12 @@ def classify_pending(
                 counts["errors"] += len(pending_chunk)
                 continue
 
-            _increment_daily_api_calls(conn)
+            # Counted at the seam in `llm.providers` when a real provider
+            # answered. A supplied `gemini_caller` — every test, and the
+            # evaluation harness — never reaches it, so it is counted here
+            # instead. Doing both would double every real call.
+            if supplied_caller:
+                _increment_daily_api_calls(conn)
             counts["api_calls_made"] = counts.get("api_calls_made", 0) + 1
 
             for idx, (signal_id, raw) in enumerate(pending_chunk):

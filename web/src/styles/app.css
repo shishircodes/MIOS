@@ -385,6 +385,10 @@ input, textarea, select { font-family: inherit; }
 /* ---------- Sparkbars ---------- */
 .spark { display: flex; gap: 2px; align-items: flex-end; height: 24px; }
 .spark span { width: 6px; background: var(--teal); }
+/* Panel-width charts: the bars share the space rather than sitting at a fixed
+   6px, so a short history reads as short rather than as a broken chart. */
+.spark.fill { gap: 4px; }
+.spark.fill span { flex: 1; width: auto; min-width: 3px; }
 
 /* ---------- Forms ---------- */
 .field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
@@ -1621,4 +1625,16 @@ overflow-x: auto;
   letter-spacing: 0.04em;
   color: var(--ink-3);
   cursor: help;
+}
+
+/* Dates under a spark chart. The chart has no axis of its own, and a series
+   with no endpoints leaves the reader guessing what period it covers. */
+.spark-axis {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 6px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  color: var(--ink-3);
 }

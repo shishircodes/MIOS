@@ -31,6 +31,14 @@ from llm.purposes import PURPOSES, Purpose
 
 log = logging.getLogger(__name__)
 
+#: Near-deterministic. Every purpose here asks for structured extraction or
+#: grounded prose, and none of them wants invention.
+GEMINI_TEMPERATURE = 0.1
+
+#: ~150 tokens per record across a hundred-record classification batch, with
+#: headroom.
+GEMINI_MAX_OUTPUT_TOKENS = 32000
+
 #: (system_prompt, user_prompt, schema) -> parsed JSON. The shape every existing
 #: caller already passes around.
 Caller = Callable[..., Any]
@@ -100,7 +108,13 @@ class GeminiProvider:
                 system_instruction=system_prompt,
                 response_mime_type="application/json",
                 response_schema=schema,
-                max_output_tokens=32000,
+                # Both settings match what `agents.signal_analyst` used before
+                # this seam existed. Temperature especially: classification is
+                # meant to be near-deterministic, and leaving it at the model
+                # default would have made every migrated caller subtly less
+                # repeatable without anything saying so.
+                temperature=GEMINI_TEMPERATURE,
+                max_output_tokens=GEMINI_MAX_OUTPUT_TOKENS,
             )
             response = client.models.generate_content(
                 model=model, contents=user_prompt, config=config

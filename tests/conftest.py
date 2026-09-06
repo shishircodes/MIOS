@@ -85,18 +85,19 @@ def _never_a_live_model(request, monkeypatch):
 
     import llm.providers as providers
 
-    def refuse(purpose: str):
-        raise providers.LLMError(
-            f"tests must not call a live model (purpose {purpose!r}). Pass a fake "
-            "caller, or mark the test @pytest.mark.real_llm if it genuinely needs one."
+    def refuse(model: str):
+        raise providers.ProviderNotConfigured(
+            f"tests must not call a live model ({model}). Pass a fake caller, or "
+            "mark the test @pytest.mark.real_llm if it genuinely needs one."
         )
 
-    monkeypatch.setattr(providers, "caller_for", refuse)
-    # Callers import the name directly, so the module attribute is patched too.
-    import llm
-    monkeypatch.setattr(llm, "caller_for", refuse, raising=False)
-    import push.rationale as rationale
-    monkeypatch.setattr(rationale, "caller_for", refuse, raising=False)
+    # Blocked at the provider rather than at `caller_for`. Routing, purpose
+    # resolution and usage counting are all worth exercising in tests; what must
+    # not happen is a request leaving the machine. Patching the router instead
+    # made the seam itself untestable, and a test that cannot reach the code it
+    # is about tends to get written around.
+    for provider in providers._PROVIDERS.values():
+        monkeypatch.setattr(provider, "build", refuse)
 
 
 @pytest.fixture(autouse=True)
