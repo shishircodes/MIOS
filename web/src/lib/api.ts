@@ -9,6 +9,7 @@ import type {
   FeedPayload,
   FeedQuery,
   MatchResponse,
+  OutcomeSummary,
   ParsedCV,
   ProfileDraft,
   Report,
@@ -209,6 +210,37 @@ export const profilesQueryOptions = queryOptions({
 export async function fetchMatches(profileId: string): Promise<MatchResponse> {
   return fetchJson<MatchResponse>(`/api/push/profiles/${profileId}/matches`)
 }
+
+/** Record what the team did with one ranked company.
+ *
+ *  The score travels with the decision rather than being looked up server-side:
+ *  it has to be the number the consultant was actually looking at, or the model
+ *  ends up judged against a later version of itself. */
+export async function recordOutcome(
+  profileId: string,
+  body: {
+    company: string
+    outcome: string
+    score?: number
+    confidence?: string
+    assessable?: number
+    rank?: number
+    note?: string
+  },
+): Promise<{ recorded: boolean; outcomes: Record<string, { outcome: string }> }> {
+  return postOrExplain(`/api/push/profiles/${encodeURIComponent(profileId)}/outcomes`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+}
+
+/** How much outcome data exists, and whether it is yet enough to calibrate. */
+export const outcomeSummaryQueryOptions = queryOptions({
+  queryKey: ['push', 'outcomes'],
+  queryFn: () => fetchJson<OutcomeSummary>('/api/push/outcomes'),
+  retry: false,
+})
 
 /** Rank companies for a draft without storing the person. */
 export async function matchDraft(draft: ProfileDraft): Promise<MatchResponse> {
