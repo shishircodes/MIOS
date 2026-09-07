@@ -46,7 +46,6 @@ from agents.signal_analyst import (
     _increment_daily_api_calls,
     _throttle,
 )
-from config.settings import settings
 from loader.db import connect
 from publish.report import Section
 
@@ -153,11 +152,12 @@ def rewrite(
         return RewriteOutcome(sections, used_llm=False, reason="Nothing to rewrite.")
 
     if gemini_caller is None:
-        if not settings.gemini_api_key:
-            return RewriteOutcome(
-                sections, used_llm=False,
-                reason="No Gemini key is configured, so the report uses its computed wording.",
-            )
+        # No Gemini-specific key check: this purpose may be routed to another
+        # provider entirely, and asking about GEMINI_API_KEY would refuse a
+        # perfectly configured Claude — or, now that keys can be entered in the
+        # Admin panel, refuse a perfectly configured Gemini whose key simply is
+        # not in the environment. `caller_for` raises naming whatever is
+        # actually missing. Same fix as `delivery.pulse`.
         remaining = _remaining_quota(target)
         if remaining <= 0:
             return RewriteOutcome(
@@ -171,8 +171,11 @@ def rewrite(
 
             gemini_caller = caller_for(PURPOSE_PUBLISH)
         except Exception as exc:  # noqa: BLE001
+            # Not "Gemini is unavailable": the message has to name whatever is
+            # actually routed here, or an administrator who moved this purpose
+            # to Claude reads a sentence about a provider they are not using.
             return RewriteOutcome(sections, used_llm=False,
-                                  reason=f"Gemini is unavailable ({exc}).")
+                                  reason=f"No model is available for rewriting ({exc}).")
         _throttle()
 
     prompt = "\n\n".join(

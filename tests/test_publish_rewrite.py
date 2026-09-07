@@ -183,8 +183,6 @@ def test_a_failed_call_still_counts_against_the_budget(db):
 
 def test_an_exhausted_quota_falls_back_without_calling(db, monkeypatch):
     monkeypatch.setattr("publish.rewrite._remaining_quota", lambda _t: 0)
-    monkeypatch.setattr("publish.rewrite.settings",
-                        type("S", (), {"gemini_api_key": "present"})())
 
     out = rewrite(COMPUTED, target=db)
     assert out.used_llm is False
@@ -192,12 +190,21 @@ def test_an_exhausted_quota_falls_back_without_calling(db, monkeypatch):
     assert out.sections == COMPUTED, "the computed report still ships"
 
 
-def test_a_missing_api_key_falls_back_and_says_so(db, monkeypatch):
-    monkeypatch.setattr("publish.rewrite.settings",
-                        type("S", (), {"gemini_api_key": ""})())
+def test_no_available_model_falls_back_and_says_so(db):
+    """It used to check GEMINI_API_KEY directly, which asks the wrong question
+    twice over: this purpose may be routed to Claude, and a Gemini key may have
+    been entered in the Admin panel rather than the environment. Either way the
+    report ships with its computed wording — but the reason must name what is
+    actually missing, not a variable that has stopped being the authority.
+
+    The conftest guard makes every provider refuse to build, which is the same
+    path an unconfigured one takes.
+    """
     out = rewrite(COMPUTED, target=db)
+
     assert out.used_llm is False
-    assert "No Gemini key" in (out.reason or "")
+    assert "No model is available" in (out.reason or "")
+    assert out.sections == COMPUTED
 
 
 # ---------- failure is never fatal ----------
