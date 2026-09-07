@@ -20,8 +20,19 @@ services:
       DATABASE_URL: ${DATABASE_URL}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+
+      # Encrypts provider API keys entered in the Admin panel. Listed here for
+      # the same reason as the scrape targets below: without it the panel
+      # refuses to store a key, and a variable that never reached the container
+      # is exactly the failure this file should make visible.
+      #
+      # It must stay stable. Change it and the stored keys cannot be decrypted
+      # — the panel reports that specifically, rather than showing them as
+      # absent, because the two need completely different fixes.
+      MIOS_CREDENTIAL_KEY: ${MIOS_CREDENTIAL_KEY:-}
 
       # Scraper credentials. The API image also contains the pipeline, so the
       # scheduled `pipeline.live` run inside this container needs these.

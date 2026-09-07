@@ -21,6 +21,16 @@ dependencies = [
     # trips, which is most of a request when the API and the database are not in
     # the same region — see loader/db.py.
     "psycopg_pool>=3.2.0",
+    # Anthropic Claude. Present as a real dependency rather than an optional
+    # one because routing a purpose to Claude is a choice an administrator can
+    # make in the panel at any time — and a provider that fails on `import`
+    # after the key was accepted is indistinguishable, from the panel, from a
+    # bad key.
+    "anthropic>=0.40.0",
+    # Encrypts the provider API keys entered in the Admin panel, so a database
+    # dump yields ciphertext rather than working credentials. See
+    # loader/credentials.py.
+    "cryptography>=42.0.0",
 ]
 
 [project.optional-dependencies]

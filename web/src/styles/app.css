@@ -1543,6 +1543,29 @@ overflow-x: auto;
   max-width: 300px;
 }
 
+/* ---------- Admin · provider API keys ---------- */
+
+.key-list { padding: 0; }
+.key-row { padding: 14px 16px; border-bottom: 1px solid var(--line); }
+.key-head { display: grid; grid-template-columns: 1fr auto; gap: 20px; align-items: start; }
+.key-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+
+.key-form { display: flex; align-items: center; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+.key-label {
+  font-family: var(--mono); font-size: 11px; letter-spacing: 0.04em;
+  color: var(--ink-3); text-transform: uppercase;
+}
+.key-input {
+  font: inherit; font-family: var(--mono); font-size: 13px; padding: 6px 9px;
+  color: var(--ink); background: var(--surface); border: 1px solid var(--line);
+  border-radius: 4px; flex: 1; min-width: 240px;
+  /* A key is long and unbroken; letting it scroll beats wrapping the row. */
+  text-overflow: ellipsis;
+}
+.key-input:focus { outline: 2px solid var(--navy); outline-offset: 1px; }
+
+.key-result { margin: 12px 0 0; }
+
 /* ---------- Mode Push · the written half ---------- */
 
 .match-note {

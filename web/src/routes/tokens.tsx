@@ -3,8 +3,15 @@ import { createFileRoute } from '@tanstack/react-router'
 import { useState } from 'react'
 import { AdminOnly } from '~/components/AdminOnly'
 import { Loading, Section } from '~/components/ui'
-import { clearLlmRoute, llmSettingsQueryOptions, setLlmRoute } from '~/lib/api'
-import type { LlmRoute, LlmUsage } from '~/lib/types'
+import {
+  clearLlmRoute,
+  clearProviderKey,
+  llmSettingsQueryOptions,
+  setLlmRoute,
+  setProviderKey,
+  testProviderKey,
+} from '~/lib/api'
+import type { LlmProvider, LlmRoute, LlmUsage } from '~/lib/types'
 
 export const Route = createFileRoute('/tokens')({
   head: () => ({ meta: [{ title: 'Models & cost · MIOS' }] }),
@@ -50,6 +57,132 @@ function UsageBar({ u }: { u: LlmUsage }) {
             <span className="muted"> · {u.remaining} left today</span>
           </div>
         </>
+      )}
+    </div>
+  )
+}
+
+/** Where a key came from. Text, not a colour: the distinction between "yours"
+ *  and "the server's" decides what somebody does next, and a colour alone
+ *  cannot be read by everyone (WCAG 1.4.1). */
+const KEY_SOURCE_LABEL: Record<string, string> = {
+  panel: 'Entered here',
+  environment: 'Set on the server',
+  none: 'No key',
+}
+
+function KeyRow({
+  p,
+  onSave,
+  onClear,
+  onTest,
+  busy,
+  testResult,
+}: {
+  p: LlmProvider
+  onSave: (provider: string, key: string) => void
+  onClear: (provider: string) => void
+  onTest: (provider: string) => void
+  busy: boolean
+  testResult: { provider: string; ok: boolean; message: string } | null
+}) {
+  const [value, setValue] = useState('')
+  const [open, setOpen] = useState(false)
+  const k = p.key
+  const mine = testResult?.provider === p.name ? testResult : null
+
+  return (
+    <div className="key-row">
+      <div className="key-head">
+        <div>
+          <div className="llm-purpose">{p.label}</div>
+          <div className="llm-meta">
+            {KEY_SOURCE_LABEL[k.source] ?? k.source}
+            {/* The hint identifies a key to somebody already holding it and is
+                useless to anybody else, which is why it is safe to print. */}
+            {k.hint && <> · ends <span className="mono">…{k.hint}</span></>}
+            {k.changedBy && k.source === 'panel' && <> · by {k.changedBy}</>}
+          </div>
+          {k.shadowsEnvironment && (
+            <div className="llm-meta llm-warn">
+              This key is overriding the one set on the server.
+            </div>
+          )}
+          {/* Two different reasons a stored key cannot be read, and naming the
+              wrong one sends somebody to the wrong fix. */}
+          {k.unreadable && (
+            <div className="llm-meta llm-warn">
+              {k.canStore
+                ? 'A key is stored but will not decrypt — the server’s ' +
+                  'MIOS_CREDENTIAL_KEY has changed since it was saved. Enter the ' +
+                  'key again, or restore the previous value.'
+                : 'A key is stored but cannot be read while the server has no ' +
+                  'MIOS_CREDENTIAL_KEY. It is not lost — set that variable back ' +
+                  'and it becomes readable again.'}
+            </div>
+          )}
+          {!p.sdkInstalled && (
+            <div className="llm-meta llm-warn">
+              The client library for {p.label} is not installed, so a key alone
+              will not make it work. This one needs a deploy, not a key.
+            </div>
+          )}
+        </div>
+        <div className="key-actions">
+          {k.source !== 'none' && (
+            <button className="btn sm ghost" disabled={busy} onClick={() => onTest(p.name)}>
+              Test
+            </button>
+          )}
+          {k.source === 'panel' && (
+            <button className="btn sm ghost" disabled={busy} onClick={() => onClear(p.name)}>
+              Remove
+            </button>
+          )}
+          {k.canStore && (
+            <button className="btn sm" disabled={busy} onClick={() => setOpen((o) => !o)}>
+              {open ? 'Cancel' : k.source === 'panel' ? 'Replace' : 'Add key'}
+            </button>
+          )}
+        </div>
+      </div>
+
+      {open && k.canStore && (
+        <form
+          className="key-form"
+          onSubmit={(e) => {
+            e.preventDefault()
+            if (!value.trim()) return
+            onSave(p.name, value.trim())
+            // Cleared immediately: the key has no reason to sit in a form field
+            // after it has been sent, and it cannot be read back to refill it.
+            setValue('')
+            setOpen(false)
+          }}
+        >
+          <label className="key-label" htmlFor={`key-${p.name}`}>
+            {p.label} API key
+          </label>
+          <input
+            id={`key-${p.name}`}
+            type="password"
+            className="key-input"
+            value={value}
+            autoComplete="off"
+            spellCheck={false}
+            placeholder={`Paste the ${p.label} key`}
+            onChange={(e) => setValue(e.target.value)}
+          />
+          <button className="btn sm" type="submit" disabled={busy || !value.trim()}>
+            Save
+          </button>
+        </form>
+      )}
+
+      {mine && (
+        <div className={`notice ${mine.ok ? 'ok' : 'err'} key-result`} role="status">
+          <strong>{mine.ok ? 'Works.' : 'Did not work.'}</strong> {mine.message}
+        </div>
       )}
     </div>
   )
@@ -134,6 +267,10 @@ function ModelsScreen() {
   const { data, isPending, error } = useQuery(llmSettingsQueryOptions)
   const [problem, setProblem] = useState<string | null>(null)
   const [caution, setCaution] = useState<string | null>(null)
+  const [note, setNote] = useState<string | null>(null)
+  const [tested, setTested] = useState<
+    { provider: string; ok: boolean; message: string } | null
+  >(null)
 
   const save = useMutation({
     mutationFn: (v: { purpose: string; provider: string; model: string }) =>
@@ -156,6 +293,39 @@ function ModelsScreen() {
     onError: (e: Error) => setProblem(e.message),
   })
 
+  const saveKey = useMutation({
+    mutationFn: (v: { provider: string; key: string }) => setProviderKey(v.provider, v.key),
+    onSuccess: (payload) => {
+      qc.setQueryData(llmSettingsQueryOptions.queryKey, payload)
+      setProblem(null)
+      setNote(payload.note ?? null)
+      setTested(null)
+    },
+    onError: (e: Error) => setProblem(e.message),
+  })
+
+  const removeKey = useMutation({
+    mutationFn: (provider: string) => clearProviderKey(provider),
+    onSuccess: (payload) => {
+      qc.setQueryData(llmSettingsQueryOptions.queryKey, payload)
+      setProblem(null)
+      setNote(payload.note ?? null)
+      setTested(null)
+    },
+    onError: (e: Error) => setProblem(e.message),
+  })
+
+  const testKey = useMutation({
+    mutationFn: (provider: string) => testProviderKey(provider),
+    onSuccess: (payload) => {
+      qc.setQueryData(llmSettingsQueryOptions.queryKey, payload)
+      setProblem(null)
+      setNote(null)
+      setTested(payload.test ?? null)
+    },
+    onError: (e: Error) => setProblem(e.message),
+  })
+
   if (isPending) {
     return (
       <div className="page">
@@ -171,8 +341,13 @@ function ModelsScreen() {
     )
   }
 
-  const busy = save.isPending || reset.isPending
+  const busy =
+    save.isPending || reset.isPending ||
+    saveKey.isPending || removeKey.isPending || testKey.isPending
   const spent = data.usage.find((u) => u.dailyLimit !== null && u.remaining === 0)
+  // A property of the deployment, not of any one provider: every row reports
+  // the same answer, so ask the first.
+  const locked = data.providers.length > 0 && !data.providers[0]!.key.canStore
 
   return (
     <div className="page">
@@ -194,6 +369,13 @@ function ModelsScreen() {
       )}
 
       {problem && <div className="notice err" role="alert">{problem}</div>}
+      {note && !problem && (
+        <div className="notice ok" role="status">
+          {note}
+          <button className="btn sm ghost" style={{ marginLeft: 10 }}
+                  onClick={() => setNote(null)}>Dismiss</button>
+        </div>
+      )}
       {caution && !problem && (
         <div className="notice warn" role="status">
           <strong>Saved, but read this.</strong>
@@ -212,6 +394,61 @@ function ModelsScreen() {
             Every attempt is counted, not just the ones that worked — a provider charges the
             allowance for a rejected request the same as a served one. A counter that only
             recorded successes read zero on the day this pipeline ran out.
+          </p>
+        </div>
+      </Section>
+
+      <Section
+        title="Provider API keys"
+        tools={<span>{locked ? 'ENTRY DISABLED' : 'STORED ENCRYPTED'}</span>}
+      >
+        {locked && (
+          <div className="notice warn" role="status" style={{ margin: '14px 22px 0' }}>
+            <strong>Keys cannot be entered here yet.</strong>
+            <p style={{ margin: '6px 0 0' }}>
+              The server has no <span className="mono">MIOS_CREDENTIAL_KEY</span>, so there
+              is nothing to encrypt a key with — and storing one in plain text would leave
+              every provider key readable to anyone who can reach the database. Set that
+              variable in the deployment and restart, then keys can be added here. Keys set
+              as server environment variables keep working either way.
+            </p>
+          </div>
+        )}
+        <div className="key-list">
+          {data.providers.map((p) => (
+            <KeyRow
+              key={p.name}
+              p={p}
+              busy={busy}
+              testResult={tested}
+              onSave={(provider, key) => saveKey.mutate({ provider, key })}
+              onClear={(provider) => removeKey.mutate(provider)}
+              onTest={(provider) => testKey.mutate(provider)}
+            />
+          ))}
+        </div>
+        <div className="prose-note">
+          <p>
+            A key entered here takes effect on the next call — there is no redeploy to wait
+            for, which is the point: a key gets replaced because it leaked or because the
+            free allowance ran out, and both are moments where waiting for a build is the
+            opposite of what is wanted.
+          </p>
+          <p>
+            Keys are encrypted before they are written, with a secret held in the server’s
+            environment and never in the database. A database dump therefore yields
+            ciphertext rather than working credentials. The key is never sent back to this
+            page — the last four characters are shown so you can tell which one is loaded.
+          </p>
+          <p>
+            A key entered here takes precedence over the same provider’s server environment
+            variable, and the row says so when it is doing that. Remove it to go back.
+          </p>
+          <p>
+            <strong>Test</strong> spends one real call. That is deliberate: a key that is
+            stored is not necessarily a key that works — it can be truncated by a paste,
+            revoked, or belong to a project with the API switched off, and all three look
+            identical here until a run fails at five on a Monday morning.
           </p>
         </div>
       </Section>

@@ -41,6 +41,7 @@ from llm.providers import (
     caller_for,
     describe_routing,
     resolve,
+    verify,
 )
 from llm.purposes import (
     PURPOSE_CLASSIFY,
@@ -63,4 +64,5 @@ __all__ = [
     "caller_for",
     "describe_routing",
     "resolve",
+    "verify",
 ]

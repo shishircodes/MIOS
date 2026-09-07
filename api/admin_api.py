@@ -19,9 +19,15 @@ from fastapi import APIRouter, Body, Depends, HTTPException
 from api import access, scheduler
 from api.auth import require_admin
 from config.settings import settings
-from llm import available_providers, describe_routing
+from llm import available_providers, describe_routing, verify
 from llm.usage import budget, history
 from loader import run_log
+from loader.credentials import (
+    CredentialError,
+    CredentialsLocked,
+    clear_key,
+    set_key,
+)
 from loader.llm_settings import UnknownPurpose, clear_route, set_route
 from loader.db import connect
 from loader.schedule import (
@@ -502,3 +508,93 @@ def clear_llm_route(
     clear_route(purpose)
     log.info("admin: %s reset the model for %s", user["email"], purpose)
     return llm_settings(user)
+
+
+# --------------------------------------------------------------------------
+# Provider API keys
+# --------------------------------------------------------------------------
+
+
+@router.put("/llm/keys/{provider}")
+def set_provider_key(
+    provider: str,
+    payload: dict[str, Any] = Body(...),
+    user: dict[str, Any] = Depends(require_admin),
+) -> dict[str, Any]:
+    """Store an API key for one provider, encrypted.
+
+    The response never contains the key — not the one just sent, not any other.
+    A write-only field is unusual enough to be worth stating: an administrator
+    who needs to check *which* key is loaded gets the last four characters and
+    who installed it, which identifies it to somebody already holding it and is
+    useless to anybody else.
+    """
+    key = str(payload.get("key") or "").strip()
+    known = {p["name"] for p in available_providers()}
+    if provider not in known:
+        raise HTTPException(
+            status_code=400,
+            detail=f"'{provider}' is not a provider. Known: {', '.join(sorted(known))}.")
+    if not key:
+        raise HTTPException(status_code=400, detail="An API key is required.")
+
+    try:
+        hint = set_key(provider, key, changed_by=user["email"])
+    except CredentialsLocked as exc:
+        # 503, not 400: the request was fine, the deployment is not configured
+        # to accept it. The message names the variable to set.
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except CredentialError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    result = llm_settings(user)
+    result["note"] = (f"Key ending …{hint} saved for {provider}. "
+                      f"It takes effect on the next call — use Test to check it now.")
+    return result
+
+
+@router.delete("/llm/keys/{provider}")
+def clear_provider_key(
+    provider: str,
+    user: dict[str, Any] = Depends(require_admin),
+) -> dict[str, Any]:
+    """Forget a stored key, returning the provider to its environment variable."""
+    removed = clear_key(provider)
+    log.info("admin: %s cleared the %s key (had one: %s)",
+             user["email"], provider, removed)
+    result = llm_settings(user)
+    result["note"] = (
+        f"Stored key for {provider} removed. "
+        f"{'The environment variable is in use again.' if removed else 'There was none.'}")
+    return result
+
+
+@router.post("/llm/keys/{provider}/test")
+def test_provider_key(
+    provider: str,
+    payload: dict[str, Any] = Body(default={}),
+    user: dict[str, Any] = Depends(require_admin),
+) -> dict[str, Any]:
+    """Make one real call and report whether the key works.
+
+    Stored is not the same as working: a key can be truncated by a paste,
+    revoked, or belong to a project with the API switched off, and all three
+    look identical in the panel until the weekly run fails at 05:00 on a
+    Monday. Spending one call to find out now is the point of being able to
+    enter a key here at all.
+
+    The call is counted like any other, because the provider charges for it.
+    """
+    known = {p["name"] for p in available_providers()}
+    if provider not in known:
+        raise HTTPException(
+            status_code=400,
+            detail=f"'{provider}' is not a provider. Known: {', '.join(sorted(known))}.")
+
+    model = str(payload.get("model") or "").strip()
+    ok, message = verify(provider, model)
+    log.info("admin: %s tested %s -> %s", user["email"], provider, "ok" if ok else "failed")
+
+    result = llm_settings(user)
+    result["test"] = {"provider": provider, "ok": ok, "message": message}
+    return result
