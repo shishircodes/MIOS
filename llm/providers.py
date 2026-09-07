@@ -44,6 +44,29 @@ GEMINI_MAX_OUTPUT_TOKENS = 32000
 Caller = Callable[..., Any]
 
 
+def _key(provider: str, env_value: str,
+         rows: dict[str, dict[str, Any]] | None = None) -> str:
+    """The API key in play for this provider.
+
+    A panel-entered key first, then the environment variable. Providers go
+    through here rather than reading `settings` directly so that order has one
+    definition — and so a key rotated in the panel takes effect on the next
+    call, with no redeploy.
+
+    Fails open to the environment value: if the credentials table is missing or
+    unreadable, a deployment that has only ever used environment variables goes
+    on working exactly as before.
+    """
+    try:
+        from loader.credentials import key_for
+
+        return key_for(provider, env_value, rows=rows)
+    except Exception as exc:  # noqa: BLE001 - a key store problem is not an outage
+        log.warning("llm: could not read the stored %s key (%s) — using the "
+                    "environment", provider, exc)
+        return env_value
+
+
 class LLMError(RuntimeError):
     """Anything that went wrong reaching a model."""
 
@@ -63,8 +86,21 @@ class Provider(Protocol):
     label: str
     default_model: str
 
-    def configured(self) -> bool:
-        """Whether credentials exist. Never raises, never calls out."""
+    def configured(self, rows: dict[str, dict[str, Any]] | None = None) -> bool:
+        """Whether credentials exist. Never raises, never calls out.
+
+        `rows` is a preloaded credentials table, so a caller checking every
+        provider reads it once rather than once per provider.
+        """
+
+    def sdk_installed(self) -> bool:
+        """Whether this provider's client library is importable.
+
+        Separate from `configured()` because they fail for different reasons and
+        need different fixes: a key is entered in the panel, a package is added
+        to `pyproject.toml` and redeployed. Reporting both as "not configured"
+        sends an administrator to type a key that was never the problem.
+        """
 
     def build(self, model: str) -> Caller:
         """Return a callable for this model. Raises ProviderNotConfigured."""
@@ -85,23 +121,37 @@ class GeminiProvider:
     #: screen can warn before a run rather than after.
     free_tier_daily_requests = 20
 
-    def configured(self) -> bool:
-        return bool(settings.gemini_api_key)
+    def configured(self, rows: dict[str, dict[str, Any]] | None = None) -> bool:
+        return bool(_key(self.name, settings.gemini_api_key, rows))
 
     def models(self) -> list[str]:
+        """Suggestions, not a whitelist — routing accepts any model string.
+
+        A fixed list goes stale the week a provider ships something, and the
+        symptom is a model you cannot select rather than an error. Same reason
+        the feed reads its source filter from the data instead of a list kept
+        in the UI.
+        """
         return ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"]
 
+    def sdk_installed(self) -> bool:
+        from importlib.util import find_spec
+
+        return find_spec("google.genai") is not None
+
     def build(self, model: str) -> Caller:
-        if not self.configured():
+        api_key = _key(self.name, settings.gemini_api_key)
+        if not api_key:
             raise ProviderNotConfigured(
-                "GEMINI_API_KEY is not set, so no Gemini model can be reached."
+                "No Gemini API key: none entered in the Admin panel, and "
+                "GEMINI_API_KEY is not set either."
             )
         # Imported here rather than at module scope: importing this package must
         # not require every provider's SDK to be installed.
         from google import genai
         from google.genai import types
 
-        client = genai.Client(api_key=settings.gemini_api_key)
+        client = genai.Client(api_key=api_key)
 
         def _call(system_prompt: str, user_prompt: str, schema: Any = None) -> Any:
             config = types.GenerateContentConfig(
@@ -144,16 +194,24 @@ class AnthropicProvider:
     label = "Anthropic Claude"
     default_model = "claude-sonnet-4-5"
 
-    def configured(self) -> bool:
-        return bool(getattr(settings, "anthropic_api_key", ""))
+    def configured(self, rows: dict[str, dict[str, Any]] | None = None) -> bool:
+        return bool(_key(self.name, getattr(settings, "anthropic_api_key", ""), rows))
 
     def models(self) -> list[str]:
+        """Suggestions, not a whitelist. See `GeminiProvider.models`."""
         return ["claude-sonnet-4-5", "claude-opus-4-1", "claude-haiku-4-5"]
 
+    def sdk_installed(self) -> bool:
+        from importlib.util import find_spec
+
+        return find_spec("anthropic") is not None
+
     def build(self, model: str) -> Caller:
-        if not self.configured():
+        api_key = _key(self.name, getattr(settings, "anthropic_api_key", ""))
+        if not api_key:
             raise ProviderNotConfigured(
-                "ANTHROPIC_API_KEY is not set, so no Claude model can be reached."
+                "No Anthropic API key: none entered in the Admin panel, and "
+                "ANTHROPIC_API_KEY is not set either."
             )
         try:
             import anthropic
@@ -163,7 +221,7 @@ class AnthropicProvider:
                 "before routing a purpose to Claude."
             ) from exc
 
-        client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+        client = anthropic.Anthropic(api_key=api_key)
 
         def _call(system_prompt: str, user_prompt: str, schema: Any = None) -> Any:
             # The schema is expressed in the prompt rather than as a response
@@ -275,16 +333,95 @@ def available_providers() -> list[dict[str, Any]]:
     unconfigured rather than hidden, so somebody wondering why Claude is not an
     option can see that the answer is a missing variable.
     """
+    from loader.credentials import available as can_store, describe, stored_rows
+
+    # Read the credentials table once, not once per provider.
+    try:
+        rows = stored_rows()
+    except Exception as exc:  # noqa: BLE001 - unreadable store, not an outage
+        log.warning("llm: could not read stored keys (%s)", exc)
+        rows = {}
+
+    envs = {
+        GeminiProvider.name: settings.gemini_api_key,
+        AnthropicProvider.name: getattr(settings, "anthropic_api_key", ""),
+    }
+
     out = []
     for p in _PROVIDERS.values():
         out.append({
             "name": p.name,
             "label": p.label,
-            "configured": p.configured(),
+            "configured": p.configured(rows),
             "defaultModel": p.default_model,
             "models": p.models(),
+            #: Where the key came from and the last four characters of it —
+            #: never the key. Somebody debugging a failing provider needs to
+            #: know whether the one in play is theirs, the deployment's, or
+            #: absent, which are three different next actions.
+            "key": describe(p.name, envs.get(p.name, ""), rows),
+            "sdkInstalled": p.sdk_installed(),
         })
+    # Whether the panel can accept a key at all, which is a property of the
+    # deployment rather than of any one provider.
+    for entry in out:
+        entry["key"]["canStore"] = can_store()
     return out
+
+
+def verify(provider_name: str, model: str = "") -> tuple[bool, str]:
+    """Make one real call and say whether it worked.
+
+    A key that is merely *stored* is not a key that *works*: it can be
+    truncated by a paste, revoked, or belong to a project with the API
+    disabled — and every one of those looks identical in the panel until the
+    weekly run fails at 05:00 on Monday. So this spends one call to find out
+    now, which is the whole point of being able to enter a key here.
+
+    Returns (ok, message) rather than raising: every outcome is something the
+    panel displays, and the distinction that matters to the reader is not the
+    exception type but whether the key works.
+    """
+    provider = _PROVIDERS.get(provider_name)
+    if provider is None:
+        return False, f"'{provider_name}' is not a provider this pipeline knows."
+
+    model = model or provider.default_model
+    try:
+        call = provider.build(model)
+    except ProviderNotConfigured as exc:
+        return False, str(exc)
+    except LLMError as exc:  # noqa: BLE001
+        return False, str(exc)
+
+    from llm.usage import record
+
+    try:
+        # Deliberately tiny: this is a reachability check, not a demonstration.
+        result = call(
+            "Reply with JSON only.",
+            'Reply with exactly {"ok": true}',
+            {"type": "object", "properties": {"ok": {"type": "boolean"}}},
+        )
+    except Exception as exc:  # noqa: BLE001 - recorded, then described
+        # Counted even though it failed. A verification that spends allowance
+        # and reports nothing is the same hole the seam was built to close:
+        # the provider charges for a rejected request exactly as for a served
+        # one, so a test button that only counted successes would let somebody
+        # exhaust a free tier by pressing it.
+        record("verify", provider_name, model, ok=False, note=type(exc).__name__)
+        message = str(exc).lower()
+        if any(w in message for w in ("quota", "429", "resource_exhausted", "rate")):
+            # The key is valid — this is what an exhausted allowance looks like,
+            # and calling it a bad key sends somebody to regenerate a working one.
+            return False, (f"The key reached {provider.label}, but the allowance is "
+                           f"spent: {exc}")
+        return False, f"{provider.label} rejected the call: {exc}"
+
+    record("verify", provider_name, model, ok=True)
+    log.info("llm: verified %s/%s", provider_name, model)
+    return True, (f"{provider.label} answered on {model}."
+                  if result else f"{provider.label} answered on {model} (empty reply).")
 
 
 def describe_routing() -> list[dict[str, Any]]:

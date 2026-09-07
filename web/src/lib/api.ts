@@ -325,6 +325,50 @@ export async function clearLlmRoute(purpose: string): Promise<LlmSettingsPayload
   })
 }
 
+/** Store an API key for a provider.
+ *
+ *  Write-only: the response carries a hint and who set it, never the key. */
+export async function setProviderKey(
+  provider: string,
+  key: string,
+): Promise<LlmSettingsPayload> {
+  return postOrExplain<LlmSettingsPayload>(
+    `/api/admin/llm/keys/${encodeURIComponent(provider)}`,
+    {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key }),
+    },
+  )
+}
+
+/** Forget a stored key, returning the provider to its server setting. */
+export async function clearProviderKey(provider: string): Promise<LlmSettingsPayload> {
+  return postOrExplain<LlmSettingsPayload>(
+    `/api/admin/llm/keys/${encodeURIComponent(provider)}`,
+    { method: 'DELETE' },
+  )
+}
+
+/** Spend one real call to find out whether the key works.
+ *
+ *  Stored is not the same as working — a key can be truncated by a paste,
+ *  revoked, or belong to a project with the API switched off, and all three
+ *  look identical here until the Monday run fails. */
+export async function testProviderKey(
+  provider: string,
+  model?: string,
+): Promise<LlmSettingsPayload> {
+  return postOrExplain<LlmSettingsPayload>(
+    `/api/admin/llm/keys/${encodeURIComponent(provider)}/test`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: model ?? '' }),
+    },
+  )
+}
+
 /** How the match score is calculated. Read from the scorer, not written out in
  *  the interface, so the two cannot disagree. */
 export const scoringModelQueryOptions = queryOptions({

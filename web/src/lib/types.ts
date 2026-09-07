@@ -409,12 +409,42 @@ export interface LlmRoute {
   overriddenEnv: string | null
 }
 
+/** Where a provider's API key comes from, and never the key itself.
+ *
+ *  The API returns a hint — the last four characters — because an administrator
+ *  has to be able to tell which key is loaded without the app being able to
+ *  show it to them. */
+export interface LlmKeyStatus {
+  provider: string
+  /** 'panel' (entered here), 'environment' (set on the server), or 'none'. */
+  source: string
+  /** Last four characters of whichever key is in play. Null when there is none. */
+  hint: string | null
+  /** A key entered here is overriding one set on the server. Shown so an
+   *  environment variable that appears to do nothing is explainable. */
+  shadowsEnvironment: boolean
+  /** A stored key that will not decrypt — almost always because the server's
+   *  MIOS_CREDENTIAL_KEY changed. Looks identical to "no key" and needs a
+   *  completely different fix, so it is reported separately. */
+  unreadable: boolean
+  /** False when the server has no MIOS_CREDENTIAL_KEY, so keys cannot be
+   *  encrypted and the form is not offered. */
+  canStore: boolean
+  changedBy: string | null
+  changedAt: string | null
+}
+
 export interface LlmProvider {
   name: string
   label: string
   configured: boolean
   defaultModel: string
+  /** Suggestions, not a whitelist — any model name can be typed. */
   models: string[]
+  key: LlmKeyStatus
+  /** False when the client library is not installed. A different problem from
+   *  a missing key, and a different fix: this one needs a deploy. */
+  sdkInstalled: boolean
 }
 
 export interface LlmUsage {
@@ -436,6 +466,10 @@ export interface LlmSettingsPayload {
   you: string
   /** Set after choosing a provider that has no key. Not an error. */
   warning?: string | null
+  /** Confirmation of a key saved or cleared. Not an error. */
+  note?: string | null
+  /** The result of pressing Test on a provider. */
+  test?: { provider: string; ok: boolean; message: string } | null
 }
 
 /** How a Mode Push score is arrived at. Served from the scorer's own constants,

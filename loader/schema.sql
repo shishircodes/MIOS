@@ -312,3 +312,31 @@ CREATE TABLE IF NOT EXISTS llm_settings (
     changed_at TEXT NOT NULL
 );
 
+
+
+-- ---------------------------------------------------------------------------
+-- Provider API keys entered in the panel
+-- ---------------------------------------------------------------------------
+
+-- Only deviations, like `llm_settings` above: a provider with no row falls back
+-- to its environment variable. That is what keeps `GEMINI_API_KEY` working on a
+-- deployment nobody has touched the panel on, and makes "forget this key" a
+-- delete rather than a second kind of state.
+--
+-- `secret` is a Fernet token, not the key. It is encrypted with a value derived
+-- from MIOS_CREDENTIAL_KEY, which lives in the environment and never in this
+-- table -- so a database dump, a leaked read-only DATABASE_URL or a Neon
+-- console session yields ciphertext rather than working credentials. Nothing
+-- else in this file is defended that way because nothing else in it is a
+-- bearer token that spends money.
+--
+-- `hint` is the last four characters, stored in clear on purpose: an
+-- administrator has to be able to tell which key is loaded without the app
+-- being able to show them the key.
+CREATE TABLE IF NOT EXISTS llm_credentials (
+    provider   TEXT PRIMARY KEY,
+    secret     TEXT NOT NULL,
+    hint       TEXT,
+    changed_by TEXT,
+    changed_at TEXT NOT NULL
+);
