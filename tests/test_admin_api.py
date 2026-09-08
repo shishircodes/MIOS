@@ -21,7 +21,24 @@ ADMIN = {"email": "boss@easyskill.com", "role": "admin"}
 
 
 def _iso(days_ago: float) -> str:
-    return (datetime.now(timezone.utc) - timedelta(days=days_ago)).isoformat(timespec="seconds")
+    """A capture time `days_ago` ago, anchored to midday UTC.
+
+    Anchored rather than measured from the clock because `runDays` counts
+    distinct calendar dates. The tests below place several signals a few minutes
+    apart to represent one scrape; measured from the current time, those land on
+    two dates whenever the suite runs just after midnight UTC, and the count
+    comes back one higher per group than the test meant.
+
+    That is not hypothetical — it failed in CI at roughly 00:03 UTC, where two of
+    three groups straddled and `runDays` read 5 instead of 3.
+
+    Midday leaves nearly twelve hours of slack either side, which is far more
+    than any spread used here. Every caller works in whole days or fractions of
+    one, so the shift costs nothing: the smallest margin in the file is five
+    days, against a worst-case drift of half a day.
+    """
+    midday = datetime.now(timezone.utc).replace(hour=12, minute=0, second=0, microsecond=0)
+    return (midday - timedelta(days=days_ago)).isoformat(timespec="seconds")
 
 
 @pytest.fixture

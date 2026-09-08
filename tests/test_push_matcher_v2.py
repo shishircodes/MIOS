@@ -37,6 +37,7 @@ from push.matcher import (
     _skills_overlap,
     match_profile,
 )
+from push.rarity import none_for as rarity_none
 
 NOW = datetime(2026, 8, 31, tzinfo=timezone.utc)
 
@@ -66,23 +67,31 @@ def test_the_weights_still_sum_to_one_hundred():
 # ---------- skills ----------
 
 
+#: Rarity needs a corpus to measure; these unit tests pass one advert, so it
+#: does not apply and every term weighs the same. That keeps them about the
+#: property under test. Rarity has its own tests in test_push_rarity.py.
+FLAT = rarity_none()
+
+
 def test_skills_present_in_the_adverts_score(db=None):
-    pts, ev = _skills_overlap(["SAP", "shutdown planning"],
-                              [sig(content="Planner | BHP | SAP and shutdown planning")])
+    pts, ev, _ = _skills_overlap(["SAP", "shutdown planning"],
+                                 [sig(content="Planner | BHP | SAP and shutdown planning")],
+                                 FLAT)
     assert pts > 0
     assert "SAP" in ev
 
 
 def test_skills_score_in_proportion_to_how_many_matched():
-    two = _skills_overlap(["SAP", "AMOS"], [sig(content="Planner | SAP AMOS")])[0]
-    one = _skills_overlap(["SAP", "AMOS"], [sig(content="Planner | SAP only")])[0]
+    two = _skills_overlap(["SAP", "Maximo"], [sig(content="Planner | SAP Maximo")], FLAT)[0]
+    one = _skills_overlap(["SAP", "Maximo"], [sig(content="Planner | SAP only")], FLAT)[0]
     assert two > one > 0
 
 
 def test_a_skill_must_match_as_a_whole_word():
     """Fuzzy matching is right for a job title, where word order and
     abbreviation vary. A skill is a noun somebody either asked for or did not."""
-    pts, _ = _skills_overlap(["SAP"], [sig(content="Planner | SAPPHIRE mine services")])
+    pts, _, _ = _skills_overlap(["SAP"], [sig(content="Planner | SAPPHIRE mine services")],
+                                FLAT)
     assert pts == 0
 
 
@@ -90,14 +99,14 @@ def test_no_skills_on_the_profile_is_unassessable_not_zero():
     """The distinction the normalisation rests on. Scoring zero would charge the
     company for a gap in the candidate's profile; None removes the contributor's
     weight from the denominator instead."""
-    assert _skills_overlap([], [sig()]) == (None, None)
-    assert _skills_overlap(None, [sig()]) == (None, None)
+    assert _skills_overlap([], [sig()], FLAT)[:2] == (None, None)
+    assert _skills_overlap(None, [sig()], FLAT)[:2] == (None, None)
 
 
 def test_skills_that_are_known_and_absent_score_zero():
     """The other side of it: we knew what to look for and none of it is there.
     That is a real finding and must count against the company."""
-    pts, ev = _skills_overlap(["Autocad"], [sig(content="Planner | SAP only")])
+    pts, ev, _ = _skills_overlap(["Autocad"], [sig(content="Planner | SAP only")], FLAT)
     assert pts == 0
     assert ev, "an assessed zero should say so, or the reader cannot tell it apart"
 

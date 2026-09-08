@@ -209,6 +209,65 @@ export interface Match {
   /** True where the model's read and the score point different ways. A flag for
    *  a human to look at, not a correction applied to the ranking. */
   disagrees?: boolean
+  /** The full working, one entry per contributor including those that could not
+   *  be judged. What the detail drawer renders. */
+  contributions?: Contribution[]
+  /** Every skill the candidate claims, matched or not, with how rare each is in
+   *  this market. Shown in full so a thin match cannot read as a strong one. */
+  skillDetail?: SkillDetail[]
+  /** What the team already decided about this company for this candidate. */
+  outcome?: { outcome: string; by?: string | null; at?: string | null; note?: string | null }
+}
+
+/** One contributor's share of a score, with what it asks and what it found. */
+export interface Contribution {
+  key: string
+  label: string
+  /** What this contributor asks, in plain language. */
+  asks: string
+  /** Points available — this contributor's share of the model. */
+  weight: number
+  /** Points earned, or null when there was nothing to judge. */
+  earned: number | null
+  evidence?: string | null
+  /** Why it could not be judged. Written to be acted on: "no skills recorded on
+   *  the profile" tells a reader what to do; "not assessed" does not. */
+  unassessedBecause?: string | null
+  /** Fraction of the available points earned, for the bar. Null when unassessed,
+   *  so the bar is absent rather than drawn at zero — a contributor that could
+   *  not be judged did not score badly. */
+  share: number | null
+}
+
+export interface SkillDetail {
+  name: string
+  kind: string
+  kindLabel: string
+  matched: boolean
+  /** Plain words: "rare in this market", "common", "not weighted". */
+  rarity: string
+}
+
+/** Whether rarity weighting was in play for this run.
+ *
+ *  A score computed with it and one computed without are different numbers, so
+ *  a reader comparing across weeks is told which they are looking at. */
+export interface RarityState {
+  applies: boolean
+  corpusSize: number
+  minimum: number
+}
+
+export interface OutcomeSummary {
+  verbs: Record<string, string>
+  total: number
+  counts: Record<string, number>
+  byBand: { band: string; total: number; [verb: string]: string | number }[]
+  minimumForRates: number
+  /** False until there are enough decisions to say anything. Until then the UI
+   *  shows the count and how far off it is, never a derived rate. */
+  readyToCalibrate: boolean
+  note: string
 }
 
 export interface MatchResponse {
@@ -219,6 +278,7 @@ export interface MatchResponse {
   windowDays: number
   /** How many signals the ranking stood on — context for a short result list. */
   signalsConsidered: number
+  rarity?: RarityState
 }
 
 export interface FeedQuery {

@@ -25,6 +25,9 @@ from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, Upload
 from api.auth import require_user
 from push.cv_extract import MAX_BYTES, CVExtractionError, extract_text
 from push.matcher import match_profile
+from push.outcomes import OUTCOMES, UnknownOutcome, for_profile, record, summary
+from push.rarity import MIN_CORPUS as RARITY_MIN_CORPUS
+from push.rarity import build as build_rarity
 from push.rationale import ANNOTATE_TOP_N, annotate
 from push.profile_parser import parse_profile
 from push.store import (
@@ -47,7 +50,10 @@ MAX_RESULTS = 25
 def _matches_for(profile: dict[str, Any], *, days: int, limit: int,
                  explain: bool = True) -> dict[str, Any]:
     signals = signals_for_matching(days=days)
-    results = match_profile(profile, signals, limit=limit)
+    # Built once here rather than inside the matcher, so the payload can report
+    # whether it applied — the same object that scored is the one described.
+    rarity = build_rarity(signals)
+    results = match_profile(profile, signals, limit=limit, rarity_model=rarity)
     matches = [m.to_dict(rank=i + 1) for i, m in enumerate(results)]
 
     # The written half. Deliberately after the ranking is fixed and unable to
@@ -56,6 +62,19 @@ def _matches_for(profile: dict[str, Any], *, days: int, limit: int,
     note = None
     if explain:
         matches, note = annotate(profile, matches)
+
+    # What has already been decided about these companies for this candidate, so
+    # a consultant is not asked twice and can see what a colleague did.
+    decided = for_profile(str(profile.get("id") or "")) if profile.get("id") else {}
+    for m in matches:
+        prior = decided.get(m["co"])
+        if prior:
+            m["outcome"] = {
+                "outcome": prior.get("outcome"),
+                "by": prior.get("recorded_by"),
+                "at": prior.get("recorded_at"),
+                "note": prior.get("note"),
+            }
 
     return {
         "profile": profile,
@@ -68,6 +87,14 @@ def _matches_for(profile: dict[str, Any], *, days: int, limit: int,
         #: means something different when it came from 12 signals than from 900,
         #: and the UI says which.
         "signalsConsidered": len(signals),
+        #: Whether rarity weighting was in play. A score computed with it and
+        #: one computed without are different numbers, and a reader comparing
+        #: across weeks should be told which they are looking at.
+        "rarity": {
+            "applies": rarity.applies,
+            "corpusSize": rarity.corpus_size,
+            "minimum": RARITY_MIN_CORPUS,
+        },
     }
 
 
@@ -279,3 +306,67 @@ def scoring_model(user: dict[str, Any] = Depends(require_user)) -> dict[str, Any
                   "be argued with, and the weights are expected to change once the team can "
                   "say what actually predicts a placement.",
     }
+
+
+# --------------------------------------------------------------------------
+# What happened to a match
+# --------------------------------------------------------------------------
+
+
+@router.post("/profiles/{profile_id}/outcomes")
+def record_outcome(
+    profile_id: str,
+    payload: dict[str, Any] = Body(...),
+    user: dict[str, Any] = Depends(require_user),
+) -> dict[str, Any]:
+    """Record what the team did with one ranked company.
+
+    The score is taken from the request rather than recomputed, and that is
+    deliberate: it must be the number the consultant was actually looking at
+    when they decided. Recomputing it here would judge the decision against a
+    model and a signal set that did not exist at the time — which is how a
+    scoring model comes to confirm whatever it currently believes.
+    """
+    company = str(payload.get("company") or "").strip()
+    outcome = str(payload.get("outcome") or "").strip()
+    if not company:
+        raise HTTPException(status_code=400, detail="A company is required.")
+
+    def _int_or_none(key: str) -> int | None:
+        value = payload.get(key)
+        try:
+            return int(value) if value is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    try:
+        record(
+            profile_id,
+            company,
+            outcome,
+            score=_int_or_none("score"),
+            confidence=str(payload.get("confidence") or "") or None,
+            assessable=_int_or_none("assessable"),
+            rank_shown=_int_or_none("rank"),
+            note=str(payload.get("note") or "") or None,
+            recorded_by=user["email"],
+        )
+    except UnknownOutcome as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return {"recorded": True, "company": company, "outcome": outcome,
+            "outcomes": for_profile(profile_id)}
+
+
+@router.get("/outcomes")
+def outcome_summary(user: dict[str, Any] = Depends(require_user)) -> dict[str, Any]:
+    """How much outcome data exists, and whether it is yet enough to calibrate.
+
+    Deliberately returns counts and a threshold rather than a success rate. A
+    precision figure over a handful of decisions is not a rough measurement, it
+    is a wrong one, and the interface has to be able to say "not yet" rather
+    than print a number that looks like an answer.
+    """
+    return {"verbs": OUTCOMES, **summary()}

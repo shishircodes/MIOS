@@ -60,6 +60,10 @@ import re
 
 from rapidfuzz import fuzz
 
+from push import taxonomy
+from push.rarity import AVERAGE_HEADROOM, RARE_AT, Rarity
+from push.rarity import build as build_rarity
+
 log = logging.getLogger(__name__)
 
 # --------------------------------------------------------------------------
@@ -138,6 +142,81 @@ MOMENTUM_SATURATION = 1.0
 MOMENTUM_MIN_BASELINE_TO_QUOTE = 1.0
 
 
+#: What each contributor is called, and what it actually asks. Kept here rather
+#: than in the interface so the drawer explaining a score reads from the same
+#: place the score is computed — the two cannot drift into telling different
+#: stories about the same number.
+CONTRIBUTOR_LABEL: dict[str, tuple[str, str]] = {
+    "role": ("Role demand",
+             "Are they hiring for this candidate's discipline, with seniority "
+             "words set aside so a title matches on the trade rather than the level?"),
+    "skills": ("Skills overlap",
+               "Do the candidate's skills appear in their adverts — weighted by "
+               "how rare each one is in this market, and by whether it is a "
+               "ticket, a system or a turn of phrase?"),
+    "signalQuality": ("Signal quality",
+                      "What kind of signals these are. A new project or a leadership "
+                      "change is a decision point; routine vacancies are not."),
+    "sector": ("Sector fit", "Is their hiring in the candidate's sector?"),
+    "momentum": ("Momentum",
+                 "Is their hiring accelerating against their own recent baseline?"),
+    "volume": ("Hiring volume", "How much they are hiring right now."),
+    "relationship": ("Relationship",
+                     "An existing watchlist client, or a new name."),
+    "seniority": ("Seniority fit",
+                  "Does the candidate's experience match the level the adverts are "
+                  "pitched at?"),
+    "region": ("Region fit", "Same market as the candidate."),
+    "recency": ("Recency", "How fresh the signals behind this are."),
+}
+
+
+@dataclass
+class Contribution:
+    """One contributor's part of a score, with everything needed to defend it.
+
+    The score alone cannot be argued with, and a consultant putting a company in
+    front of a client needs to be able to say why it is there. So each part
+    carries what it was worth, what it earned, and the sentence explaining it —
+    or, when it could not be judged, that fact and nothing invented in its place.
+    """
+
+    key: str
+    label: str
+    #: What this contributor asks. Plain language, for the drawer.
+    asks: str
+    #: Points available. The share of the model this contributor represents.
+    weight: int
+    #: Points earned, or None when there was nothing to judge.
+    earned: int | None
+    evidence: str | None = None
+    #: Why it could not be judged. Present only when `earned` is None, and
+    #: written for a reader: "no skills recorded on the profile" is actionable,
+    #: "not assessed" is not.
+    unassessed_because: str | None = None
+
+    @property
+    def assessed(self) -> bool:
+        return self.earned is not None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "key": self.key,
+            "label": self.label,
+            "asks": self.asks,
+            "weight": self.weight,
+            "earned": self.earned,
+            "evidence": self.evidence,
+            "unassessedBecause": self.unassessed_because,
+            #: How much of what was available this contributor earned, for a bar
+            #: in the drawer. None when unassessed, so the bar is absent rather
+            #: than drawn at zero — a contributor that could not be judged did
+            #: not score badly, and a zero-length bar says it did.
+            "share": (round(self.earned / self.weight, 3)
+                      if self.earned is not None and self.weight else None),
+        }
+
+
 @dataclass
 class MatchResult:
     """One company, scored, with the reasoning that produced the score."""
@@ -163,6 +242,11 @@ class MatchResult:
     not_assessed: list[str] = field(default_factory=list)
     evidence: list[str] = field(default_factory=list)
     breakdown: dict[str, int] = field(default_factory=dict)
+    #: The full working, one entry per contributor including the ones that could
+    #: not be judged. What the detail drawer renders.
+    contributions: list[Contribution] = field(default_factory=list)
+    #: Which of the candidate's skills were found, and how rare each is here.
+    skill_detail: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def relationship(self) -> str:
@@ -192,6 +276,8 @@ class MatchResult:
             "earned": self.earned,
             "assessable": self.assessable,
             "notAssessed": self.not_assessed,
+            "contributions": [c.to_dict() for c in self.contributions],
+            "skillDetail": self.skill_detail,
         }
 
 
@@ -215,6 +301,42 @@ def _parse_stamp(raw: Any) -> datetime | None:
     return d if d.tzinfo else d.replace(tzinfo=timezone.utc)
 
 
+#: Words that state a level rather than a trade. Stripped before two titles are
+#: compared, because seniority is scored separately and a title match that
+#: includes it charges the same fact twice: "Senior Planner" against "Planner"
+#: loses points on the title AND again on seniority, while "Senior Planner"
+#: against "Senior Boilermaker" gains points for agreeing about nothing that
+#: matters.
+_LEVEL_WORDS = frozenset({
+    "graduate", "trainee", "apprentice", "junior", "jnr", "intermediate",
+    "senior", "snr", "sr", "lead", "leading", "principal", "chief", "head",
+    "assistant", "deputy", "acting", "trainee", "entry", "level", "grade",
+    "i", "ii", "iii", "iv", "1", "2", "3", "4",
+})
+
+_WORD = re.compile(r"[a-z0-9]+")
+
+
+def _discipline(title: str | None) -> str:
+    """A title reduced to the trade it names.
+
+    "Senior Maintenance Planner" and "Maintenance Planner" both become
+    "maintenance planner", so they compare as the same discipline — which they
+    are. The level is not discarded from the model, only from this comparison;
+    `_seniority_fit` reads it from the advert text separately.
+    """
+    if not title:
+        return ""
+    words = [w for w in _WORD.findall(str(title).lower()) if w not in _LEVEL_WORDS]
+    return " ".join(words)
+
+
+def _role_head(signal: dict) -> str:
+    """The job title from a signal. Scrapers put it in the first segment."""
+    content = (signal.get("raw_content") or "")
+    return content.split("|", 1)[0].strip() or content[:80]
+
+
 def _role_demand(title: str | None, signals: list[dict]) -> tuple[int | None, str | None]:
     """How strongly this company is hiring for the candidate's discipline.
 
@@ -223,28 +345,27 @@ def _role_demand(title: str | None, signals: list[dict]) -> tuple[int | None, st
     """
     if not title:
         return None, None
-    best = 0
-    best_text = ""
-    for s in signals:
-        content = (s.get("raw_content") or "")
-        # Compare against the first segment: scrapers put the job title there.
-        head = content.split("|", 1)[0].strip() or content[:80]
-        score = fuzz.token_set_ratio(title.lower(), head.lower())
-        if score > best:
-            best, best_text = score, head[:70]
+    wanted = _discipline(title)
+    if not wanted:
+        # A title made entirely of seniority words ("Senior Manager") leaves no
+        # discipline to compare. Seniority is its own contributor; pretending
+        # this one was assessed would score the same fact twice.
+        return None, None
+
+    heads = [_role_head(s) for s in signals]
+    scored = [(fuzz.token_set_ratio(wanted, _discipline(h)), h) for h in heads if h]
+    if not scored:
+        return None, None
+
+    best, best_text = max(scored, key=lambda p: p[0])
     if best < ROLE_SIMILARITY_FLOOR:
-        return 0, None
+        return 0, f"Nothing close to “{title}” — nearest advert is “{best_text[:60]}”"
 
     # Rescale: the floor earns nothing, a perfect title match earns full marks.
     scaled = round(W_ROLE * (best - ROLE_SIMILARITY_FLOOR) / (100 - ROLE_SIMILARITY_FLOOR))
-    matching = sum(
-        1 for s in signals
-        if fuzz.token_set_ratio(
-            title.lower(), (s.get("raw_content") or "").split("|", 1)[0].lower()
-        ) >= ROLE_SIMILARITY_FLOOR
-    )
+    matching = sum(1 for score, _ in scored if score >= ROLE_SIMILARITY_FLOOR)
     plural = "roles" if matching != 1 else "role"
-    return scaled, f"{matching} {plural} matching “{title}” — closest: {best_text}"
+    return scaled, f"{matching} {plural} matching “{title}” — closest: {best_text[:70]}"
 
 
 def _sector_fit(sector: str | None, signals: list[dict]) -> tuple[int | None, str | None]:
@@ -307,8 +428,8 @@ def _recency(signals: list[dict], now: datetime) -> tuple[int | None, str | None
     return scaled, f"Most recent signal {int(age_days)} day(s) ago"
 
 
-def _skills_overlap(skills: list[str] | None,
-                    signals: list[dict]) -> tuple[int | None, str | None]:
+def _skills_overlap(skills: list[str] | None, signals: list[dict],
+                    rarity: Rarity) -> tuple[int | None, str | None, list[dict[str, Any]]]:
     """How many of the candidate's skills appear in what this company is hiring for.
 
     The most specific evidence held about a candidate, and the old model never
@@ -322,24 +443,79 @@ def _skills_overlap(skills: list[str] | None,
     if not skills:
         # No skills recorded. Scoring zero here would charge the company for a
         # gap in the candidate's profile.
-        return None, None
+        return None, None, []
 
-    blob = " ".join((s.get("raw_content") or "") for s in signals).lower()
+    wanted = taxonomy.canonicalise(skills)
+    if not wanted:
+        # Skills were recorded but none are in the vocabulary, so there is
+        # nothing this scorer can compare. Not zero: the candidate has not
+        # failed a test, we simply cannot mark it.
+        return None, None, []
+
+    blob = " ".join((s.get("raw_content") or "") for s in signals)
     if not blob.strip():
-        return None, None
+        return None, None, []
 
-    matched = [
-        skill for skill in skills
-        if skill and re.search(rf"(?<!\w){re.escape(skill.lower())}(?!\w)", blob)
-    ]
+    present = {s.name for s in taxonomy.find(blob)}
+
+    # Two separate questions, deliberately not multiplied into one weighting.
+    #
+    # **Coverage** is how much of what the candidate claims this company asks
+    # for, weighted by kind: a ticket is a gate, a method is a turn of phrase.
+    #
+    # **Strength** is how meaningful those matches are, from how rare they are
+    # in this market.
+    #
+    # Rarity belongs in the second only. Putting it in the denominator too —
+    # which is what the first version of this did — cancels it out entirely: a
+    # candidate claiming one rare skill and matching it scores exactly what one
+    # claiming a common skill and matching it scores, because both matched
+    # everything they claimed. That is the flat model this was meant to replace.
+    detail: list[dict[str, Any]] = []
+    kind_total = 0.0
+    kind_matched = 0.0
+    for skill in wanted:
+        kind_total += skill.weight
+        hit = skill.name in present
+        if hit:
+            kind_matched += skill.weight
+        detail.append({
+            "name": skill.name,
+            "kind": skill.kind,
+            "kindLabel": skill.kind_label,
+            "matched": hit,
+            "rarity": rarity.describe(skill),
+        })
+
+    if not kind_total:
+        return None, None, detail
+
+    matched = [d for d in detail if d["matched"]]
     if not matched:
         # Assessed: we knew what to look for and none of it is there.
-        return 0, "None of the candidate's recorded skills appear in their adverts"
+        return 0, "None of the candidate's recorded skills appear in their adverts", detail
 
-    share = len(matched) / len(skills)
-    shown = ", ".join(matched[:4]) + ("…" if len(matched) > 4 else "")
-    return (round(W_SKILLS * share),
-            f"{len(matched)} of {len(skills)} skills appear in their adverts: {shown}")
+    coverage = kind_matched / kind_total
+    if rarity.applies:
+        mean_rarity = sum(rarity.of(d["name"]) for d in matched) / len(matched)
+        strength = min(1.0, AVERAGE_HEADROOM * mean_rarity)
+    else:
+        # No corpus to measure against, so nothing is known to be unusual. Full
+        # marks stay reachable — applying the headroom here would quietly cap
+        # every skills score on a small corpus for a reason nobody could see.
+        strength = 1.0
+
+    # Sorted by what carries most, so the evidence line leads with the rare
+    # ticket rather than whichever skill was typed first.
+    lead = sorted(matched, key=lambda d: -rarity.of(d["name"]))
+    shown = ", ".join(d["name"] for d in lead[:4]) + ("…" if len(lead) > 4 else "")
+    note = ""
+    standout = [d["name"] for d in lead if rarity.of(d["name"]) >= RARE_AT][:2]
+    if standout:
+        note = f" — {', '.join(standout)} {'is' if len(standout) == 1 else 'are'} rare here"
+    return (round(W_SKILLS * coverage * strength),
+            f"{len(matched)} of {len(wanted)} skills appear in their adverts: "
+            f"{shown}{note}", detail)
 
 
 def _signal_quality(signals: list[dict]) -> tuple[int | None, str | None]:
@@ -489,6 +665,7 @@ def match_profile(
     signals: list[dict[str, Any]],
     limit: int = 10,
     now: datetime | None = None,
+    rarity_model: Rarity | None = None,
 ) -> list[MatchResult]:
     """Rank companies for one candidate.
 
@@ -513,10 +690,15 @@ def match_profile(
         if name and name.lower() != "unknown":
             by_company[name].append(s)
 
+    # Rarity is built from every signal in the run, not from one company's —
+    # "how unusual is this skill" is a question about the market, and computing
+    # it per company would make a term rare at a firm that mentioned it once.
+    rarity = rarity_model if rarity_model is not None else build_rarity(signals)
+
     results: list[MatchResult] = []
     for company, rows in by_company.items():
         role_pts, role_ev = _role_demand(title, rows)
-        skills_pts, skills_ev = _skills_overlap(skills, rows)
+        skills_pts, skills_ev, skill_detail = _skills_overlap(skills, rows, rarity)
         quality_pts, quality_ev = _signal_quality(rows)
         sector_pts, sector_ev = _sector_fit(sector, rows)
         momentum_pts, momentum_ev = _momentum(rows, now)
@@ -568,9 +750,45 @@ def match_profile(
             key=lambda sec: sum(1 for r in rows if r.get("sector") == sec),
         )
 
+        # Why each unassessed contributor could not be judged. "Not assessed"
+        # tells a reader nothing they can act on; "no skills recorded on the
+        # profile" tells them to go and add some.
+        because = {
+            "role": "no job title on the profile",
+            "skills": "no recognised skills on the profile",
+            "signalQuality": "signals carry no category",
+            "sector": "no sector on the profile, or none stated in their adverts",
+            "momentum": "no earlier window to measure a trend against",
+            "volume": "nothing to count",
+            "relationship": "no watchlist tier recorded",
+            "seniority": "the adverts do not state a level",
+            "region": "no region on the profile, or none stated in their adverts",
+            "recency": "signals carry no usable date",
+        }
+        evidence_for = {
+            "role": role_ev, "skills": skills_ev, "signalQuality": quality_ev,
+            "sector": sector_ev, "momentum": momentum_ev, "volume": volume_ev,
+            "relationship": rel_ev, "seniority": seniority_ev,
+            "region": region_ev, "recency": recency_ev,
+        }
+        contributions = [
+            Contribution(
+                key=key,
+                label=CONTRIBUTOR_LABEL[key][0],
+                asks=CONTRIBUTOR_LABEL[key][1],
+                weight=weight,
+                earned=pts,
+                evidence=evidence_for.get(key),
+                unassessed_because=None if pts is not None else because.get(key),
+            )
+            for key, (pts, weight) in parts.items()
+        ]
+
         results.append(MatchResult(
             company=company,
             score=min(100, total),
+            contributions=contributions,
+            skill_detail=skill_detail,
             region=dominant_region,
             sector=dominant_sector,
             tier=tier,

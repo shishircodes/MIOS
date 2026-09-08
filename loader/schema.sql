@@ -340,3 +340,38 @@ CREATE TABLE IF NOT EXISTS llm_credentials (
     changed_by TEXT,
     changed_at TEXT NOT NULL
 );
+
+
+-- ---------------------------------------------------------------------------
+-- What happened to a Mode Push match
+-- ---------------------------------------------------------------------------
+
+-- The weights in push/matcher.py encode judgement, not evidence: nobody has
+-- been placed through this, so nothing has been calibrated against an outcome.
+-- This is the table that changes that. Each row records what the BD team did
+-- with one ranked company, and the score AS IT STOOD when they did it.
+--
+-- Storing the score alongside the outcome is the whole point. Recomputing it
+-- later would score the decision against a model that did not exist when the
+-- decision was made, and against signals collected since -- which is how a
+-- model gets to mark its own homework and always pass.
+CREATE TABLE IF NOT EXISTS match_outcomes (
+    outcome_id   TEXT PRIMARY KEY,
+    profile_id   TEXT NOT NULL,
+    company_name TEXT NOT NULL,
+    -- 'contacted', 'not_relevant', 'placed'. Not an enum: SQLite has none and
+    -- a CHECK that has to be migrated to add a verb is worse than a value the
+    -- API validates.
+    outcome      TEXT NOT NULL,
+    -- The score, its confidence, and how much of the model applied, frozen at
+    -- the moment of the decision.
+    score        INTEGER,
+    confidence   TEXT,
+    assessable   INTEGER,
+    rank_shown   INTEGER,
+    note         TEXT,
+    recorded_by  TEXT,
+    recorded_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_outcomes_profile ON match_outcomes(profile_id);
+CREATE INDEX IF NOT EXISTS idx_outcomes_outcome ON match_outcomes(outcome);
