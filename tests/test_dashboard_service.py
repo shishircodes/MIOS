@@ -181,3 +181,135 @@ def test_the_watchlist_survives_an_empty_signals_table(db):
 
     assert payload["collections"] == []
     assert payload["watchlist"]["total"] == 2
+
+
+# ---------- what the collection was made of ----------
+
+
+def add_cat(db, *, day: str, category: str, n: int = 1, company="BHP", tier="A", new=0):
+    with connect(db) as conn:
+        for i in range(n):
+            sid = f"{day}-{category}-{company}-{i}"
+            conn.execute(
+                "INSERT INTO signals (signal_id, source_type, source_name, source_url, "
+                "captured_at, geography, region, sector, company_name, watchlist_tier, "
+                "signal_category, review_cycle, raw_content, analysis_notes, is_new_prospect, "
+                "classified_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (sid, "job_board", "seek", f"https://x/{sid}", f"{day}T00:41:05+00:00",
+                 "AU", "AU", "mining", company, tier, category, "weekly",
+                 "hiring", "note", new, f"{day}T00:41:05+00:00"),
+            )
+
+
+def test_the_three_groups_are_always_present_and_ordered(db):
+    """A group with nothing in it is still returned. Dropping it would make a
+    week with no decision points look like a week where nobody asked."""
+    add_cat(db, day="2026-08-17", category="hiring_velocity", n=5)
+
+    groups = build_dashboard_payload(db)["groups"]
+
+    assert [g["key"] for g in groups] == ["acting", "routine", "context"]
+    assert [g["count"] for g in groups] == [0, 5, 0]
+
+
+def test_categories_are_grouped_by_what_they_say_about_acting(db):
+    add_cat(db, day="2026-08-17", category="project", n=2)
+    add_cat(db, day="2026-08-17", category="leadership", n=1)
+    add_cat(db, day="2026-08-17", category="hiring_velocity", n=6)
+    add_cat(db, day="2026-08-17", category="market_intel", n=1)
+
+    groups = {g["key"]: g["count"] for g in build_dashboard_payload(db)["groups"]}
+
+    assert groups == {"acting": 3, "routine": 6, "context": 1}
+
+
+def test_shares_are_of_the_collection_not_of_each_other(db):
+    add_cat(db, day="2026-08-17", category="project", n=1)
+    add_cat(db, day="2026-08-17", category="hiring_velocity", n=3)
+
+    p = build_dashboard_payload(db)
+
+    assert p["latest"]["total"] == 4
+    assert {g["key"]: g["share"] for g in p["groups"]}["acting"] == 25.0
+
+
+# ---------- who was active ----------
+
+
+def test_the_most_active_companies_are_ranked(db):
+    add_cat(db, day="2026-08-17", category="hiring_velocity", n=4, company="BHP")
+    add_cat(db, day="2026-08-17", category="hiring_velocity", n=2, company="Newmont",
+            tier=None, new=1)
+
+    companies = build_dashboard_payload(db)["companies"]
+
+    assert [c["name"] for c in companies] == ["BHP", "Newmont"]
+    assert companies[0]["count"] == 4
+    assert companies[0]["tier"] == "A"
+    assert companies[1]["tier"] is None and companies[1]["isNew"] is True
+
+
+def test_an_unidentified_employer_is_not_listed_as_a_company(db):
+    """'Unknown' is what the classifier emits when it could not name the
+    employer. Offering it among the most active companies would be offering a
+    name nobody can act on."""
+    add_cat(db, day="2026-08-17", category="hiring_velocity", n=9, company="Unknown", tier=None)
+    add_cat(db, day="2026-08-17", category="hiring_velocity", n=1, company="BHP")
+
+    names = [c["name"] for c in build_dashboard_payload(db)["companies"]]
+
+    assert names == ["BHP"]
+
+
+def test_watchlist_coverage_counts_distinct_companies_seen(db):
+    """Four signals from one watchlist company is one company seen, not four."""
+    add_cat(db, day="2026-08-17", category="hiring_velocity", n=4, company="BHP")
+
+    wl = build_dashboard_payload(db)["watchlist"]
+
+    assert wl["total"] == 2
+    assert wl["seen"] == 1
+    assert wl["seenShare"] == 50.0
+
+
+def test_new_names_counts_companies_not_signals(db):
+    add_cat(db, day="2026-08-17", category="project", n=3, company="Civmec",
+            tier=None, new=1)
+
+    assert build_dashboard_payload(db)["newNames"] == 1
+
+
+# ---------- where it came from ----------
+
+
+def test_sources_count_what_they_collected_including_unclassified(db):
+    """A row awaiting classification was still collected by its source. Counting
+    only classified rows would understate a scraper that ran fine."""
+    add(db, day="2026-08-17", n=3)
+    add(db, day="2026-08-17", n=2, classified=False)
+
+    sources = build_dashboard_payload(db)["sources"]
+
+    assert sum(s["count"] for s in sources) == 5
+    assert build_dashboard_payload(db)["latest"]["total"] == 3, "the headline stays classified-only"
+
+
+def test_a_collector_is_listed_once_even_with_mixed_signal_types(db):
+    """Grouping by source_type as well as source_name split one collector into
+    two rows, which reads as two sources rather than one."""
+    with connect(db) as conn:
+        for i, kind in enumerate(("job_board", "news", "job_board")):
+            conn.execute(
+                "INSERT INTO signals (signal_id, source_type, source_name, source_url, "
+                "captured_at, geography, region, sector, company_name, watchlist_tier, "
+                "signal_category, review_cycle, raw_content, analysis_notes, is_new_prospect, "
+                "classified_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (f"mix{i}", kind, "adzuna", f"https://x/mix{i}", "2026-08-17T00:41:05+00:00",
+                 "AU", "AU", "mining", "BHP", "A", "hiring_velocity", "weekly",
+                 "hiring", "note", 0, "2026-08-17T00:41:05+00:00"),
+            )
+
+    sources = build_dashboard_payload(db)["sources"]
+
+    assert [s["name"] for s in sources] == ["adzuna"]
+    assert sources[0]["count"] == 3

@@ -574,10 +574,58 @@ export interface DashboardPayload {
   /** Movement against the previous collection. Null where there was none, so
    *  the UI shows nothing rather than a direction it cannot justify. */
   change: { total?: number | null; au?: number | null; png?: number | null }
-  sectors: { key: string; label: string; count: number }[]
-  watchlist: { total: number; byTier: Record<string, number> }
+  sectors: Breakdown[]
+  /** What kind of signals the latest collection was made of. */
+  categories: (Breakdown & { group: string })[]
+  /** The coarse three-way split over `categories`: a reason to act, routine
+   *  hiring, or market background. Returned rather than derived in the browser
+   *  so the mapping lives in one place. A group with nothing in it is still
+   *  present at zero — dropping it would make a week with no decision points
+   *  look like a week where the question was not asked. */
+  groups: (Breakdown & { what: string })[]
+  /** Which collectors produced this week's signals. A source absent from this
+   *  list contributed nothing, which is the quickest way to see a scraper that
+   *  has quietly stopped working. */
+  sources: { name: string; kind: string; count: number; share: number }[]
+  /** The most active companies in the latest collection. */
+  companies: {
+    name: string
+    count: number
+    sector: string
+    region: string
+    /** Watchlist tier, or null for a company not on it. */
+    tier: string | null
+    isNew: boolean
+  }[]
+  /** Companies seen this collection that are not on the watchlist. */
+  newNames: number
+  /** The run behind the latest collection, read from the run log rather than
+   *  inferred from signals — so a run that collected nothing still reports. */
+  run: {
+    id: string
+    trigger: string
+    status: string
+    finishedAt: string | null
+    collected: number
+  } | null
+  watchlist: {
+    total: number
+    byTier: Record<string, number>
+    /** How many of them appeared in the latest collection. A watchlist is only
+     *  worth keeping if the pipeline is seeing the companies on it. */
+    seen: number
+    seenShare: number
+  }
   /** What the charts actually stand on, rather than what they promise. */
   coverage: { collections: number; from: string | null; to: string | null }
   trendWindow: number
+}
+
+/** One slice of a composition, with its share of the whole already computed. */
+export interface Breakdown {
+  key: string
+  label: string
+  count: number
+  share: number
 }
 
