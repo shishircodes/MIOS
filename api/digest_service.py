@@ -189,9 +189,40 @@ DEFAULT_WINDOW_DAYS = 7
 MAX_SIGNALS_SHOWN = 40
 
 
+def _local(d: datetime) -> datetime:
+    """A stored timestamp in the market's own timezone, for display.
+
+    Everything is stored in UTC, which is right, and was then formatted in UTC,
+    which was not. The weekly run fires at 05:00 Australia/Sydney — 19:00 UTC
+    the previous day for most of the year — so a digest collected at 05:01 on
+    Monday 7 September was headed "Week of 6 September", a Sunday. The pipeline
+    was correct and only the label was wrong, which is the harder kind of wrong
+    to notice: nothing failed, the date was simply a day out and named the wrong
+    weekday.
+
+    The zone comes from `loader.schedule`, which is where the run is scheduled,
+    so the date a digest is named after and the date it was scheduled for cannot
+    disagree. A second constant here would be a second thing to keep in step.
+
+    Falls back to the value as given if the zone database is unavailable — a
+    slim container without tzdata should mislabel a heading, not fail a page.
+    """
+    from loader.schedule import DEFAULT_TIMEZONE
+
+    if d.tzinfo is None:
+        d = d.replace(tzinfo=timezone.utc)
+    try:
+        from zoneinfo import ZoneInfo
+
+        return d.astimezone(ZoneInfo(DEFAULT_TIMEZONE))
+    except Exception as exc:  # noqa: BLE001 - a heading is not worth a 500
+        log.warning("digest: could not localise a timestamp (%s)", exc)
+        return d
+
+
 def _fmt_day(d: datetime) -> str:
     # Windows-safe: %-d is not supported by the MSVC strftime.
-    return d.strftime("%d %B %Y").lstrip("0")
+    return _local(d).strftime("%d %B %Y").lstrip("0")
 
 
 #: How many earlier windows the hiring-velocity baseline averages over. Four
@@ -301,10 +332,14 @@ def _collection_label(start: datetime | None, end: datetime | None) -> str:
     """
     if start is None or end is None:
         return "Sample dataset"
-    if start.date() == end.date():
+    # Compared in local time as well as formatted in it: a scrape that starts at
+    # 05:00 Sydney and finishes minutes later is one day to a reader here, but
+    # spans two UTC dates whenever it straddles 10:00 UTC.
+    local_start, local_end = _local(start), _local(end)
+    if local_start.date() == local_end.date():
         return f"Week of {_fmt_day(end)}"
-    if (start.year, start.month) == (end.year, end.month):
-        return f"{start.day} – {_fmt_day(end)}"
+    if (local_start.year, local_start.month) == (local_end.year, local_end.month):
+        return f"{local_start.day} – {_fmt_day(end)}"
     return f"{_fmt_day(start)} – {_fmt_day(end)}"
 
 
@@ -558,9 +593,14 @@ def build_digest_payload(
         #: data is from today" even when the last scrape was a week ago.
         "collectedFrom": collected_from.isoformat() if collected_from else None,
         "collectedTo": collected_to.isoformat() if collected_to else None,
-        "week": (collected_to or datetime.now(timezone.utc)).strftime("WEEK %d %b %Y").upper(),
+        "week": _local(collected_to or datetime.now(timezone.utc))
+        .strftime("WEEK %d %b %Y").upper(),
         "weekLabel": week_label,
-        "generatedAt": datetime.now(timezone.utc).strftime("%a %d %b %Y · %H:%M UTC"),
+        #: Local time, and labelled with the zone rather than left ambiguous. It
+        #: said UTC before, which was at least honest, but put the one timestamp
+        #: on the page in a different zone from every date beside it.
+        "generatedAt": _local(datetime.now(timezone.utc))
+        .strftime("%a %d %b %Y · %H:%M %Z"),
         #: What this week's collection actually consisted of.
         #:
         #: This replaced four KPI tiles that did not survive checking. Two of
