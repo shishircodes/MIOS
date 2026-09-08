@@ -85,27 +85,93 @@ def _by_name(payload: dict, name: str) -> dict:
 # ---------- source health ----------
 
 
+# These three derive a status from how recently a source collected, so they use
+# a source that ships switched on. SEEK does not — it is off by default because
+# the host's IP is blocked — and a switched-off source now reports "off"
+# whatever its records look like, which would shadow the property under test.
+
+
 def test_a_source_that_ran_this_week_is_collecting(db):
     for i in range(3):
-        _add_signal(db, source="seek", captured=_iso(1 + i * 0.01))
-    seek = _by_name(admin_api.source_health(user=ADMIN), "seek")
-    assert seek["status"] == "ok"
-    assert seek["totalRecords"] == 3
-    assert seek["last7Days"] == 3
+        _add_signal(db, source="pngworkforce", captured=_iso(1 + i * 0.01))
+    png = _by_name(admin_api.source_health(user=ADMIN), "pngworkforce")
+    assert png["status"] == "ok"
+    assert png["totalRecords"] == 3
+    assert png["last7Days"] == 3
 
 
 def test_a_source_that_has_gone_quiet_is_stale(db):
     """Longer than the weekly cycle, so an ordinary week never trips it."""
-    _add_signal(db, source="seek", captured=_iso(admin_api.STALE_AFTER_DAYS + 5))
-    seek = _by_name(admin_api.source_health(user=ADMIN), "seek")
-    assert seek["status"] == "stale"
-    assert seek["last7Days"] == 0, "an old record is not recent activity"
+    _add_signal(db, source="pngworkforce", captured=_iso(admin_api.STALE_AFTER_DAYS + 5))
+    png = _by_name(admin_api.source_health(user=ADMIN), "pngworkforce")
+    assert png["status"] == "stale"
+    assert png["last7Days"] == 0, "an old record is not recent activity"
 
 
 def test_a_source_with_no_records_says_so_rather_than_showing_a_bare_zero(db):
+    png = _by_name(admin_api.source_health(user=ADMIN), "pngworkforce")
+    assert png["status"] == "never_run"
+    assert png["totalRecords"] == 0
+
+
+# ---------- a switched-off source is not collecting ----------
+
+
+def test_a_switched_off_source_does_not_report_collecting(db):
+    """SEEK held records from within the week and was switched off, so the row
+    read "Collecting" beside a toggle reading Off. The chip was the wrong half:
+    a source that is excluded from the next scrape is not collecting, however
+    fresh what it already gathered happens to be.
+    """
+    for i in range(3):
+        _add_signal(db, source="seek", captured=_iso(1 + i * 0.01))
+
     seek = _by_name(admin_api.source_health(user=ADMIN), "seek")
-    assert seek["status"] == "never_run"
-    assert seek["totalRecords"] == 0
+
+    assert seek["enabled"] is False
+    assert seek["status"] == "off"
+
+
+def test_a_switched_off_source_still_reports_what_it_collected(db):
+    """The status changes; the history does not. Those figures are how somebody
+    decides whether turning it back on is worth it."""
+    for i in range(3):
+        _add_signal(db, source="seek", captured=_iso(1 + i * 0.01))
+
+    seek = _by_name(admin_api.source_health(user=ADMIN), "seek")
+
+    assert seek["totalRecords"] == 3
+    assert seek["last7Days"] == 3
+
+
+def test_switching_a_source_on_returns_it_to_a_measured_status(db):
+    """The toggle shadows the recency status rather than replacing it, so
+    turning a source on has to reveal the real one again."""
+    from loader.source_settings import set_enabled
+
+    for i in range(3):
+        _add_signal(db, source="seek", captured=_iso(1 + i * 0.01))
+    set_enabled("seek", True, changed_by="admin@example.com")
+
+    seek = _by_name(admin_api.source_health(user=ADMIN), "seek")
+
+    assert seek["enabled"] is True
+    assert seek["status"] == "ok"
+
+
+def test_missing_credentials_outrank_the_toggle(db, monkeypatch):
+    """Ordered deliberately. A missing key persists past the toggle and has to
+    be fixed before switching it on would achieve anything, so saying "off"
+    would hide the thing that actually needs doing."""
+    monkeypatch.setattr(admin_api, "settings",
+                        type("S", (), {"adzuna_configured": False,
+                                       "allowed_google_domain": ""})())
+    from loader.source_settings import set_enabled
+
+    set_enabled("adzuna", False, changed_by="admin@example.com")
+
+    adzuna = _by_name(admin_api.source_health(user=ADMIN), "adzuna")
+    assert adzuna["status"] == "not_configured"
 
 
 def test_a_source_missing_its_credentials_is_reported_as_unconfigured(db, monkeypatch):

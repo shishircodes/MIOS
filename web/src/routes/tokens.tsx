@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
 import { useState } from 'react'
 import { AdminOnly } from '~/components/AdminOnly'
-import { Loading, Section } from '~/components/ui'
+import { Explainer, Loading, Section } from '~/components/ui'
 import {
   clearLlmRoute,
   clearProviderKey,
@@ -44,9 +44,17 @@ function UsageBar({ u }: { u: LlmUsage }) {
         {!u.configured && <span className="usage-tag">no API key</span>}
       </div>
       {u.dailyLimit === null ? (
-        <div className="muted" style={{ fontSize: 12.5 }}>
-          {u.usedToday} call{u.usedToday === 1 ? '' : 's'} today · no published daily cap
-        </div>
+        // Three cells, like every other row, rather than one spanning two
+        // columns. A spanning item leaves nothing to size the `1fr` track from,
+        // and both tracks collapsed to zero — the text still painted, out of
+        // its own box, so it looked fine while being one line-length away from
+        // wrapping into a column 12px wide.
+        <>
+          <div className="usage-note">
+            {u.usedToday} call{u.usedToday === 1 ? '' : 's'} today
+          </div>
+          <div className="usage-num muted">no published daily cap</div>
+        </>
       ) : (
         <>
           <div className="usage-rail">
@@ -353,7 +361,7 @@ function ModelsScreen() {
     <div className="page">
       <div className="page-header">
         <div>
-          <div className="kicker">Admin · Models &amp; cost</div>
+          <div className="kicker">Admin · Models &amp; keys</div>
           <h1>Which model answers what</h1>
         </div>
       </div>
@@ -389,13 +397,13 @@ function ModelsScreen() {
         <div className="usage-list">
           {data.usage.map((u) => <UsageBar key={u.provider} u={u} />)}
         </div>
-        <div className="prose-note">
+        <Explainer title="Why a failed call still counts">
           <p>
             Every attempt is counted, not just the ones that worked — a provider charges the
             allowance for a rejected request the same as a served one. A counter that only
             recorded successes read zero on the day this pipeline ran out.
           </p>
-        </div>
+        </Explainer>
       </Section>
 
       <Section
@@ -427,7 +435,7 @@ function ModelsScreen() {
             />
           ))}
         </div>
-        <div className="prose-note">
+        <Explainer title="How keys are stored, and which one wins">
           <p>
             A key entered here takes effect on the next call — there is no redeploy to wait
             for, which is the point: a key gets replaced because it leaked or because the
@@ -450,7 +458,7 @@ function ModelsScreen() {
             revoked, or belong to a project with the API switched off, and all three look
             identical here until a run fails at five on a Monday morning.
           </p>
-        </div>
+        </Explainer>
       </Section>
 
       <Section title="Model for each job">
@@ -464,7 +472,7 @@ function ModelsScreen() {
             onClear={(purpose) => reset.mutate(purpose)}
           />
         ))}
-        <div className="prose-note">
+        <Explainer title="When a model change takes effect">
           <p>
             A change applies to the next call — nothing is cached between requests, so there
             is no restart to do.
@@ -474,7 +482,7 @@ function ModelsScreen() {
             effect once the key is set on the server, which is more useful than refusing to
             record a decision that has already been made.
           </p>
-        </div>
+        </Explainer>
       </Section>
 
       {data.history.length > 0 && (

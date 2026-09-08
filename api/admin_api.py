@@ -218,8 +218,20 @@ def source_health(user: dict[str, Any] = Depends(require_admin)) -> dict[str, An
         last_seen = s.get("lastSeen")
         chosen = settings_by_source.get(name, {"enabled": True})
 
+        # A switched-off source is not collecting, whatever its last run looked
+        # like. `status` used to be derived from the age of the newest signal
+        # alone, so SEEK — switched off, and holding records from eight days
+        # ago — reported "Collecting" beside a toggle reading Off. The row
+        # contradicted itself, and the chip was the half that was wrong.
+        #
+        # Ordered after `not_configured` deliberately: missing credentials
+        # outlast the toggle and are the thing an administrator has to fix
+        # before switching it on would achieve anything. The figures in the rest
+        # of the row still carry what it collected while it was on.
         if not configured:
             status = "not_configured"
+        elif not chosen.get("enabled", True):
+            status = "off"
         elif not last_seen:
             status = "never_run"
         else:

@@ -60,10 +60,15 @@ const NAV = [
     // endpoint re-checks the role, so a member who types the URL still gets
     // nothing back.
     adminOnly: true,
+    // Named for what each page manages, and matching the heading it opens on.
+    // "Tokens & cost" was wrong twice over: the page counts *requests* against a
+    // provider's daily allowance, never tokens, and it has since become where
+    // API keys are entered and a model is chosen per job. Somebody looking for
+    // "why is Market Pulse using that model" would not have looked here.
     items: [
-      { to: '/sources', label: 'Sources health', icon: 'src' },
+      { to: '/sources', label: 'Data sources', icon: 'src' },
       { to: '/access', label: 'People & access', icon: 'people' },
-      { to: '/tokens', label: 'Tokens & cost', icon: 'tokens' },
+      { to: '/tokens', label: 'Models & keys', icon: 'tokens' },
     ],
   },
 ] as const
@@ -75,9 +80,9 @@ const CRUMBS: Record<string, string[]> = {
   '/publish': ['Mode Publish', 'Quarterly report'],
   '/watchlist': ['Reference', 'Watchlist'],
   '/dashboard': ['Reference', 'Dashboard'],
-  '/sources': ['Admin', 'Source health'],
+  '/sources': ['Admin', 'Data sources'],
   '/access': ['Admin', 'People & access'],
-  '/tokens': ['Admin', 'Tokens & cost'],
+  '/tokens': ['Admin', 'Models & keys'],
 }
 
 /** The footer dot said "Connected" unconditionally, including when nothing was
@@ -278,7 +283,7 @@ function Shell({ children }: { children: ReactNode }) {
           {Icons.panel}
         </button>
         <div className="brand">
-          <div className="brand-mark" />
+          {/* Wordmark only until a logo is chosen — see SignIn.tsx. */}
           <span>MIOS</span>
         </div>
         {/* flex:1 so the badge and user menu sit hard right now that the

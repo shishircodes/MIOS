@@ -61,6 +61,13 @@ function ContextPanel() {
             <p>Takes one consultant and ranks the companies who need them.</p>
           </div>
         </li>
+        <li>
+          <span className="ico" aria-hidden="true">{Icons.publish}</span>
+          <div>
+            <h2>Publish</h2>
+            <p>Turns a quarter of collected signals into a client-ready report.</p>
+          </div>
+        </li>
       </ul>
 
       <p className="signin-aside-foot">
@@ -96,8 +103,9 @@ export function SignIn({ next, error: errCode, detail }: SignInProps) {
 
       <div className="signin-split">
       <div className="signin-inner">
+        {/* Wordmark only. There is no logo yet, and a placeholder mark reads as
+            a decided one — the first thing anybody would have to un-learn. */}
         <div className="signin-brand">
-          <div className="brand-mark" />
           <span>MIOS</span>
         </div>
 
