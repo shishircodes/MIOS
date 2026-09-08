@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
 import { Link } from '@tanstack/react-router'
 import { useRef, useState } from 'react'
-import { Loading, Section } from '~/components/ui'
+import { Explainer, Loading, Section } from '~/components/ui'
 import { dashboardQueryOptions } from '~/lib/api'
 import { useCountUpAll, useDrawPath, useGrowSlices, useReveal } from '~/lib/motion'
 import type { Breakdown, CollectionPoint } from '~/lib/types'
@@ -542,6 +542,25 @@ function DashboardScreen() {
         <div style={{ padding: '18px 22px 14px' }}>
           <TrendChart points={collections} mode={mode} />
         </div>
+        <Explainer title="Why collections, not calendar weeks">
+          <p>
+            Each point is one collection, not one calendar week. The pipeline runs weekly
+            so the two usually coincide — but when a run is missed, a calendar chart has
+            to draw something for the gap, and every option misleads: a zero says nobody
+            was hiring, a joined line invents a measurement, and repeating the last value
+            states it twice.
+          </p>
+          <p>
+            Movement is measured against the previous collection. Where there is no
+            earlier one, the tile says so instead of showing a direction it cannot
+            justify.
+          </p>
+          <p>
+            Only classified signals are counted here. A row that has been collected but
+            not yet read has no sector or region, so including it would move the totals
+            without being able to say where.
+          </p>
+        </Explainer>
       </Section>
 
       {/* ---------- what kind of week ---------- */}
@@ -552,6 +571,17 @@ function DashboardScreen() {
         >
           <div style={{ padding: '16px 22px 18px' }}>
             <Composition items={groups} total={latest.total} />
+          </div>
+          {/* The one judgement on the page, and what it rests on. Collapsed, but
+              first in its own card rather than in a note at the foot of the
+              page: somebody questioning the number is looking at this panel. */}
+          <Explainer title="What counts as a decision point">
+            <p>
+              <b>This grouping is a judgement, not a measurement.</b> Treating a project or
+              a leadership change as a decision point and a vacancy as routine is an
+              editorial call about what usually merits a call. The signal categories
+              panel below shows what the classifier actually recorded.
+            </p>
             <ul className="group-notes">
               {groups.map((g) => (
                 <li key={g.key}>
@@ -559,7 +589,7 @@ function DashboardScreen() {
                 </li>
               ))}
             </ul>
-          </div>
+          </Explainer>
         </Section>
 
         <Section title={`Sectors · ${latest.date}`}>
@@ -624,11 +654,20 @@ function DashboardScreen() {
               }))}
               total={sources.reduce((n, s) => n + s.count, 0)}
             />
-            <p className="drawer-lede" style={{ marginTop: 12, marginBottom: 0 }}>
-              A source missing from this list contributed nothing to the collection.
-              <Link to="/sources"> Source health →</Link>
-            </p>
           </div>
+          <Explainer title="Why this adds up differently">
+            <p>
+              These count what each source <i>collected</i>, including rows still awaiting
+              classification — a row not yet read was still collected by its source, and
+              excluding it would understate a scraper that ran perfectly. Every other
+              panel counts classified signals only, so this total can be higher.
+            </p>
+            <p>
+              A source missing from this list contributed nothing to the collection, which
+              is the quickest way to see a scraper that has quietly stopped working.
+              {' '}<Link to="/sources">Source health →</Link>
+            </p>
+          </Explainer>
         </Section>
 
         <Section title="Signal categories">
@@ -638,33 +677,6 @@ function DashboardScreen() {
         </Section>
       </div>
 
-      <Section title="How to read this">
-        <div className="explainer-body" style={{ padding: '16px 22px 18px' }}>
-          <p>
-            Each point on the chart is one collection, not one calendar week. The pipeline
-            runs weekly so the two usually coincide — but when a run is missed, a calendar
-            chart has to draw something for the gap, and every option misleads: a zero says
-            nobody was hiring, a joined line invents a measurement, and repeating the last
-            value states it twice.
-          </p>
-          <p>
-            Movement is measured against the previous collection. Where there is no earlier
-            one, the tile says so instead of showing a direction.
-          </p>
-          <p>
-            Only classified signals are counted, except under “Where it came from”,
-            which counts what each source collected — a row awaiting classification was
-            still collected. A classified row has no sector or region until it is read, so
-            including it elsewhere would move the totals without being able to say where.
-          </p>
-          <p>
-            <b>“What kind of week” is a judgement, not a measurement.</b> Grouping a
-            project or a leadership change as a decision point and a vacancy as routine is
-            an editorial call about what usually merits a call. The categories beneath it
-            are what the classifier actually recorded.
-          </p>
-        </div>
-      </Section>
     </div>
   )
 }
