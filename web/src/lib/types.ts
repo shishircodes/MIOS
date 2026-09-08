@@ -372,7 +372,16 @@ export interface AccessPayload {
   warning?: string | null
 }
 
-export type SourceStatus = 'ok' | 'stale' | 'never_run' | 'not_configured' | 'retired'
+export type SourceStatus =
+  | 'ok'
+  | 'stale'
+  | 'never_run'
+  | 'not_configured'
+  /** Switched off, so it collects nothing regardless of how recent its last
+   *  records are. Distinct from `not_configured`, which persists past the
+   *  toggle and has to be fixed before turning it on would achieve anything. */
+  | 'off'
+  | 'retired'
 
 export interface SourceHealth {
   /** Whether this source ships switched on. A source that is off for a

@@ -114,6 +114,30 @@ export function Section({ title, tools, children }: { title?: string; tools?: Re
   )
 }
 
+/** Collapsed explanation beneath a panel.
+ *
+ *  The admin screens each carry a few paragraphs on why something behaves as it
+ *  does — why a stored key beats an environment one, why a source that ships off
+ *  ships off, why a failed model call still counts against the allowance. All of
+ *  it is worth having and none of it is worth reading twice, so it opens on
+ *  demand rather than sitting between an administrator and the controls.
+ *
+ *  A `<details>` rather than a custom disclosure: it is keyboard-operable and
+ *  announced correctly with no work, it prints expanded, and the browser's find
+ *  can reach the text inside it.
+ *
+ *  `title` should name the question the text answers. "Notes" tells nobody
+ *  whether opening it is worth the click.
+ */
+export function Explainer({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <details className="explainer">
+      <summary>{title}</summary>
+      <div className="explainer-body">{children}</div>
+    </details>
+  )
+}
+
 // ----- Bar block -----
 export function BarBlock({ label, value, max, suffix = '' }: { label: string; value: number; max: number; suffix?: string }) {
   return (

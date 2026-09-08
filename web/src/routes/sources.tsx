@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useRef, useState } from 'react'
 import { AdminOnly } from '~/components/AdminOnly'
 import { SchedulePanel } from '~/components/SchedulePanel'
-import { Loading, Section } from '~/components/ui'
+import { Explainer, Loading, Section } from '~/components/ui'
 import { setSourceEnabled, sourceHealthQueryOptions } from '~/lib/api'
 import { useFigure, useReveal } from '~/lib/motion'
 import type { SourceHealth, SourceStatus } from '~/lib/types'
@@ -24,6 +24,12 @@ const STATUS: Record<SourceStatus, { label: string; cls: string; help: string }>
   stale: { label: 'Stale', cls: 'warn', help: 'Has not collected anything lately.' },
   never_run: { label: 'No data yet', cls: 'warn', help: 'Configured, but has never returned a record.' },
   not_configured: { label: 'Not configured', cls: 'off', help: 'Missing credentials, so it is skipped.' },
+  off: {
+    label: 'Switched off',
+    cls: 'off',
+    help: 'Excluded from the next scrape. The figures beside this are what it '
+      + 'collected while it was on.',
+  },
   retired: { label: 'Retired', cls: 'off', help: 'No longer collected; past records are kept.' },
 }
 
@@ -147,6 +153,8 @@ function SourcesScreen() {
   if (error) return <div className="page"><div className="notice err">Could not load source health. {error.message}</div></div>
 
   const healthy = data.sources.filter((s) => s.status === 'ok').length
+  // "N of M collecting" now excludes switched-off sources, because they are
+  // not. It counted them whenever their last run was recent enough.
   const live = data.sources.filter((s) => s.status !== 'retired')
   const pending = data.sources.reduce((n, s) => n + s.pending, 0)
 
@@ -215,10 +223,10 @@ function SourcesScreen() {
             onToggle={(name, enabled) => toggle.mutate({ name, enabled })}
           />
         ))}
-      </Section>
-
-      <Section title="How to read this">
-        <div className="prose-note">
+        {/* Attached to the table it explains, rather than a card of its own.
+            A separate "How to read this" panel holding one disclosure was two
+            headings deep for a paragraph nobody needs twice. */}
+        <Explainer title="Where these figures come from">
           <p>
             Every figure here is counted from the collected records themselves, not
             from a separate log — so it cannot drift out of step with what is
@@ -241,8 +249,9 @@ function SourcesScreen() {
               are collected and stored; they just have not been read yet.
             </p>
           )}
-        </div>
+        </Explainer>
       </Section>
     </div>
   )
 }
+
