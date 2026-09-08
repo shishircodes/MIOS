@@ -1,9 +1,20 @@
 @import "tailwindcss";
 
 /* MIOS — Paper Data Terminal aesthetic
-   Easy Skill: warm sunshine yellow + deep forest green · DM Sans / Poppins / JetBrains Mono */
+   Easy Skill: warm sunshine yellow + deep forest green · Segoe UI */
 
-@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+/* No webfont import.
+   The interface is set in Segoe UI, which ships with Windows, so there is
+   nothing to download: no request to fonts.googleapis.com on every load, no
+   flash of fallback text while three families arrive, and the app renders
+   identically offline. It also removes a third-party request from a page that
+   shows a client's hiring intelligence.
+
+   The trade is that Segoe UI is a Windows typeface. On macOS the stack falls
+   through to the system font, on Android to Roboto. That is how most system
+   stacks behave and the layout is built on relative units, so it adapts — but
+   it does mean the app no longer renders byte-identically on every platform
+   the way three pinned webfonts did. */
 
 @theme {
   --color-paper: #FFFFFF;
@@ -17,9 +28,13 @@
   --color-primary: #FFCD2C;
   --color-moss: #0F6E3D;
   --color-teal: #0E9594;
-  --font-sans: 'DM Sans', ui-sans-serif, sans-serif;
-  --font-display: 'Poppins', 'DM Sans', sans-serif;
-  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+  /* Kept in step with the --sans/--display/--mono set below, which is what the
+     stylesheet actually uses. Nothing references these, but a Tailwind theme
+     that disagreed with the interface would be a trap for whoever reached for
+     it first. */
+  --font-sans: 'Segoe UI Variable Text', 'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif;
+  --font-display: 'Segoe UI Variable Display', 'Segoe UI Semibold', 'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: 'Cascadia Mono', Consolas, 'Segoe UI Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
 :root {
@@ -72,10 +87,32 @@
   --amber-line: rgba(107, 79, 0, 0.35);
   --crimson: #4B5A6E;
   --crimson-bg: rgba(75, 90, 110, 0.10);
-  --sans: 'DM Sans', ui-sans-serif, sans-serif;
-  --display: 'Poppins', 'DM Sans', sans-serif;
-  --mono: 'JetBrains Mono', ui-monospace, monospace;
-  --serif: 'DM Sans', Georgia, serif;
+  /* ---- Typeface ---------------------------------------------------------
+     Segoe UI, using its optical variants rather than one face at every size.
+     Windows 11 ships Segoe UI Variable in three cuts drawn for different
+     sizes — Display is tightened for headings, Text is spaced for reading at
+     body size — which is the distinction the interface was previously getting
+     from two unrelated families. Windows 10 and earlier fall back to plain
+     Segoe UI, which is the same design without the optical sizing. */
+  --sans: 'Segoe UI Variable Text', 'Segoe UI', system-ui, -apple-system,
+          'Helvetica Neue', Arial, sans-serif;
+  --display: 'Segoe UI Variable Display', 'Segoe UI Semibold', 'Segoe UI',
+             system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif;
+  /* Small text has its own cut too: Segoe UI Variable Small keeps counters
+     open at the 10–11px the labels and axis ticks use, where Text closes up. */
+  --small: 'Segoe UI Variable Small', 'Segoe UI', system-ui, -apple-system,
+           'Helvetica Neue', Arial, sans-serif;
+  /* Deliberately still a monospace, not Segoe UI.
+     This token does two jobs: it sets the uppercase labels, and it sets the
+     figures in every table and KPI, plus the `<code>` in the sign-in and admin
+     screens. Segoe UI has proper tabular figures so the columns would still
+     align — but an environment variable name or a shell command set in a
+     proportional face is genuinely harder to read, and the labels lose the
+     instrument quality the whole design leans on. Cascadia Mono and Consolas
+     both ship with Windows, so this stays a system font like the rest. */
+  --mono: 'Cascadia Mono', Consolas, 'Segoe UI Mono', ui-monospace,
+          SFMono-Regular, Menlo, monospace;
+  --serif: 'Segoe UI', system-ui, Georgia, serif;
 
   /* ---- Shape and depth -------------------------------------------------
      The interface was drawn entirely in 1px lines: 96 of them, against seven
@@ -1597,7 +1634,7 @@ overflow-x: auto;
   display: flex; flex-direction: column; align-items: flex-start; gap: 6px;
   justify-content: center; min-width: 210px;
 }
-.hero-meta { font-size: 12px; color: rgba(255, 255, 255, 0.66); line-height: 1.45; }
+.hero-meta { font-family: var(--small); font-size: 12px; color: rgba(255, 255, 255, 0.66); line-height: 1.45; }
 .hero-cta { margin-top: 8px; background: transparent; color: var(--paper); border-color: rgba(255,255,255,0.35); }
 .hero-cta:hover { background: rgba(255,255,255,0.10); color: var(--paper); border-color: rgba(255,255,255,0.6); }
 .run-chip {
@@ -1627,7 +1664,7 @@ overflow-x: auto;
 }
 .kpi2-value { display: flex; align-items: baseline; gap: 7px; margin-top: 6px; }
 .kpi2-value .val { font-family: var(--display); font-size: 27px; font-weight: 700; color: var(--ink); line-height: 1; }
-.kpi2-suffix { font-size: 12px; color: var(--ink-3); }
+.kpi2-suffix { font-family: var(--small); font-size: 12px; color: var(--ink-3); }
 .kpi2-foot { display: flex; gap: 9px; align-items: baseline; flex-wrap: wrap; font-size: 11.5px; margin: 5px 0 10px; min-height: 16px; }
 .kpi-spark { display: block; width: calc(100% + 32px); margin: 0 -16px -1px; height: 34px; }
 .spark-empty {
@@ -1752,7 +1789,7 @@ overflow-x: auto;
 .comp-empty { padding: 6px 0 2px; font-size: 13px; }
 
 .group-notes { list-style: none; margin: 16px 0 0; padding: 14px 0 0; border-top: 1px solid var(--line); }
-.group-notes li { font-size: 12.5px; line-height: 1.55; color: var(--ink-3); margin-bottom: 7px; }
+.group-notes li { font-family: var(--small); font-size: 12.5px; line-height: 1.55; color: var(--ink-3); margin-bottom: 7px; }
 .group-notes li:last-child { margin-bottom: 0; }
 .group-notes b { color: var(--ink-2); }
 
@@ -1928,6 +1965,7 @@ overflow-x: auto;
 .contrib-fill { height: 100%; background: var(--teal); }
 .contrib-ev { font-size: 13px; line-height: 1.5; color: var(--ink-2); }
 .contrib-asks {
+  font-family: var(--small);
   margin-top: 4px; font-size: 12px; line-height: 1.5; color: var(--ink-3);
 }
 
