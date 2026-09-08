@@ -27,7 +27,7 @@ from agents.signal_analyst import classify_pending
 from config.settings import configure_logging, settings
 from api.digest_service import build_digest_payload
 from delivery.digest import build_digest
-from delivery.pulse import generate_pulse, save_pulse
+from delivery.pulse import generate_pulse, load_pulse, save_pulse
 from delivery.slack import post_digest
 from loader import run_log
 from loader.db import connect, describe, resolve_target
@@ -189,6 +189,27 @@ def run_live_cycle(
         if outcome.ok:
             pulse = outcome.bullets
             log.info("live: Market Pulse generated (%d bullets)", len(pulse))
+            # Put it into the payload before that payload is archived.
+            #
+            # `build_digest_payload` above read the pulse for this window and
+            # correctly found none — it had not been generated yet. Archiving
+            # that payload unchanged stored `marketPulse: None` for every clean
+            # run, so the Slack message carried the week's written read and the
+            # stored digest did not. It only ever looked right when a window was
+            # processed twice, because the second pass found the first pass's
+            # pulse already in the table.
+            #
+            # Read back rather than assigning `outcome.bullets`: `load_pulse`
+            # returns the shape `/api/digest` serves, so the archived payload and
+            # the live one stay identical. Assigning the raw bullets here would
+            # give the archive a different shape from every other route to the
+            # same digest.
+            payload["marketPulse"] = load_pulse(
+                payload.get("collectedFrom") or since.isoformat(timespec="seconds"),
+                payload.get("collectedTo")
+                or datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                db_path,
+            )
         else:
             # Deliberately not fatal, and deliberately not replaced with computed
             # bullets: the section is simply absent this week.

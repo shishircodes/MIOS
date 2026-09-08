@@ -100,7 +100,34 @@ class Settings:
 
 
 def _get(name: str, default: str = "") -> str:
-    return os.environ.get(name, default).strip()
+    """An environment value, or the default when there isn't one.
+
+    An **empty** value counts as absent. `os.environ.get(name, default)` does
+    not: it applies the default only when the name is missing, so a variable
+    set to the empty string silently wins over the default.
+
+    That is not a hypothetical. `deploy-main.yml` writes the server's `.env`
+    from GitHub, and an unset repository variable expands to nothing, so the
+    file gets `PNGWORKFORCE_BASE_URL=` — present, and empty. The default listings
+    URL was therefore overridden by "" on every deployed container while working
+    perfectly on every laptop, where the variable is genuinely absent. The
+    scheduled run of 6 September collected zero PNG job signals for exactly this
+    reason, and reported a healthy run, because a scraper with no URL returns an
+    empty list rather than failing.
+
+    The commit that introduced that passthrough added it so a missing URL would
+    be *visible* in the compose file, and verified the fix with the variable
+    removed from the environment — the one state the same commit made impossible
+    in production. Treating empty as absent is what makes that intent true.
+
+    `_get_list` has always worked this way; its docstring says so ("Empty tuple
+    means 'use the code default'"). This brings the scalar version into line.
+
+    A caller that genuinely wants "set, but empty" cannot express it here — no
+    setting in this file wants that, and every non-empty default it affects
+    means "nobody configured this".
+    """
+    return os.environ.get(name, "").strip() or default
 
 
 def _get_list(name: str) -> tuple[str, ...]:
