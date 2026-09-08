@@ -111,7 +111,52 @@ def _load_one(sql: str, params: tuple, target) -> dict[str, Any] | None:
 
     payload["archived"] = _summary(row)
     payload["digestText"] = row["digest_text"]
+    _relabel(payload)
     return payload
+
+
+def _relabel(payload: dict[str, Any]) -> None:
+    """Re-derive the headings from the timestamps the payload already carries.
+
+    A digest is archived as a snapshot, and its *figures* must stay exactly as
+    published — a later re-classification or watchlist edit must not quietly
+    rewrite what a past week reported. A heading is not a figure. It is a
+    rendering of `collectedFrom`/`collectedTo`, both of which are stored, so
+    deriving it on read costs nothing and keeps every archived week consistent
+    with how dates are shown today.
+
+    That distinction was learned the hard way twice. The Market Pulse had to be
+    repaired row by row because it was frozen into the payload, and the same
+    week the headings were found to be a day out — named in UTC when the run
+    fires at 05:00 Australia/Sydney — with every stored digest carrying the
+    wrong weekday as a baked string. Fixing the formatter changed nothing on
+    screen, because what is served is the archive.
+
+    Anything derived from stored timestamps belongs here rather than in the
+    stored bytes, so the next formatting change needs no migration at all.
+
+    `generatedAt` is deliberately NOT re-derived: it records when the digest was
+    produced, which is a fact about the run and not a rendering of anything in
+    the payload.
+    """
+    from datetime import datetime as _dt
+
+    raw_to, raw_from = payload.get("collectedTo"), payload.get("collectedFrom")
+    if not raw_to:
+        # Synthetic or pre-archive rows carry no collection span; their stored
+        # label ("Sample dataset") is the only one available and stays.
+        return
+    try:
+        end = _dt.fromisoformat(str(raw_to))
+        start = _dt.fromisoformat(str(raw_from)) if raw_from else end
+    except ValueError:
+        log.warning("digest_archive: unparsable collection span; keeping stored labels")
+        return
+
+    from api.digest_service import _collection_label, _local
+
+    payload["weekLabel"] = _collection_label(start, end)
+    payload["week"] = _local(end).strftime("WEEK %d %b %Y").upper()
 
 
 def latest_digest(target: str | Path | None = None) -> dict[str, Any] | None:

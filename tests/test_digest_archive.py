@@ -245,3 +245,79 @@ def test_a_payload_without_a_collection_block_falls_back_to_the_list(db):
                 window_from=iso(7), window_to=iso(6), target=db)
 
     assert list_digests(target=db)[0]["signalCount"] == 2
+
+
+# ---------- headings are rendered, not remembered ----------
+
+
+def test_a_stored_heading_is_re_derived_on_read(db):
+    """The heading is a rendering of the collection span, not a figure.
+
+    Every archived digest carried its label as a baked string, so when the
+    headings were found to be a day out — named in UTC while the run fires at
+    05:00 Australia/Sydney — fixing the formatter changed nothing on screen.
+    What `/api/digest` serves is the archive.
+
+    Deriving it on read means the next formatting change needs no migration.
+    """
+    save_digest(
+        run_id="run-tz",
+        payload={
+            "signals": [],
+            "collectedFrom": "2026-09-06T19:01:13+00:00",
+            "collectedTo": "2026-09-06T19:01:19+00:00",
+            # As it was written by the old code: the UTC date, a Sunday.
+            "weekLabel": "Week of 6 September 2026",
+            "week": "WEEK 06 SEP 2026",
+        },
+        window_from="2026-09-06T19:01:13+00:00",
+        window_to="2026-09-06T19:01:19+00:00",
+        target=db,
+    )
+
+    got = load_digest("run-tz", target=db)
+
+    assert got["weekLabel"] == "Week of 7 September 2026"
+    assert got["week"] == "WEEK 07 SEP 2026"
+
+
+def test_re_deriving_the_heading_leaves_the_figures_alone(db):
+    """A digest is a snapshot and its numbers must stay exactly as published.
+    Only the heading is re-rendered."""
+    save_digest(
+        run_id="run-tz",
+        payload={
+            "signals": [{"id": "a"}],
+            "collection": {"collected": 80},
+            "collectedFrom": "2026-09-06T19:01:13+00:00",
+            "collectedTo": "2026-09-06T19:01:19+00:00",
+            "weekLabel": "Week of 6 September 2026",
+            "generatedAt": "Sun 06 Sep 2026 · 19:04 UTC",
+        },
+        window_from="2026-09-06T19:01:13+00:00",
+        window_to="2026-09-06T19:01:19+00:00",
+        target=db,
+    )
+
+    got = load_digest("run-tz", target=db)
+
+    assert got["collection"]["collected"] == 80
+    assert got["signals"] == [{"id": "a"}]
+    # When it was produced is a fact about the run, not a rendering of anything
+    # in the payload, so it is left exactly as recorded.
+    assert got["generatedAt"] == "Sun 06 Sep 2026 · 19:04 UTC"
+
+
+def test_a_payload_with_no_collection_span_keeps_its_stored_label(db):
+    """Synthetic and pre-archive rows have no timestamps to render from, so the
+    stored label is the only one available."""
+    save_digest(
+        run_id="run-synthetic",
+        payload={"signals": [], "collectedFrom": None, "collectedTo": None,
+                 "weekLabel": "Sample dataset"},
+        window_from="2026-09-06T19:01:13+00:00",
+        window_to="2026-09-06T19:01:19+00:00",
+        target=db,
+    )
+
+    assert load_digest("run-synthetic", target=db)["weekLabel"] == "Sample dataset"
