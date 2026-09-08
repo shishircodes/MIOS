@@ -1,9 +1,20 @@
 @import "tailwindcss";
 
 /* MIOS — Paper Data Terminal aesthetic
-   Easy Skill: warm sunshine yellow + deep forest green · DM Sans / Poppins / JetBrains Mono */
+   Easy Skill: warm sunshine yellow + deep forest green · Segoe UI */
 
-@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+/* No webfont import.
+   The interface is set in Segoe UI, which ships with Windows, so there is
+   nothing to download: no request to fonts.googleapis.com on every load, no
+   flash of fallback text while three families arrive, and the app renders
+   identically offline. It also removes a third-party request from a page that
+   shows a client's hiring intelligence.
+
+   The trade is that Segoe UI is a Windows typeface. On macOS the stack falls
+   through to the system font, on Android to Roboto. That is how most system
+   stacks behave and the layout is built on relative units, so it adapts — but
+   it does mean the app no longer renders byte-identically on every platform
+   the way three pinned webfonts did. */
 
 @theme {
   --color-paper: #FFFFFF;
@@ -17,9 +28,13 @@
   --color-primary: #FFCD2C;
   --color-moss: #0F6E3D;
   --color-teal: #0E9594;
-  --font-sans: 'DM Sans', ui-sans-serif, sans-serif;
-  --font-display: 'Poppins', 'DM Sans', sans-serif;
-  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+  /* Kept in step with the --sans/--display/--mono set below, which is what the
+     stylesheet actually uses. Nothing references these, but a Tailwind theme
+     that disagreed with the interface would be a trap for whoever reached for
+     it first. */
+  --font-sans: 'Segoe UI Variable Text', 'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif;
+  --font-display: 'Segoe UI Variable Display', 'Segoe UI Semibold', 'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: 'Cascadia Mono', Consolas, 'Segoe UI Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
 :root {
@@ -72,10 +87,61 @@
   --amber-line: rgba(107, 79, 0, 0.35);
   --crimson: #4B5A6E;
   --crimson-bg: rgba(75, 90, 110, 0.10);
-  --sans: 'DM Sans', ui-sans-serif, sans-serif;
-  --display: 'Poppins', 'DM Sans', sans-serif;
-  --mono: 'JetBrains Mono', ui-monospace, monospace;
-  --serif: 'DM Sans', Georgia, serif;
+  /* ---- Typeface ---------------------------------------------------------
+     Segoe UI, using its optical variants rather than one face at every size.
+     Windows 11 ships Segoe UI Variable in three cuts drawn for different
+     sizes — Display is tightened for headings, Text is spaced for reading at
+     body size — which is the distinction the interface was previously getting
+     from two unrelated families. Windows 10 and earlier fall back to plain
+     Segoe UI, which is the same design without the optical sizing. */
+  --sans: 'Segoe UI Variable Text', 'Segoe UI', system-ui, -apple-system,
+          'Helvetica Neue', Arial, sans-serif;
+  --display: 'Segoe UI Variable Display', 'Segoe UI Semibold', 'Segoe UI',
+             system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif;
+  /* Small text has its own cut too: Segoe UI Variable Small keeps counters
+     open at the 10–11px the labels and axis ticks use, where Text closes up. */
+  --small: 'Segoe UI Variable Small', 'Segoe UI', system-ui, -apple-system,
+           'Helvetica Neue', Arial, sans-serif;
+  /* Deliberately still a monospace, not Segoe UI.
+     This token does two jobs: it sets the uppercase labels, and it sets the
+     figures in every table and KPI, plus the `<code>` in the sign-in and admin
+     screens. Segoe UI has proper tabular figures so the columns would still
+     align — but an environment variable name or a shell command set in a
+     proportional face is genuinely harder to read, and the labels lose the
+     instrument quality the whole design leans on. Cascadia Mono and Consolas
+     both ship with Windows, so this stays a system font like the rest. */
+  --mono: 'Cascadia Mono', Consolas, 'Segoe UI Mono', ui-monospace,
+          SFMono-Regular, Menlo, monospace;
+  --serif: 'Segoe UI', system-ui, Georgia, serif;
+
+  /* ---- Shape and depth -------------------------------------------------
+     The interface was drawn entirely in 1px lines: 96 of them, against seven
+     box-shadows of which four were `inset` and doing a border's job. Every
+     boundary was a stroke, which is what made a dense, deliberate layout read
+     as a wireframe of itself.
+
+     Cards keep their border and gain a whisper of elevation, so they read as
+     objects on a surface rather than regions fenced off from it. The shadows
+     are deliberately far softer than they look in a spec — at this density,
+     anything heavier turns a page of twelve panels into a relief map. */
+  --radius: 5px;
+  --radius-sm: 3px;
+  /* Resting: a card sitting on the page. */
+  --shadow-1: 0 1px 2px rgba(26, 40, 55, 0.04), 0 2px 6px rgba(26, 40, 55, 0.04);
+  /* Raised: the hero, and anything the eye should reach first. */
+  --shadow-2: 0 1px 2px rgba(26, 40, 55, 0.06), 0 6px 16px rgba(26, 40, 55, 0.07);
+
+  /* ---- Type scale ------------------------------------------------------
+     187 of about 200 font-size declarations sat between 10px and 15px, so a
+     card heading was 14px against 13.5px of body text — half a pixel of
+     hierarchy, with weight and uppercase carrying the rest. These give the
+     scale somewhere to breathe without touching the density that makes this
+     product usable. */
+  --t-page: 30px;     /* page title */
+  --t-card: 16.5px;   /* card heading — was 14, against 13.5px body */
+  --t-body: 13.5px;
+  --t-small: 12.5px;
+  --t-label: 11px;    /* mono, uppercase */
 }
 
 * { box-sizing: border-box; }
@@ -286,22 +352,32 @@ input, textarea, select { font-family: inherit; }
 .page-header .meta { font-family: var(--mono); font-size: 12px; color: var(--muted); text-align: right; letter-spacing: 0.04em; }
 
 /* ---------- Cards / sections ---------- */
-.section { border: 1px solid var(--line-2); background: var(--surface); margin-bottom: 18px; overflow: hidden; }
+.section {
+  border: 1px solid var(--line); background: var(--surface);
+  margin-bottom: 18px; overflow: hidden;
+  border-radius: var(--radius); box-shadow: var(--shadow-1);
+}
 .section-h {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 11px 16px; border-bottom: 1px solid var(--line-2);
-  background: var(--surface-2);
-  /* A turquoise rule under the heading ties each card to the accent without
-     tinting a whole surface, which would fight the data underneath. */
+  padding: 13px 18px; border-bottom: 1px solid var(--line);
+  background: var(--surface);
+  /* The turquoise rule stays — it ties each card to the accent without tinting
+     a whole surface. The header no longer takes its own background: with a
+     shadow doing the separating, a second fill made every card look like two
+     stacked ones. */
   box-shadow: inset 0 -2px 0 var(--teal);
 }
-.section-h h2 { margin: 0; font-size: 14px; font-family: var(--display); font-weight: 700; letter-spacing: -0.005em; color: var(--ink); }
-.section-h .tools { display: flex; gap: 8px; align-items: center; font-size: 11.5px; font-family: var(--mono); color: var(--ink-3); letter-spacing: 0.04em; }
+.section-h h2 {
+  margin: 0; font-size: var(--t-card); font-family: var(--display);
+  font-weight: 700; letter-spacing: -0.012em; color: var(--ink); line-height: 1.25;
+}
+.section-h .tools { display: flex; gap: 8px; align-items: center; font-size: var(--t-label); font-family: var(--mono); color: var(--ink-3); letter-spacing: 0.05em; }
 
 /* ---------- Buttons ---------- */
 .btn {
   display: inline-flex; align-items: center; gap: 7px;
   padding: 8px 15px; border: 1px solid var(--line-3);
+  border-radius: var(--radius-sm);
   background: var(--surface); color: var(--ink);
   font-size: 13.5px; font-weight: 600; font-family: var(--sans);
   letter-spacing: 0.01em; text-decoration: none; cursor: pointer;
@@ -534,7 +610,7 @@ input, textarea, select { font-family: inherit; }
 .match-row:last-child { border-bottom: none; }
 .match-row .rank { font-family: var(--display); font-size: 22px; font-weight: 700; color: var(--moss); }
 .match-row .co-name { font-weight: 600; font-size: 15.5px; margin: 0 0 3px; }
-.match-row .co-meta { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; font-family: var(--mono); font-size: 11.5px; color: var(--muted); letter-spacing: 0.04em; text-transform: uppercase; }
+.match-row .co-meta { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; font-family: var(--mono); font-size: 11.5px; color: var(--muted); letter-spacing: 0.03em; }
 .match-row .ev-list { margin: 0; padding: 0 0 0 14px; font-size: 13.5px; color: var(--ink-3); }
 .match-row .ev-list li { margin-bottom: 2px; }
 .match-row .score { text-align: right; font-family: var(--mono); font-size: 12px; letter-spacing: 0.04em; color: var(--muted); }
@@ -576,7 +652,7 @@ input, textarea, select { font-family: inherit; }
 @media (max-width: 620px) {
   .drawer { width: 100vw; border-left: none; }
 }
-.drawer-h { padding: 14px 18px; border-bottom: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between; background: var(--paper); position: sticky; top: 0; z-index: 1; }
+.drawer-h { padding: 15px 18px; border-bottom: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between; background: var(--paper); position: sticky; top: 0; z-index: 1; }
 .drawer-h .close { border: none; background: none; cursor: pointer; padding: 2px 6px; font-family: var(--mono); font-size: 15px; color: var(--ink-3); }
 .drawer-body { padding: 18px; }
 .pull { border-left: 3px solid var(--moss); background: var(--moss-bg); padding: 12px 16px; margin: 16px 0; font-family: var(--sans); font-size: 14px; }
@@ -1402,7 +1478,7 @@ overflow-x: auto;
   color: var(--ink);
   background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
 }
 
 .sched-actions {
@@ -1497,7 +1573,7 @@ overflow-x: auto;
   /* Room on the right for the drawn caret. */
   padding: 6px 30px 6px 11px;
   color: var(--ink); background: var(--surface-2);
-  border: 1px solid var(--line-2); border-radius: 0;
+  border: 1px solid var(--line-2); border-radius: var(--radius-sm);
   cursor: pointer; min-width: 210px;
   /* The platform arrow is what made this look like an unstyled form control
      dropped into a designed page. */
@@ -1516,11 +1592,238 @@ overflow-x: auto;
   .digest-pick select { min-width: 0; width: 100%; }
 }
 
+/* Every small pill takes the same corner. Grouped rather than repeated in a
+   dozen definitions: they already share a shape and a job — a short label
+   carrying a state — and a rule per chip is a dozen places to forget. */
+.status-chip, .fit-chip, .conf-chip, .rel-chip, .run-chip,
+.mode-banner, .usage-tag, .outcome-tag, .pulse-tag, .skill-mark, .kbd {
+  border-radius: var(--radius-sm);
+}
+.comp-bar, .usage-rail, .contrib-rail, .bar-block .bar-rail {
+  border-radius: 999px; overflow: hidden;
+}
+
+/* ---------- Dashboard ---------- */
+
+.split-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+@media (max-width: 900px) { .split-2 { grid-template-columns: 1fr; } }
+
+/* The hero band. Dark enough to sit apart from the cards beneath it without
+   another accent colour: this is the one figure the page exists to show. */
+.hero {
+  display: grid; grid-template-columns: 1fr auto; gap: 24px;
+  padding: 22px 26px; margin-bottom: 18px;
+  background: var(--ink); color: var(--paper);
+  border: 1px solid var(--ink);
+  border-radius: var(--radius); box-shadow: var(--shadow-2);
+}
+@media (max-width: 760px) { .hero { grid-template-columns: 1fr; } }
+.hero-label {
+  font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.08em;
+  text-transform: uppercase; color: rgba(255, 255, 255, 0.62);
+}
+.hero-figure { display: flex; align-items: baseline; gap: 12px; margin: 6px 0 12px; }
+.hero-figure .val {
+  font-family: var(--display); font-size: 40px; font-weight: 700;
+  line-height: 1; color: var(--paper);
+}
+.hero-split { display: flex; gap: 18px; flex-wrap: wrap; font-size: 13px; color: rgba(255,255,255,0.85); }
+.hero-split span { display: inline-flex; align-items: center; gap: 7px; }
+.hero-split b { color: var(--paper); }
+.hero-side {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 6px;
+  justify-content: center; min-width: 210px;
+}
+.hero-meta { font-family: var(--small); font-size: 12px; color: rgba(255, 255, 255, 0.66); line-height: 1.45; }
+.hero-cta { margin-top: 8px; background: transparent; color: var(--paper); border-color: rgba(255,255,255,0.35); }
+.hero-cta:hover { background: rgba(255,255,255,0.10); color: var(--paper); border-color: rgba(255,255,255,0.6); }
+.run-chip {
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.07em;
+  text-transform: uppercase; padding: 2px 8px; border: 1px solid transparent;
+}
+.run-chip.ok { background: rgba(74, 222, 128, 0.18); color: #8FE6B0; border-color: rgba(74,222,128,0.35); }
+.run-chip.warn { background: rgba(255, 205, 44, 0.18); color: var(--primary); border-color: rgba(255,205,44,0.4); }
+
+/* The hero's delta sits on a dark ground, where the page's own delta colours
+   do not have the contrast to be read. */
+.hero .delta.up { color: #8FE6B0; }
+.hero .delta.down { color: #FFB4A6; }
+.hero .delta.flat { color: rgba(255, 255, 255, 0.6); }
+
+.kpi2-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; margin-bottom: 18px; }
+@media (max-width: 980px) { .kpi2-row { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 520px) { .kpi2-row { grid-template-columns: 1fr; } }
+.kpi2 {
+  background: var(--surface); border: 1px solid var(--line);
+  padding: 14px 16px 0; display: flex; flex-direction: column; overflow: hidden;
+  border-radius: var(--radius); box-shadow: var(--shadow-1);
+}
+.kpi2-label {
+  font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.07em;
+  text-transform: uppercase; color: var(--ink-3);
+}
+.kpi2-value { display: flex; align-items: baseline; gap: 7px; margin-top: 6px; }
+.kpi2-value .val { font-family: var(--display); font-size: 27px; font-weight: 700; color: var(--ink); line-height: 1; }
+.kpi2-suffix { font-family: var(--small); font-size: 12px; color: var(--ink-3); }
+.kpi2-foot { display: flex; gap: 9px; align-items: baseline; flex-wrap: wrap; font-size: 11.5px; margin: 5px 0 10px; min-height: 16px; }
+.kpi-spark { display: block; width: calc(100% + 32px); margin: 0 -16px -1px; height: 34px; }
+.spark-empty {
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.05em;
+  color: var(--muted); padding-bottom: 12px;
+}
+
+.delta { font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.03em; white-space: nowrap; }
+.delta.up { color: var(--moss); }
+.delta.down { color: var(--crimson); }
+.delta.flat { color: var(--muted); }
+
+/* ---------- Trend chart ---------- */
+
+.trend-svg { width: 100%; height: auto; display: block; overflow: visible; }
+.trend-tick { font-family: var(--mono); font-size: 8px; fill: var(--muted); }
+.trend-axis {
+  display: flex; justify-content: space-between; margin-top: 4px;
+  font-family: var(--mono); font-size: 10.5px; color: var(--muted);
+}
+.legend { display: flex; gap: 18px; flex-wrap: wrap; margin-top: 12px; font-size: 12.5px; color: var(--ink-2); }
+.legend-item { display: inline-flex; align-items: center; gap: 7px; }
+.swatch { width: 9px; height: 9px; display: inline-block; flex-shrink: 0; }
+/* The PNG series is dashed as well as differently coloured — WCAG 1.4.1. */
+.swatch.dashed { height: 3px; width: 14px; }
+
+/* ---------- Trend chart: the interactive parts ---------- */
+
+.trend-plot { position: relative; }
+.trend-plot:focus { outline: none; }
+.trend-plot:focus-visible { outline: 2px solid var(--teal); outline-offset: 3px; border-radius: var(--radius-sm); }
+.trend-cursor { stroke: var(--teal); stroke-width: 1; stroke-dasharray: 3 3; opacity: 0.75; }
+/* The point under the cursor grows. A transition rather than a tween: it fires
+   on every pointer move, and a JS animation per frame would be waste. */
+.pt circle, .trend-bar { transition: r 120ms ease, opacity 120ms ease; }
+.bars .trend-bar { opacity: 0.78; }
+.bars.on .trend-bar { opacity: 1; }
+
+/* The readout. Anchored to the plot, not the pointer: a tooltip that chases
+   the cursor cannot be reached by keyboard and jumps under a finger. */
+.trend-read {
+  position: absolute; top: 4px; pointer-events: none;
+  background: var(--ink); color: var(--paper);
+  border-radius: var(--radius-sm); box-shadow: var(--shadow-2);
+  padding: 9px 12px; min-width: 196px; z-index: 2;
+}
+.trend-read-date {
+  font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.06em;
+  color: rgba(255,255,255,0.66); margin-bottom: 6px;
+}
+.trend-read-row, .trend-read-total {
+  display: grid; grid-template-columns: 9px 1fr auto; gap: 8px;
+  align-items: center; font-size: 12.5px; padding: 2px 0;
+  /* The longest series name is "Papua New Guinea"; wrapping it made the
+     readout two lines taller than it needed to be. */
+  white-space: nowrap;
+}
+.trend-read-total {
+  grid-template-columns: 1fr auto; margin-top: 5px; padding-top: 5px;
+  border-top: 1px solid rgba(255,255,255,0.18); color: rgba(255,255,255,0.78);
+}
+.trend-read b { color: var(--paper); font-family: var(--mono); }
+
+.trend-hint {
+  font-family: var(--mono); font-size: 10px; color: var(--muted);
+  letter-spacing: 0.04em;
+}
+@media (max-width: 620px) { .trend-hint { display: none; } }
+
+/* Legend entries are buttons, because they do something. */
+.legend-item.toggle {
+  background: none; border: 1px solid transparent; cursor: pointer;
+  font: inherit; font-size: 12.5px; color: var(--ink-2);
+  padding: 3px 8px; border-radius: var(--radius-sm);
+  transition: background 120ms, border-color 120ms, opacity 120ms;
+}
+.legend-item.toggle:hover { background: var(--paper-2); border-color: var(--line); }
+.legend-item.toggle:focus-visible { outline: 2px solid var(--teal); outline-offset: 1px; }
+.legend-item.toggle.off { opacity: 0.5; text-decoration: line-through; }
+
+/* A segmented switch, for a choice between two views of one thing. */
+.seg { display: inline-flex; border: 1px solid var(--line-2); border-radius: var(--radius-sm); overflow: hidden; }
+.seg-btn {
+  font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.05em;
+  text-transform: uppercase; padding: 4px 10px; border: none; cursor: pointer;
+  background: var(--surface); color: var(--ink-3);
+  transition: background 120ms, color 120ms;
+}
+.seg-btn + .seg-btn { border-left: 1px solid var(--line-2); }
+.seg-btn:hover { background: var(--paper-2); color: var(--ink); }
+.seg-btn.on { background: var(--teal-2); color: var(--on-teal); }
+.seg-btn:focus-visible { outline: 2px solid var(--teal); outline-offset: -2px; }
+
+/* Following a company leads to its signals. */
+.co-link { color: inherit; text-decoration: none; border-bottom: 1px solid transparent; }
+.co-link:hover { color: var(--teal-3); border-bottom-color: var(--teal); }
+.co-link:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+
+/* ---------- Composition bar ---------- */
+
+.comp-bar { display: flex; height: 12px; overflow: hidden; background: var(--paper-2); border: 1px solid var(--line); }
+.comp-slice {
+  display: block; height: 100%; min-width: 2px;
+  transition: opacity 140ms ease;
+}
+.comp.has-lit .comp-slice { opacity: 0.34; }
+.comp.has-lit .comp-slice.lit { opacity: 1; }
+.comp-legend li { transition: background 140ms ease; }
+.comp.has-lit .comp-legend li { opacity: 0.5; }
+.comp.has-lit .comp-legend li.lit { opacity: 1; background: var(--paper-2); }
+.comp-legend { list-style: none; margin: 14px 0 0; padding: 0; }
+.comp-legend li {
+  display: grid; grid-template-columns: 12px 1fr auto 52px; gap: 10px;
+  align-items: baseline; padding: 6px 0; border-top: 1px solid var(--line);
+  font-size: 13px;
+}
+.comp-legend li:first-child { border-top: none; }
+.comp-legend .swatch { align-self: center; }
+.comp-name { color: var(--ink-2); }
+.comp-num { font-family: var(--mono); font-weight: 600; color: var(--ink); }
+.comp-share { font-family: var(--mono); color: var(--ink-3); text-align: right; font-size: 12px; }
+.comp-empty { padding: 6px 0 2px; font-size: 13px; }
+
+/* Lives inside an Explainer now, under a paragraph, so it no longer needs the
+   rule that separated it from the composition bar it used to sit beneath. */
+.group-notes { list-style: none; margin: 10px 0 0; padding: 0; }
+.group-notes li {
+  font-family: var(--small); font-size: 12.5px; line-height: 1.55;
+  color: var(--ink-3); margin-bottom: 7px;
+  padding-left: 11px; border-left: 2px solid var(--line-2);
+}
+.group-notes li:last-child { margin-bottom: 0; }
+.group-notes b { color: var(--ink-2); }
+
+/* ---------- Most active companies ---------- */
+
+.co-table td { vertical-align: middle; }
+.co-cell { font-weight: 600; }
+.co-table .num { position: relative; text-align: right; white-space: nowrap; }
+/* A bar behind the figure rather than a column of its own: the number is the
+   fact and the bar is only there to make the ranking scannable. */
+.co-bar {
+  position: absolute; right: 34px; top: 50%; transform: translateY(-50%);
+  height: 7px; background: var(--teal-bg); border-right: 2px solid var(--teal);
+  max-width: 120px; pointer-events: none;
+}
+.rel-chip {
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.05em;
+  text-transform: uppercase; padding: 2px 7px; border: 1px solid var(--line-2);
+  white-space: nowrap;
+}
+.rel-chip.client { background: var(--moss-bg); color: var(--moss); border-color: rgba(15,110,61,0.3); }
+.rel-chip.new { background: var(--paper-2); color: var(--ink-3); }
+
 /* ---------- Collapsed explanations ---------- */
 
 .explainer { border-top: 1px solid var(--line); background: var(--paper); }
 .explainer > summary {
-  cursor: pointer; list-style: none; padding: 10px 22px;
+  cursor: pointer; list-style: none; padding: 11px 22px;
   font-family: var(--mono); font-size: 11px; letter-spacing: 0.06em;
   text-transform: uppercase; color: var(--ink-3);
   display: flex; align-items: center; gap: 8px;
@@ -1591,14 +1894,14 @@ overflow-x: auto;
 .llm-purpose { font-weight: 600; font-size: 14px; }
 .llm-needs { font-size: 12.5px; color: var(--ink-2); margin-top: 3px; max-width: 60ch; line-height: 1.5; }
 .llm-meta {
-  margin-top: 6px; font-family: var(--mono); font-size: 11px;
-  letter-spacing: 0.04em; color: var(--ink-3);
+  margin-top: 6px; font-family: var(--mono); font-size: 11.5px;
+  letter-spacing: 0.02em; color: var(--ink-3);
 }
 .llm-warn { color: var(--amber-ink); }
 .llm-pick { display: flex; align-items: center; gap: 8px; }
 .llm-pick select {
   font: inherit; font-size: 13px; padding: 5px 8px; color: var(--ink);
-  background: var(--surface); border: 1px solid var(--line); border-radius: 4px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-sm);
   max-width: 300px;
 }
 
@@ -1648,8 +1951,8 @@ overflow-x: auto;
 .drawer-section { padding: 16px 18px; border-bottom: 1px solid var(--line); }
 .drawer-section:last-child { border-bottom: none; }
 .drawer-section h3 {
-  margin: 0 0 4px; font-family: var(--mono); font-size: 11px;
-  letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-3);
+  margin: 0 0 6px; font-family: var(--display); font-size: 13.5px;
+  font-weight: 700; letter-spacing: -0.005em; color: var(--ink);
 }
 .drawer-lede { font-size: 13px; line-height: 1.55; color: var(--ink-2); margin: 0 0 14px; }
 
@@ -1668,6 +1971,7 @@ overflow-x: auto;
 .contrib-fill { height: 100%; background: var(--teal); }
 .contrib-ev { font-size: 13px; line-height: 1.5; color: var(--ink-2); }
 .contrib-asks {
+  font-family: var(--small);
   margin-top: 4px; font-size: 12px; line-height: 1.5; color: var(--ink-3);
 }
 
@@ -1704,13 +2008,14 @@ overflow-x: auto;
 
 .key-form { display: flex; align-items: center; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
 .key-label {
-  font-family: var(--mono); font-size: 11px; letter-spacing: 0.04em;
-  color: var(--ink-3); text-transform: uppercase;
+  font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.02em;
+  color: var(--ink-3);
 }
 .key-input {
+  border-radius: var(--radius-sm);
   font: inherit; font-family: var(--mono); font-size: 13px; padding: 6px 9px;
   color: var(--ink); background: var(--surface); border: 1px solid var(--line);
-  border-radius: 4px; flex: 1; min-width: 240px;
+  border-radius: var(--radius-sm); flex: 1; min-width: 240px;
   /* A key is long and unbroken; letting it scroll beats wrapping the row. */
   text-overflow: ellipsis;
 }
