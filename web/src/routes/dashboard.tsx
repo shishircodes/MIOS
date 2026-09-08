@@ -1,11 +1,11 @@
 import { useQuery } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
 import { Link } from '@tanstack/react-router'
-import { useRef } from 'react'
+import { useRef, useState } from 'react'
 import { Loading, Section } from '~/components/ui'
 import { dashboardQueryOptions } from '~/lib/api'
-import { useCountUpAll } from '~/lib/motion'
-import type { Breakdown, DashboardPayload } from '~/lib/types'
+import { useCountUpAll, useDrawPath, useGrowSlices, useReveal } from '~/lib/motion'
+import type { Breakdown, CollectionPoint } from '~/lib/types'
 
 export const Route = createFileRoute('/dashboard')({
   head: () => ({ meta: [{ title: 'Dashboard · MIOS' }] }),
@@ -107,14 +107,48 @@ function Kpi({
   )
 }
 
-/** Two series over the same collections, drawn together.
+const SERIES = [
+  { key: 'au' as const, label: 'Australia', colour: 'var(--teal-2)', dash: undefined },
+  { key: 'png' as const, label: 'Papua New Guinea', colour: 'var(--moss)', dash: '5 3' },
+]
+
+/** Two series over the same collections, drawn together and inspectable.
  *
  *  One chart rather than two stacked ones: the question is whether the two
  *  markets move together, and that cannot be read from charts with independent
- *  vertical scales sitting one above the other.
+ *  vertical scales.
+ *
+ *  Hand-drawn SVG rather than a charting library. Two series over a dozen
+ *  points does not need one, and a library would arrive with its own type
+ *  scale, palette and tooltip to be overridden back into this one — plus a few
+ *  hundred kilobytes for a path and some circles.
+ *
+ *  **Every interaction has a keyboard path.** The readout follows arrow keys as
+ *  well as the pointer, and the legend toggles are real buttons. A hover-only
+ *  chart puts its figures out of reach of anyone not using a mouse, and the
+ *  numbers here are the whole point of it.
  */
-function TrendChart({ data }: { data: DashboardPayload }) {
-  const points = data.collections
+function TrendChart({ points, mode }: { points: CollectionPoint[]; mode: 'line' | 'bar' }) {
+  // Hover and keyboard keep separate cursors, and the keyboard one wins.
+  //
+  // Sharing one piece of state looked simpler and was wrong: `mouseleave`
+  // cleared it, and focusing the chart can scroll it under a stationary
+  // pointer — which fires `mouseleave` and wiped the cursor that focus had
+  // just set. Tabbing to the chart showed nothing until an arrow key was
+  // pressed, so the one affordance a keyboard user needs was invisible.
+  const [hoverAt, setHoverAt] = useState<number | null>(null)
+  const [keyAt, setKeyAt] = useState<number | null>(null)
+  const cursor = keyAt ?? hoverAt
+  const [hidden, setHidden] = useState<Set<string>>(new Set())
+  const auPath = useRef<SVGPathElement>(null)
+  const pngPath = useRef<SVGPathElement>(null)
+  const svgRef = useRef<SVGSVGElement>(null)
+
+  const shown = SERIES.filter((s) => !hidden.has(s.key))
+  const drawKey = `${mode}-${[...hidden].sort().join()}-${points.length}`
+  useDrawPath(auPath, { key: drawKey })
+  useDrawPath(pngPath, { key: drawKey, delay: 0.12 })
+
   if (points.length < 2) {
     return (
       <div className="center-empty">
@@ -125,56 +159,197 @@ function TrendChart({ data }: { data: DashboardPayload }) {
   }
 
   const w = 720
-  const h = 190
-  const pad = { l: 34, r: 12, t: 12, b: 24 }
-  const max = Math.max(...points.map((p) => Math.max(p.au, p.png)), 1)
+  const h = 200
+  const pad = { l: 36, r: 14, t: 14, b: 26 }
+  // Scaled to the visible series only, so hiding the larger one actually
+  // reveals the shape of the smaller rather than leaving it flat at the axis.
+  const max = Math.max(
+    ...points.flatMap((p) => shown.map((s) => p[s.key])), 1,
+  )
   const x = (i: number) => pad.l + (i * (w - pad.l - pad.r)) / (points.length - 1)
   const y = (v: number) => pad.t + (1 - v / max) * (h - pad.t - pad.b)
-  const line = (get: (p: typeof points[number]) => number) =>
-    points.map((p, i) => `${i === 0 ? 'M' : 'L'}${x(i).toFixed(1)},${y(get(p)).toFixed(1)}`).join(' ')
+  const line = (key: 'au' | 'png') =>
+    points.map((p, i) => `${i === 0 ? 'M' : 'L'}${x(i).toFixed(1)},${y(p[key]).toFixed(1)}`).join(' ')
 
-  // Four gridlines, at round fractions of the maximum rather than round
-  // numbers: the scale is signals per collection, which has no natural unit.
-  const grid = [0, 0.25, 0.5, 0.75, 1].map((f) => ({ f, v: Math.round(max * f) }))
+  // Gridlines at fractions of the maximum rather than round numbers: the scale
+  // is signals per collection, which has no natural unit to round to.
+  const grid = [0, 0.25, 0.5, 0.75, 1]
+  const active = cursor === null ? null : points[cursor]
+  const barW = Math.max(4, (w - pad.l - pad.r) / (points.length * 2.6))
+
+  function toggle(key: string) {
+    setHidden((prev) => {
+      const next = new Set(prev)
+      // Never hide the last visible series: an empty chart is not a view of
+      // anything, and the control would have no obvious way back.
+      if (next.has(key)) next.delete(key)
+      else if (next.size < SERIES.length - 1) next.add(key)
+      return next
+    })
+  }
+
+  function nearest(clientX: number): number | null {
+    const svg = svgRef.current
+    if (!svg) return null
+    const rect = svg.getBoundingClientRect()
+    const rel = ((clientX - rect.left) / rect.width) * w
+    let best = 0
+    for (let i = 1; i < points.length; i += 1) {
+      if (Math.abs(x(i) - rel) < Math.abs(x(best) - rel)) best = i
+    }
+    return best
+  }
 
   return (
     <div className="trend">
-      <svg viewBox={`0 0 ${w} ${h}`} className="trend-svg" role="img"
-           aria-label={`Signals per collection, Australia and Papua New Guinea, ${points.length} collections`}>
-        {grid.map(({ f, v }) => (
-          <g key={f}>
-            <line x1={pad.l} x2={w - pad.r} y1={y(max * f)} y2={y(max * f)}
-                  stroke="var(--line)" strokeWidth="1" />
-            <text x={pad.l - 6} y={y(max * f) + 3} textAnchor="end" className="trend-tick">{v}</text>
-          </g>
-        ))}
-        <path d={`${line((p) => p.au)} L${x(points.length - 1)},${y(0)} L${x(0)},${y(0)} Z`}
-              fill="var(--teal)" opacity="0.10" />
-        <path d={line((p) => p.au)} fill="none" stroke="var(--teal-2)" strokeWidth="2"
-              strokeLinejoin="round" strokeLinecap="round" />
-        <path d={line((p) => p.png)} fill="none" stroke="var(--moss)" strokeWidth="2"
-              strokeLinejoin="round" strokeLinecap="round" strokeDasharray="5 3" />
-        {points.map((p, i) => (
-          <g key={p.date}>
-            <circle cx={x(i)} cy={y(p.au)} r="2.6" fill="var(--teal-2)" />
-            <circle cx={x(i)} cy={y(p.png)} r="2.6" fill="var(--moss)" />
-            {/* Every point gets a hit area and a native tooltip: a hover
-                readout that only works with a mouse would leave the figures
-                unreachable on a tablet, which is what the BD team uses. */}
-            <rect x={x(i) - 12} y={pad.t} width="24" height={h - pad.t - pad.b}
-                  fill="transparent">
-              <title>{`${p.date} — ${p.au} Australia, ${p.png} Papua New Guinea`}</title>
-            </rect>
-          </g>
-        ))}
-      </svg>
+      {/* The focusable element is this div, not the <svg> inside it.
+          SVG focus is inconsistent across engines — Chromium will set
+          `document.activeElement` to a focused <svg> without dispatching a
+          single focus event — so hanging the keyboard affordance off it means
+          the readout may never open for a keyboard user, silently and only in
+          some browsers. A div focuses the same way everywhere. */}
+      <div
+        className="trend-plot"
+        tabIndex={0}
+        role="group"
+        aria-label={`Signals per collection across ${points.length} collections. ${
+          shown.map((s) => `${s.label}: ${points.map((p) => p[s.key]).join(', ')}`).join('. ')
+        }. Use the left and right arrow keys to read each collection.`}
+        onMouseMove={(e) => setHoverAt(nearest(e.clientX))}
+        onMouseLeave={() => setHoverAt(null)}
+        onTouchStart={(e) => e.touches[0] && setHoverAt(nearest(e.touches[0].clientX))}
+        onTouchMove={(e) => e.touches[0] && setHoverAt(nearest(e.touches[0].clientX))}
+        // Focus opens the readout at the most recent collection, so tabbing
+        // here shows something rather than requiring a guess that arrows work.
+        onFocus={() => setKeyAt((c) => c ?? points.length - 1)}
+        onBlur={() => setKeyAt(null)}
+        onKeyDown={(e) => {
+          if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+            e.preventDefault()
+            setKeyAt((c) => {
+              const from = c ?? points.length - 1
+              return Math.min(points.length - 1, Math.max(0, from + (e.key === 'ArrowLeft' ? -1 : 1)))
+            })
+          }
+          if (e.key === 'Escape') setKeyAt(null)
+        }}
+      >
+        <svg
+          ref={svgRef}
+          viewBox={`0 0 ${w} ${h}`}
+          className="trend-svg"
+          aria-hidden="true"
+        >
+          {grid.map((f) => (
+            <g key={f}>
+              <line x1={pad.l} x2={w - pad.r} y1={y(max * f)} y2={y(max * f)}
+                    stroke="var(--line)" strokeWidth="1" />
+              <text x={pad.l - 7} y={y(max * f) + 3} textAnchor="end" className="trend-tick">
+                {Math.round(max * f)}
+              </text>
+            </g>
+          ))}
+
+          {/* The cursor rule sits behind the data, so it never crosses a point. */}
+          {cursor !== null && (
+            <line className="trend-cursor" x1={x(cursor)} x2={x(cursor)}
+                  y1={pad.t} y2={h - pad.b} />
+          )}
+
+          {mode === 'line' ? (
+            <>
+              {!hidden.has('au') && (
+                <path d={`${line('au')} L${x(points.length - 1)},${y(0)} L${x(0)},${y(0)} Z`}
+                      fill="var(--teal)" opacity="0.10" className="trend-area" />
+              )}
+              {!hidden.has('au') && (
+                <path ref={auPath} d={line('au')} fill="none" stroke="var(--teal-2)"
+                      strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+              )}
+              {!hidden.has('png') && (
+                <path ref={pngPath} d={line('png')} fill="none" stroke="var(--moss)"
+                      strokeWidth="2" strokeLinejoin="round" strokeLinecap="round"
+                      strokeDasharray="5 3" />
+              )}
+              {points.map((p, i) => (
+                <g key={p.date} className={cursor === i ? 'pt on' : 'pt'}>
+                  {shown.map((s) => (
+                    <circle key={s.key} cx={x(i)} cy={y(p[s.key])} r={cursor === i ? 4.2 : 2.6}
+                            fill={s.colour} />
+                  ))}
+                </g>
+              ))}
+            </>
+          ) : (
+            points.map((p, i) => (
+              <g key={p.date} className={cursor === i ? 'bars on' : 'bars'}>
+                {shown.map((s, si) => {
+                  const offset = shown.length === 1 ? 0 : (si === 0 ? -barW / 2 - 1 : barW / 2 + 1)
+                  return (
+                    <rect key={s.key} className="trend-bar"
+                          x={x(i) + offset - barW / 2} width={barW}
+                          y={y(p[s.key])} height={Math.max(0, y(0) - y(p[s.key]))}
+                          fill={s.colour} rx="1.5" />
+                  )
+                })}
+              </g>
+            ))
+          )}
+        </svg>
+
+        {/* The readout. Positioned along the plot rather than following the
+            pointer: a tooltip that chases the cursor is unreadable on touch and
+            impossible to reach with a keyboard. */}
+        {active && (
+          <div
+            className="trend-read"
+            style={{
+              left: `${(x(cursor!) / w) * 100}%`,
+              transform: cursor! > points.length / 2 ? 'translateX(-100%)' : 'none',
+            }}
+            role="status"
+          >
+            <div className="trend-read-date">{active.date}</div>
+            {shown.map((s) => (
+              <div key={s.key} className="trend-read-row">
+                <i className="swatch" style={{ background: s.colour }} />
+                <span>{s.label}</span>
+                <b className="tnum">{active[s.key]}</b>
+              </div>
+            ))}
+            <div className="trend-read-total">
+              <span>Total</span><b className="tnum">{active.total}</b>
+            </div>
+          </div>
+        )}
+      </div>
+
       <div className="trend-axis">
         <span>{points[0]!.date}</span>
+        <span className="trend-hint">
+          Hover, or focus the chart and use ← →
+        </span>
         <span>{points[points.length - 1]!.date}</span>
       </div>
+
       <div className="legend">
-        <span className="legend-item"><i className="swatch" style={{ background: 'var(--teal-2)' }} />Australia</span>
-        <span className="legend-item"><i className="swatch dashed" style={{ background: 'var(--moss)' }} />Papua New Guinea</span>
+        {SERIES.map((s) => {
+          const off = hidden.has(s.key)
+          return (
+            <button
+              key={s.key}
+              type="button"
+              className={`legend-item toggle${off ? ' off' : ''}`}
+              aria-pressed={!off}
+              onClick={() => toggle(s.key)}
+              title={off ? `Show ${s.label}` : `Hide ${s.label}`}
+            >
+              <i className={`swatch${s.dash ? ' dashed' : ''}`}
+                 style={{ background: off ? 'var(--line-3)' : s.colour }} />
+              {s.label}
+            </button>
+          )
+        })}
       </div>
     </div>
   )
@@ -186,9 +361,15 @@ function TrendChart({ data }: { data: DashboardPayload }) {
  *  slices; a pie needs a legend anyway and compares angles badly.
  */
 function Composition({ items, total }: { items: Breakdown[]; total: number }) {
+  const scope = useRef<HTMLDivElement>(null)
+  const [lit, setLit] = useState<string | null>(null)
+  // Keyed on the shape of the data, so a bar re-grows when the collection
+  // changes rather than only on first mount.
+  useGrowSlices(scope, '.comp-slice', { key: items.map((i) => i.count).join() })
+
   if (!items.length) return <div className="muted comp-empty">Nothing classified in this collection.</div>
   return (
-    <div className="comp">
+    <div className={`comp${lit ? ' has-lit' : ''}`} ref={scope}>
       <div className="comp-bar" role="img"
            aria-label={items.map((s) => `${s.label} ${s.count}`).join(', ')}>
         {items.map((s, i) => (
@@ -196,14 +377,20 @@ function Composition({ items, total }: { items: Breakdown[]; total: number }) {
           // only valid in <head> or inside SVG; nested in a span the browser
           // hoists it and it replaces the document title, which turned the
           // browser tab into "Leadership: 2 of 80".
-          <span key={s.key} className="comp-slice"
+          <span key={s.key}
+                className={`comp-slice${lit === s.key ? ' lit' : ''}`}
                 title={`${s.label}: ${s.count} of ${total}`}
+                onMouseEnter={() => setLit(s.key)}
+                onMouseLeave={() => setLit(null)}
                 style={{ width: `${(s.count / Math.max(total, 1)) * 100}%`, background: sliceColour(i) }} />
         ))}
       </div>
       <ul className="comp-legend">
         {items.map((s, i) => (
-          <li key={s.key}>
+          <li key={s.key}
+              className={lit === s.key ? 'lit' : undefined}
+              onMouseEnter={() => setLit(s.key)}
+              onMouseLeave={() => setLit(null)}>
             <i className="swatch" style={{ background: sliceColour(i) }} />
             <span className="comp-name">{s.label}</span>
             <span className="comp-num tnum">{s.count}</span>
@@ -218,9 +405,15 @@ function Composition({ items, total }: { items: Breakdown[]; total: number }) {
 function DashboardScreen() {
   const { data, isPending, error } = useQuery(dashboardQueryOptions)
   const scope = useRef<HTMLDivElement>(null)
+  const [mode, setMode] = useState<'line' | 'bar'>('line')
 
   // Before the early returns: hooks cannot be called conditionally.
-  useCountUpAll(scope, '.kpi2 .val', data?.latest?.date ?? 'none', { delay: 0.1, stagger: 0.04 })
+  const dataKey = data?.latest?.date ?? 'none'
+  useCountUpAll(scope, '.kpi2 .val, .hero-figure .val', dataKey, { delay: 0.1, stagger: 0.04 })
+  // The panels arrive in reading order rather than all at once. Capped low:
+  // this page has a dozen, and staggering all of them delays the last one past
+  // the point where the movement still reads as arrival.
+  useReveal(scope, '.section, .kpi2', { key: dataKey, delay: 0.05, stagger: 0.04, y: 8, max: 8 })
 
   if (isPending) {
     return (
@@ -333,10 +526,21 @@ function DashboardScreen() {
 
       <Section
         title="Signals per collection"
-        tools={<span>{collections.length} POINTS</span>}
+        tools={
+          <div className="seg" role="group" aria-label="Chart type">
+            {(['line', 'bar'] as const).map((m) => (
+              <button key={m} type="button"
+                      className={`seg-btn${mode === m ? ' on' : ''}`}
+                      aria-pressed={mode === m}
+                      onClick={() => setMode(m)}>
+                {m === 'line' ? 'Line' : 'Bars'}
+              </button>
+            ))}
+          </div>
+        }
       >
         <div style={{ padding: '18px 22px 14px' }}>
-          <TrendChart data={data} />
+          <TrendChart points={collections} mode={mode} />
         </div>
       </Section>
 
@@ -383,7 +587,13 @@ function DashboardScreen() {
             <tbody>
               {companies.map((c) => (
                 <tr key={c.name}>
-                  <td className="co-cell">{c.name}</td>
+                  <td className="co-cell">
+                    {/* The row's purpose is to be followed: a company worth
+                        noticing here is one somebody wants the signals for. */}
+                    <Link to="/monitor/feed" search={{ q: c.name }} className="co-link">
+                      {c.name}
+                    </Link>
+                  </td>
                   <td className="muted">{c.sector}</td>
                   <td className="muted">{c.region}</td>
                   <td>

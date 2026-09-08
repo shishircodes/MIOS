@@ -1654,10 +1654,90 @@ overflow-x: auto;
 /* The PNG series is dashed as well as differently coloured — WCAG 1.4.1. */
 .swatch.dashed { height: 3px; width: 14px; }
 
+/* ---------- Trend chart: the interactive parts ---------- */
+
+.trend-plot { position: relative; }
+.trend-plot:focus { outline: none; }
+.trend-plot:focus-visible { outline: 2px solid var(--teal); outline-offset: 3px; border-radius: var(--radius-sm); }
+.trend-cursor { stroke: var(--teal); stroke-width: 1; stroke-dasharray: 3 3; opacity: 0.75; }
+/* The point under the cursor grows. A transition rather than a tween: it fires
+   on every pointer move, and a JS animation per frame would be waste. */
+.pt circle, .trend-bar { transition: r 120ms ease, opacity 120ms ease; }
+.bars .trend-bar { opacity: 0.78; }
+.bars.on .trend-bar { opacity: 1; }
+
+/* The readout. Anchored to the plot, not the pointer: a tooltip that chases
+   the cursor cannot be reached by keyboard and jumps under a finger. */
+.trend-read {
+  position: absolute; top: 4px; pointer-events: none;
+  background: var(--ink); color: var(--paper);
+  border-radius: var(--radius-sm); box-shadow: var(--shadow-2);
+  padding: 9px 12px; min-width: 196px; z-index: 2;
+}
+.trend-read-date {
+  font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.06em;
+  color: rgba(255,255,255,0.66); margin-bottom: 6px;
+}
+.trend-read-row, .trend-read-total {
+  display: grid; grid-template-columns: 9px 1fr auto; gap: 8px;
+  align-items: center; font-size: 12.5px; padding: 2px 0;
+  /* The longest series name is "Papua New Guinea"; wrapping it made the
+     readout two lines taller than it needed to be. */
+  white-space: nowrap;
+}
+.trend-read-total {
+  grid-template-columns: 1fr auto; margin-top: 5px; padding-top: 5px;
+  border-top: 1px solid rgba(255,255,255,0.18); color: rgba(255,255,255,0.78);
+}
+.trend-read b { color: var(--paper); font-family: var(--mono); }
+
+.trend-hint {
+  font-family: var(--mono); font-size: 10px; color: var(--muted);
+  letter-spacing: 0.04em;
+}
+@media (max-width: 620px) { .trend-hint { display: none; } }
+
+/* Legend entries are buttons, because they do something. */
+.legend-item.toggle {
+  background: none; border: 1px solid transparent; cursor: pointer;
+  font: inherit; font-size: 12.5px; color: var(--ink-2);
+  padding: 3px 8px; border-radius: var(--radius-sm);
+  transition: background 120ms, border-color 120ms, opacity 120ms;
+}
+.legend-item.toggle:hover { background: var(--paper-2); border-color: var(--line); }
+.legend-item.toggle:focus-visible { outline: 2px solid var(--teal); outline-offset: 1px; }
+.legend-item.toggle.off { opacity: 0.5; text-decoration: line-through; }
+
+/* A segmented switch, for a choice between two views of one thing. */
+.seg { display: inline-flex; border: 1px solid var(--line-2); border-radius: var(--radius-sm); overflow: hidden; }
+.seg-btn {
+  font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.05em;
+  text-transform: uppercase; padding: 4px 10px; border: none; cursor: pointer;
+  background: var(--surface); color: var(--ink-3);
+  transition: background 120ms, color 120ms;
+}
+.seg-btn + .seg-btn { border-left: 1px solid var(--line-2); }
+.seg-btn:hover { background: var(--paper-2); color: var(--ink); }
+.seg-btn.on { background: var(--teal-2); color: var(--on-teal); }
+.seg-btn:focus-visible { outline: 2px solid var(--teal); outline-offset: -2px; }
+
+/* Following a company leads to its signals. */
+.co-link { color: inherit; text-decoration: none; border-bottom: 1px solid transparent; }
+.co-link:hover { color: var(--teal-3); border-bottom-color: var(--teal); }
+.co-link:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+
 /* ---------- Composition bar ---------- */
 
 .comp-bar { display: flex; height: 12px; overflow: hidden; background: var(--paper-2); border: 1px solid var(--line); }
-.comp-slice { display: block; height: 100%; min-width: 2px; }
+.comp-slice {
+  display: block; height: 100%; min-width: 2px;
+  transition: opacity 140ms ease;
+}
+.comp.has-lit .comp-slice { opacity: 0.34; }
+.comp.has-lit .comp-slice.lit { opacity: 1; }
+.comp-legend li { transition: background 140ms ease; }
+.comp.has-lit .comp-legend li { opacity: 0.5; }
+.comp.has-lit .comp-legend li.lit { opacity: 1; background: var(--paper-2); }
 .comp-legend { list-style: none; margin: 14px 0 0; padding: 0; }
 .comp-legend li {
   display: grid; grid-template-columns: 12px 1fr auto 52px; gap: 10px;
