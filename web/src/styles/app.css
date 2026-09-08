@@ -139,10 +139,9 @@ input, textarea, select { font-family: inherit; }
   letter-spacing: 0.08em; text-transform: uppercase;
   flex: none; color: var(--ink);
 }
-/* Concentric squares: yellow ground, turquoise core. */
-.brand-mark { width: 24px; height: 24px; background: var(--primary); position: relative; flex-shrink: 0; }
-.brand-mark::after { content: ''; position: absolute; inset: 5px; background: var(--surface-2); }
-.brand-mark::before { content: ''; position: absolute; inset: 10px; background: var(--teal); z-index: 1; }
+/* No brand mark. The concentric-squares placeholder that lived here was never
+   a chosen logo, and a placeholder shown long enough stops reading as one. The
+   wordmark carries the brand until there is something to put beside it. */
 
 .topbar .crumbs { flex: 1; display: flex; align-items: center; gap: 8px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .topbar .crumbs .sep { color: var(--line-3); margin-left: 8px; }
@@ -1253,23 +1252,14 @@ overflow-x: auto;
    query counted, so it is the one section allowed to look like prose. It sits
    between the collection band and forty signal rows, and previously read as a
    third bordered box between two others. */
-.pulse {
-  border: 1px solid var(--teal-line);
-  border-top: 4px solid var(--teal-2);
-  padding: 20px 26px 24px; margin-bottom: 20px;
-  background:
-    linear-gradient(180deg, var(--teal-bg) 0%, rgba(255,255,255,0) 58%),
-    var(--surface);
+/* Market Pulse sits in a plain `.section` like everything else on the page.
+   The card chrome it used to carry — a heavier top border, its own header rule
+   and a gradient wash — made the one written passage on the screen read as an
+   insert from another product instead of the conclusion the tables support. */
+.pulse-list {
+  list-style: none; margin: 0; padding: 18px 22px 20px;
+  display: grid; gap: 14px;
 }
-.pulse-head {
-  display: flex; align-items: baseline; justify-content: space-between;
-  gap: 12px; margin-bottom: 14px;
-  border-bottom: 1px solid var(--teal-line); padding-bottom: 10px;
-}
-.pulse-head .kicker { font-size: 12px; color: var(--teal-3); }
-.pulse-head .muted { font-size: 12px; }
-
-.pulse-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 14px; }
 .pulse-item {
   display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
   /* Larger than body text on purpose. This is the read of the week; the tables
@@ -1284,12 +1274,17 @@ overflow-x: auto;
 /* Interpretation is marked three ways — hollow marker, lighter rule down the
    left, and the tag — so telling a reading from a measurement never depends on
    noticing one small label. */
+/* The rule hangs into the list's own padding so it reads as a margin note.
+   These three numbers are one measurement and must move together: the outdent,
+   the marker's compensating offset, and the text indent (outdent + the 20px the
+   fact items use). At -20 against the section's 22px padding the rule landed 3px
+   from the card border and read as a rendering artefact rather than a marker. */
 .pulse-item.interpretation {
   color: var(--ink-3);
-  border-left: 2px solid var(--line-2); margin-left: -20px; padding-left: 38px;
+  border-left: 2px solid var(--line-2); margin-left: -12px; padding-left: 32px;
 }
 .pulse-item.interpretation::before {
-  left: 20px; background: transparent; border: 1.5px solid var(--muted);
+  left: 12px; background: transparent; border: 1.5px solid var(--muted);
 }
 .pulse-text { flex: 1 1 24ch; min-width: 0; }
 .pulse-tag {
@@ -1478,31 +1473,42 @@ overflow-x: auto;
 }
 
 /* Choosing which past week to read. Sits in the digest page header. */
+/* The week selector. Built to match the app's own controls rather than left as
+   a default select, which rendered three different ways across browsers and sat
+   noticeably unfinished beside everything around it. */
 .digest-pick {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  justify-content: flex-end;
+  display: flex; align-items: center; gap: 9px; justify-content: flex-end;
 }
-
+.digest-pick-label {
+  font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--ink-3); white-space: nowrap;
+}
+.digest-pick-control { position: relative; display: inline-flex; }
 .digest-pick select {
-  font: inherit;
-  font-size: 13px;
-  padding: 4px 8px;
-  color: var(--ink);
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: 4px;
+  font: inherit; font-size: 13px; font-family: var(--sans);
+  /* Room on the right for the drawn caret. */
+  padding: 6px 30px 6px 11px;
+  color: var(--ink); background: var(--surface-2);
+  border: 1px solid var(--line-2); border-radius: 0;
+  cursor: pointer; min-width: 210px;
+  /* The platform arrow is what made this look like an unstyled form control
+     dropped into a designed page. */
+  appearance: none; -webkit-appearance: none;
+  transition: border-color 110ms, background 110ms;
+}
+.digest-pick select:hover { border-color: var(--teal); background: var(--surface); }
+.digest-pick select:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+.digest-pick-caret {
+  position: absolute; right: 11px; top: 50%; transform: translateY(-50%);
+  width: 10px; height: 6px; color: var(--ink-3); pointer-events: none;
 }
 
-/* A stored digest, as opposed to one computed on the spot. */
-.mode-banner.archived {
-  background: var(--navy-bg);
-  color: var(--navy);
-  border-color: var(--line-2);
+@media (max-width: 720px) {
+  .digest-pick { flex-wrap: wrap; justify-content: flex-start; }
+  .digest-pick select { min-width: 0; width: 100%; }
 }
 
-/* ---------- Admin · Models & cost ---------- */
+/* ---------- Admin · Models & keys ---------- */
 
 .usage-list { padding: 12px 16px; display: flex; flex-direction: column; gap: 14px; }
 .usage-row { display: grid; grid-template-columns: 160px 1fr auto; gap: 12px; align-items: center; font-size: 13px; }

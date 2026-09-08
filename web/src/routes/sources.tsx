@@ -155,7 +155,7 @@ function SourcesScreen() {
     <div className="page" ref={scope}>
       <div className="page-header">
         <div>
-          <div className="kicker">Admin · Source health</div>
+          <div className="kicker">Admin · Data sources</div>
           <h1>Data sources</h1>
         </div>
         <div className="meta">

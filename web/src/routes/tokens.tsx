@@ -353,7 +353,7 @@ function ModelsScreen() {
     <div className="page">
       <div className="page-header">
         <div>
-          <div className="kicker">Admin · Models &amp; cost</div>
+          <div className="kicker">Admin · Models &amp; keys</div>
           <h1>Which model answers what</h1>
         </div>
       </div>

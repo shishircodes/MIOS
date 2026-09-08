@@ -163,33 +163,44 @@ function WeeklyDigest() {
               watchlist edit would quietly change. */}
           {(archive.data?.digests.length ?? 0) > 1 && (
             <label className="digest-pick">
-              <span className="fld">Week</span>
-              <select value={runId} onChange={(e) => setRunId(e.target.value)}>
-                <option value="">Latest</option>
-                {archive.data?.digests.map((d) => (
-                  <option key={d.runId} value={d.runId}>
-                    {new Date(d.windowTo).toLocaleDateString('en-AU', {
-                      day: 'numeric', month: 'short', year: 'numeric',
-                    })} · {d.signalCount} signals
-                  </option>
-                ))}
-              </select>
+              <span className="digest-pick-label">Showing</span>
+              <span className="digest-pick-control">
+                <select value={runId} onChange={(e) => setRunId(e.target.value)}>
+                  <option value="">Latest collection</option>
+                  {archive.data?.digests.map((d) => (
+                    <option key={d.runId} value={d.runId}>
+                      {new Date(d.windowTo).toLocaleDateString('en-AU', {
+                        day: 'numeric', month: 'short', year: 'numeric',
+                      })} — {d.signalCount} signal{d.signalCount === 1 ? '' : 's'}
+                    </option>
+                  ))}
+                </select>
+                {/* Drawn rather than left to the platform: a bare select renders
+                    three different ways across browsers, which is most of why
+                    this control looked unfinished next to the app's own. */}
+                <svg className="digest-pick-caret" viewBox="0 0 10 6" aria-hidden="true">
+                  <path d="M1 1l4 4 4-4" fill="none" stroke="currentColor"
+                        strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </span>
             </label>
           )}
-          <div style={{ marginTop: 6, display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
-            {/* An archived digest is a snapshot; a live one is being computed
-                now because nothing has been stored yet. Saying which stops a
-                live computation being read as a published digest. */}
-            {data.archived && (
-              <span className="mode-banner archived" title={`Run ${data.archived.runId.slice(0, 8)}`}>
-                Archived
+          {/* No "Archived" or "Live data" chip. Every digest is archived and
+              every digest is live, so both said the same thing on every visit —
+              a badge that never varies is furniture, and the week selector
+              beside it already says which collection is on screen.
+
+              Sample data is the exception and stays: that badge is the only
+              thing on the page distinguishing a real week from a demonstration
+              one, and it is not the normal state. */}
+          {data.sourceMode !== 'live' && (
+            <div style={{ marginTop: 6, display: 'flex', justifyContent: 'flex-end' }}>
+              <span className="mode-banner synthetic">
+                <span className="dot-warn" />
+                Sample data
               </span>
-            )}
-            <span className={`mode-banner ${data.sourceMode}`}>
-              <span className={data.sourceMode === 'live' ? 'dot-ok' : 'dot-warn'} />
-              {data.sourceMode === 'live' ? 'Live data' : 'Sample data'}
-            </span>
-          </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -332,8 +343,14 @@ function WeeklyDigest() {
       </div>
 
       <div style={{ textAlign: 'center', padding: '24px 0', fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--muted)', letterSpacing: '0.08em' }}>
-        END OF DIGEST · {data.sourceMode === 'live' ? 'LIVE DATA' : 'SAMPLE DATA'}
-        {data.sourceMode === 'live' && ` · ${data.windowEmpty ? 'MOST RECENT COLLECTION' : `LAST ${data.windowDays} DAYS`}`}
+        {/* "LIVE DATA" is dropped here for the same reason as the badge above.
+            "SAMPLE DATA" is not: it is the one case worth repeating at the foot
+            of a long page, where a reader who scrolled past the header would
+            otherwise have no reminder that none of this is real. */}
+        END OF DIGEST
+        {data.sourceMode === 'live'
+          ? ` · ${data.windowEmpty ? 'MOST RECENT COLLECTION' : `LAST ${data.windowDays} DAYS`}`
+          : ' · SAMPLE DATA'}
       </div>
 
       <Drawer open={!!drawer} onClose={() => setDrawer(null)} title={drawer ? `Signal · ${drawer.id.slice(0, 12)}` : ''}>
@@ -366,28 +383,36 @@ function MarketPulseSection({ pulse }: { pulse: MarketPulse }) {
   useReveal(scope, '.pulse-item', { key: pulse.generatedAt, delay: 0.15, stagger: 0.06 })
 
   return (
-    <div className="pulse" ref={scope}>
-      <div className="pulse-head">
-        <span className="kicker">Market Pulse</span>
-        <span className="muted">
-          Written from {pulse.signalsAnalysed.toLocaleString()} signals
-        </span>
-      </div>
-      <ul className="pulse-list">
-        {pulse.bullets.map((b, i) => (
-          <li key={i} className={`pulse-item ${b.kind}`}>
-            <span className="pulse-text">{b.text}</span>
-            {b.kind === 'interpretation' && (
-              <span
-                className="pulse-tag"
-                title="A reading of the data, not a measurement from it"
-              >
-                interpretation
-              </span>
-            )}
-          </li>
-        ))}
-      </ul>
+    // The same chassis as every other block on the page. It used to be a
+    // bespoke card — its own border weight, its own gradient, its own header —
+    // which made the one written passage on the screen look like something
+    // pasted in from a different product rather than the read of the week the
+    // tables underneath it support.
+    //
+    // What is kept is the part that carries meaning: the bullets stay larger
+    // than body text, because this is the conclusion and the tables around it
+    // are the evidence.
+    <div ref={scope}>
+      <Section
+        title="Market Pulse"
+        tools={<span>{pulse.signalsAnalysed.toLocaleString()} SIGNALS READ</span>}
+      >
+        <ul className="pulse-list">
+          {pulse.bullets.map((b, i) => (
+            <li key={i} className={`pulse-item ${b.kind}`}>
+              <span className="pulse-text">{b.text}</span>
+              {b.kind === 'interpretation' && (
+                <span
+                  className="pulse-tag"
+                  title="A reading of the data, not a measurement from it"
+                >
+                  interpretation
+                </span>
+              )}
+            </li>
+          ))}
+        </ul>
+      </Section>
     </div>
   )
 }
