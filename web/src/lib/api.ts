@@ -413,9 +413,35 @@ export const scoringModelQueryOptions = queryOptions({
 })
 
 /** Hiring trends, counted per collection. */
-export const dashboardQueryOptions = queryOptions({
-  queryKey: ['dashboard'],
-  queryFn: () => fetchJson<DashboardPayload>('/api/dashboard'),
-  retry: false,
-})
+export interface DashboardFilters {
+  /** YYYY-MM-DD. Omit for the most recent collection. */
+  collection?: string | null
+  /** 'AU' or 'PNG'. Omit for both. */
+  region?: string | null
+  /** How many collections the chart covers. */
+  trend?: number | null
+}
+
+/** The dashboard, optionally narrowed.
+ *
+ *  The filters are part of the query key, so switching between them keeps each
+ *  result cached — going back to the collection you were just looking at is
+ *  instant rather than another round trip. `placeholderData` keeps the previous
+ *  payload on screen while the next arrives, so changing a filter updates the
+ *  figures in place instead of blanking the page to a spinner.
+ */
+export function dashboardQueryOptions(filters: DashboardFilters = {}) {
+  const params = new URLSearchParams()
+  if (filters.collection) params.set('collection', filters.collection)
+  if (filters.region) params.set('region', filters.region)
+  if (filters.trend) params.set('trend', String(filters.trend))
+  const qs = params.toString()
+  return queryOptions({
+    queryKey: ['dashboard', filters.collection ?? null, filters.region ?? null,
+               filters.trend ?? null],
+    queryFn: () => fetchJson<DashboardPayload>(`/api/dashboard${qs ? `?${qs}` : ''}`),
+    retry: false,
+    placeholderData: (prev: DashboardPayload | undefined) => prev,
+  })
+}
 

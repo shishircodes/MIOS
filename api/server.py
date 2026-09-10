@@ -186,17 +186,28 @@ def digest(
 
 
 @app.get("/api/dashboard")
-def dashboard(user: dict[str, Any] = Depends(require_user)) -> dict:
+def dashboard(
+    collection: str | None = Query(None, description="YYYY-MM-DD; omit for the latest"),
+    region: str | None = Query(None, description="AU or PNG; omit for both"),
+    trend: int | None = Query(None, ge=2, le=52, description="collections in the chart"),
+    user: dict[str, Any] = Depends(require_user),
+) -> dict:
     """Hiring trends, counted from the signals themselves.
 
     A point per collection rather than per calendar week: the pipeline runs
     weekly so they usually coincide, but a missed run leaves a gap a calendar
     series would have to fill, and every way of filling it asserts something
     nobody measured.
+
+    The three filters are validated in the service rather than here, and all
+    three fail soft — an unknown collection date shows the latest, an unknown
+    region shows both. A dashboard is a place somebody arrives from a stale
+    link, and a 422 there is a worse answer than the current week.
     """
-    payload = build_dashboard_payload()
-    log.info("api: /api/dashboard served to %s (%d collections)",
-             user["email"], payload["coverage"]["collections"])
+    payload = build_dashboard_payload(collection=collection, region=region, trend=trend)
+    log.info("api: /api/dashboard served to %s (%d collections, showing %s%s)",
+             user["email"], payload["coverage"]["collections"],
+             payload.get("selected"), f", {payload['region']} only" if payload.get("region") else "")
     return payload
 
 

@@ -18,7 +18,11 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from api.dashboard_service import TREND_COLLECTIONS, build_dashboard_payload
+from api.dashboard_service import (
+    MAX_TREND_COLLECTIONS,
+    TREND_COLLECTIONS,
+    build_dashboard_payload,
+)
 from loader.db import connect
 from loader.ingest import init_db
 
@@ -313,3 +317,115 @@ def test_a_collector_is_listed_once_even_with_mixed_signal_types(db):
 
     assert [s["name"] for s in sources] == ["adzuna"]
     assert sources[0]["count"] == 3
+
+
+# ---------- choosing what is shown ----------
+
+
+def test_a_chosen_collection_replaces_the_latest(db):
+    add(db, day="2026-08-10", region="AU", n=5)
+    add(db, day="2026-08-17", region="AU", n=9)
+
+    p = build_dashboard_payload(db, collection="2026-08-10")
+
+    assert p["selected"] == "2026-08-10"
+    assert p["latest"]["total"] == 5
+    assert p["isLatest"] is False
+
+
+def test_an_older_collection_is_compared_with_the_one_before_it(db):
+    """Not with the newest. Looking back at an earlier week should show the
+    movement that was reported at the time."""
+    add(db, day="2026-08-03", region="AU", n=10)
+    add(db, day="2026-08-10", region="AU", n=5)
+    add(db, day="2026-08-17", region="AU", n=100)
+
+    p = build_dashboard_payload(db, collection="2026-08-10")
+
+    assert p["change"]["total"] == -50.0
+
+
+def test_an_unknown_collection_falls_back_to_the_latest(db):
+    """A dashboard is somewhere people arrive from stale links. Showing the
+    current week beats an empty page or an error."""
+    add(db, day="2026-08-17", region="AU", n=4)
+
+    p = build_dashboard_payload(db, collection="1999-01-01")
+
+    assert p["selected"] == "2026-08-17"
+    assert p["isLatest"] is True
+
+
+def test_the_first_collection_has_nothing_to_compare_with(db):
+    add(db, day="2026-08-10", region="AU", n=5)
+    add(db, day="2026-08-17", region="AU", n=9)
+
+    p = build_dashboard_payload(db, collection="2026-08-10")
+
+    assert p["change"]["total"] is None
+
+
+# ---------- narrowing to one market ----------
+
+
+def test_a_region_narrows_every_panel_and_the_headline(db):
+    add(db, day="2026-08-17", region="AU", sector="mining", n=6)
+    add(db, day="2026-08-17", region="PNG", sector="oil_gas", n=2)
+
+    both = build_dashboard_payload(db)
+    png = build_dashboard_payload(db, region="PNG")
+
+    assert both["latest"]["total"] == 8
+    assert png["latest"]["total"] == 2, "the headline follows the filter"
+    assert [s["key"] for s in png["sectors"]] == ["oil_gas"]
+    assert png["region"] == "PNG"
+
+
+def test_the_trend_chart_keeps_both_series_when_a_region_is_chosen(db):
+    """The chart answers whether the two markets move together. Filtering one
+    out does not narrow that question, it removes it."""
+    add(db, day="2026-08-10", region="AU", n=4)
+    add(db, day="2026-08-10", region="PNG", n=3)
+    add(db, day="2026-08-17", region="AU", n=6)
+    add(db, day="2026-08-17", region="PNG", n=1)
+
+    png = build_dashboard_payload(db, region="PNG")
+
+    assert [(c["au"], c["png"]) for c in png["collections"]] == [(4, 3), (6, 1)]
+
+
+def test_an_unknown_region_shows_both(db):
+    add(db, day="2026-08-17", region="AU", n=3)
+
+    assert build_dashboard_payload(db, region="ATLANTIS")["region"] is None
+
+
+# ---------- how much of the history is charted ----------
+
+
+def test_the_trend_window_caps_the_chart_but_not_the_coverage(db):
+    for i in range(8):
+        add(db, day=f"2026-08-{i + 1:02d}", n=2)
+
+    p = build_dashboard_payload(db, trend=4)
+
+    assert len(p["collections"]) == 4
+    assert p["trendWindow"] == 4
+    assert p["coverage"]["collections"] == 8, "the header still says what exists"
+
+
+def test_the_window_is_clamped_to_something_drawable(db):
+    add(db, day="2026-08-17", n=2)
+
+    assert build_dashboard_payload(db, trend=9999)["trendWindow"] == MAX_TREND_COLLECTIONS
+    assert build_dashboard_payload(db, trend=1)["trendWindow"] == 2
+
+
+def test_every_collection_is_offered_newest_first(db):
+    add(db, day="2026-08-10", n=5)
+    add(db, day="2026-08-17", n=9)
+
+    available = build_dashboard_payload(db)["available"]
+
+    assert [a["date"] for a in available] == ["2026-08-17", "2026-08-10"]
+    assert available[0]["total"] == 9, "the picker can say what each one holds"

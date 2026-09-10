@@ -619,6 +619,18 @@ export interface DashboardPayload {
   /** What the charts actually stand on, rather than what they promise. */
   coverage: { collections: number; from: string | null; to: string | null }
   trendWindow: number
+  /** Window sizes the interface offers for the chart. */
+  trendChoices: number[]
+  /** Every selectable collection, newest first, with what each holds — so the
+   *  picker can say more than a bare date. */
+  available: CollectionPoint[]
+  /** The collection the panels describe. */
+  selected: string | null
+  /** The market everything is narrowed to, or null for both. */
+  region: string | null
+  /** False when the panels describe an older collection. The interface says so:
+   *  a figure from three weeks ago shown without comment reads as current. */
+  isLatest: boolean
 }
 
 /** One slice of a composition, with its share of the whole already computed. */

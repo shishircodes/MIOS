@@ -42,7 +42,7 @@ const NAV = [
   // "what happened this week" before anybody chooses which of the modes to open.
   // It used to sit under REFERENCE, three groups down, which put the overview
   // below the detail it summarises.
-  { group: 'OVERVIEW', items: [{ to: '/dashboard', label: 'Dashboard', icon: 'dash' }] },
+  { group: 'OVERVIEW', items: [{ to: '/', label: 'Dashboard', icon: 'dash' }] },
   {
     group: 'INTELLIGENCE',
     items: [
@@ -83,7 +83,7 @@ const CRUMBS: Record<string, string[]> = {
   '/push': ['Mode Push', 'Submit profile'],
   '/publish': ['Mode Publish', 'Quarterly report'],
   '/watchlist': ['Reference', 'Watchlist'],
-  '/dashboard': ['Overview', 'Dashboard'],
+  '/': ['Overview', 'Dashboard'],
   '/sources': ['Admin', 'Data sources'],
   '/access': ['Admin', 'People & access'],
   '/tokens': ['Admin', 'Models & keys'],
@@ -98,9 +98,9 @@ const CONNECTION = {
 } as const
 
 const SIGNIN_PATH = '/signin'
-//: Where a signed-in user lands. The dashboard rather than the digest: it says
-//: what the week looked like in one screen, and the digest is one click from it.
-const DEFAULT_LANDING = '/dashboard'
+//: Where a signed-in user lands. The dashboard, which is the site root: it says
+//: what the week looked like in one screen, and the digest is one click away.
+const DEFAULT_LANDING = '/'
 
 /**
  * Routes between the sign-in screen and the dashboard, and supplies the shell.
