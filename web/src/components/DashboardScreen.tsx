@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 import { useRef, useState } from 'react'
-import { Explainer, Loading, Section } from '~/components/ui'
+import { Explainer, Icons, Loading, Section } from '~/components/ui'
 import { dashboardQueryOptions } from '~/lib/api'
 import type { DashboardFilters } from '~/lib/api'
 import { useDrawPath, useFigure, useGrowSlices, useReveal } from '~/lib/motion'
@@ -74,7 +74,7 @@ function Spark({ points, colour = 'var(--teal)' }: { points: number[]; colour?: 
 }
 
 function Kpi({
-  label, value, suffix, delta, points, colour, foot,
+  label, value, suffix, delta, points, colour, foot, icon, mark, against,
 }: {
   label: string
   value: number | string
@@ -83,6 +83,14 @@ function Kpi({
   points?: number[]
   colour?: string
   foot?: string
+  /** A glyph for the tile's corner. */
+  icon?: keyof typeof Icons
+  /** A colour chip instead of a glyph, for the two markets: a region has no
+   *  icon that means anything, and its series colour does. */
+  mark?: string
+  /** What the delta is measured against, printed rather than implied. A
+   *  percentage with no comparison beside it is the weaker half of the pair. */
+  against?: string
 }) {
   // The value comes from the prop, not from reading the rendered text.
   //
@@ -97,7 +105,12 @@ function Kpi({
 
   return (
     <div className="kpi2">
-      <div className="kpi2-label">{label}</div>
+      <div className="kpi2-head">
+        {mark
+          ? <span className="kpi2-mark" style={{ background: mark }} aria-hidden="true" />
+          : icon && <span className="kpi2-icon" aria-hidden="true">{Icons[icon]}</span>}
+        <span className="kpi2-label">{label}</span>
+      </div>
       <div className="kpi2-value">
         {/* The number stays alone in .val: the count-up rewrites its text
             content, so anything sharing the node would be overwritten. */}
@@ -106,6 +119,7 @@ function Kpi({
       </div>
       <div className="kpi2-foot">
         {delta !== undefined && <Delta pct={delta} quiet />}
+        {against && <span className="muted">vs {against}</span>}
         {foot && <span className="muted">{foot}</span>}
       </div>
       {points && <Spark points={points} colour={colour} />}
@@ -486,6 +500,14 @@ export function DashboardScreen() {
     })
     .join(' ')
 
+  // The collection the deltas are measured against, and two figures the chart
+  // card's summary shows. All read off the same `collections` the chart draws.
+  const idx = collections.findIndex((c) => c.date === selected)
+  const prior = idx > 0 ? collections[idx - 1] : null
+  const average = Math.round(
+    collections.reduce((n, c) => n + c.total, 0) / Math.max(collections.length, 1))
+  const best = collections.reduce((a, b) => (b.total > a.total ? b : a))
+
   const auPoints = collections.map((c) => c.au)
   const pngPoints = collections.map((c) => c.png)
   const totalPoints = collections.map((c) => c.total)
@@ -659,166 +681,205 @@ export function DashboardScreen() {
       {/* ---------- KPI strip ---------- */}
       <div className="kpi2-row">
         <Kpi label="Australia" value={latest.au} delta={change.au}
-             points={auPoints} colour="var(--teal)" />
+             points={auPoints} colour="var(--teal)" mark="var(--teal)"
+             against={prior ? `${prior.au} on ${prior.date}` : undefined} />
         <Kpi label="Papua New Guinea" value={latest.png} delta={change.png}
-             points={pngPoints} colour="var(--moss)" />
+             points={pngPoints} colour="var(--moss)" mark="var(--moss)"
+             against={prior ? `${prior.png} on ${prior.date}` : undefined} />
         <Kpi label="Watchlist seen" value={watchlist.seen} suffix={`of ${watchlist.total}`}
-             foot={`${watchlist.seenShare}% of the list appeared`} />
-        <Kpi label="New names" value={newNames}
+             icon="watch" foot={`${watchlist.seenShare}% of the list appeared`} />
+        <Kpi label="New names" value={newNames} icon="people"
              foot="companies not on the watchlist" />
       </div>
 
-      <Section
-        title="Signals per collection"
-        tools={
-          <div className="seg" role="group" aria-label="Chart type">
-            {(['line', 'bar'] as const).map((m) => (
-              <button key={m} type="button"
-                      className={`seg-btn${mode === m ? ' on' : ''}`}
-                      aria-pressed={mode === m}
-                      onClick={() => setMode(m)}>
-                {m === 'line' ? 'Line' : 'Bars'}
-              </button>
-            ))}
-          </div>
-        }
-      >
-        <div style={{ padding: '18px 22px 14px' }}>
-          <TrendChart points={collections} mode={mode} />
+      {/* ---------- main column and rail ----------
+          Both references run a wide main column beside a narrow rail of dense
+          panels, and that is most of the difference between a dashboard and a
+          stack of cards. A single column of full-width panels made a short page
+          long and left every card mostly empty. */}
+      <div className="dash-grid">
+        <div className="dash-main">
+          <Section
+            title="Signals per collection"
+            tools={
+              <div className="seg" role="group" aria-label="Chart type">
+                {(['line', 'bar'] as const).map((m) => (
+                  <button key={m} type="button"
+                          className={`seg-btn${mode === m ? ' on' : ''}`}
+                          aria-pressed={mode === m}
+                          onClick={() => setMode(m)}>
+                    {m === 'line' ? 'Line' : 'Bars'}
+                  </button>
+                ))}
+              </div>
+            }
+          >
+            <div className="chart-wrap">
+              <div className="chart-plot">
+                <TrendChart points={collections} mode={mode} />
+              </div>
+              {/* A summary beside the plot, the way the reference puts income
+                  and expense beside its cash flow. Every figure is read off the
+                  same collections the chart draws. */}
+              <div className="chart-side">
+                <div className="chart-stat">
+                  <span className="chart-stat-icon" aria-hidden="true">{Icons.spark}</span>
+                  <div>
+                    <div className="chart-stat-label">This collection</div>
+                    <div className="chart-stat-value tnum">{latest.total}</div>
+                    <Delta pct={change.total} quiet />
+                  </div>
+                </div>
+                <div className="chart-stat">
+                  <span className="chart-stat-icon alt" aria-hidden="true">{Icons.arrow}</span>
+                  <div>
+                    <div className="chart-stat-label">Average per collection</div>
+                    <div className="chart-stat-value tnum">{average}</div>
+                    <span className="chart-stat-note">across {collections.length} charted</span>
+                  </div>
+                </div>
+                <div className="chart-stat">
+                  <span className="chart-stat-icon alt" aria-hidden="true">{Icons.watch}</span>
+                  <div>
+                    <div className="chart-stat-label">Largest collection</div>
+                    <div className="chart-stat-value tnum">{best.total}</div>
+                    <span className="chart-stat-note">{best.date}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <Explainer title="Why collections, not calendar weeks">
+              <p>
+                Each point is one collection, not one calendar week. The pipeline runs
+                weekly so the two usually coincide &mdash; but when a run is missed, a
+                calendar chart has to draw something for the gap, and every option
+                misleads: a zero says nobody was hiring, a joined line invents a
+                measurement, and repeating the last value states it twice.
+              </p>
+              <p>
+                Movement is measured against the previous collection. Where there is no
+                earlier one, the tile says so instead of showing a direction it cannot
+                justify.
+              </p>
+              <p>
+                Only classified signals are counted here. A row that has been collected
+                but not yet read has no sector or region, so including it would move the
+                totals without being able to say where.
+              </p>
+            </Explainer>
+          </Section>
+
+          <Section
+            title="Most active companies"
+            tools={<span>{companies.length} SHOWN</span>}
+          >
+            {companies.length === 0 ? (
+              <div className="center-empty">No company could be identified in this collection.</div>
+            ) : (
+              <table className="tbl co-table">
+                <thead>
+                  <tr>
+                    <th>Company</th><th>Sector</th><th>Region</th><th>Relationship</th>
+                    <th className="num">Signals</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {companies.map((c) => (
+                    <tr key={c.name}>
+                      <td>
+                        <span className="co-cell">
+                          {/* An initial where the references carry a logo.
+                              Derived from the name, so it is always right and
+                              never has to be fetched. */}
+                          <span className="co-mark" aria-hidden="true">{c.name.charAt(0)}</span>
+                          <Link to="/monitor/feed" search={{ q: c.name }} className="co-link">
+                            {c.name}
+                          </Link>
+                        </span>
+                      </td>
+                      <td className="muted">{c.sector}</td>
+                      <td className="muted">{c.region}</td>
+                      <td>
+                        {c.tier
+                          ? <span className="rel-chip client">Tier {c.tier} client</span>
+                          : <span className="rel-chip new">{c.isNew ? 'New name' : 'Not on the list'}</span>}
+                      </td>
+                      <td className="num">
+                        <span className="co-bar" style={{
+                          width: `${(c.count / Math.max(companies[0]!.count, 1)) * 100}%`,
+                        }} />
+                        <b className="tnum">{c.count}</b>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </Section>
         </div>
-        <Explainer title="Why collections, not calendar weeks">
-          <p>
-            Each point is one collection, not one calendar week. The pipeline runs weekly
-            so the two usually coincide — but when a run is missed, a calendar chart has
-            to draw something for the gap, and every option misleads: a zero says nobody
-            was hiring, a joined line invents a measurement, and repeating the last value
-            states it twice.
-          </p>
-          <p>
-            Movement is measured against the previous collection. Where there is no
-            earlier one, the tile says so instead of showing a direction it cannot
-            justify.
-          </p>
-          <p>
-            Only classified signals are counted here. A row that has been collected but
-            not yet read has no sector or region, so including it would move the totals
-            without being able to say where.
-          </p>
-        </Explainer>
-      </Section>
 
-      {/* ---------- what kind of week ---------- */}
-      <div className="split-2">
-        <Section
-          title="What kind of week"
-          tools={acting ? <span>{acting.share}% ACTIONABLE</span> : undefined}
-        >
-          <div style={{ padding: '16px 22px 18px' }}>
-            <Composition items={groups} total={latest.total} />
-          </div>
-          {/* The one judgement on the page, and what it rests on. Collapsed, but
-              first in its own card rather than in a note at the foot of the
-              page: somebody questioning the number is looking at this panel. */}
-          <Explainer title="What counts as a decision point">
-            <p>
-              <b>This grouping is a judgement, not a measurement.</b> Treating a project or
-              a leadership change as a decision point and a vacancy as routine is an
-              editorial call about what usually merits a call. The signal categories
-              panel below shows what the classifier actually recorded.
-            </p>
-            <ul className="group-notes">
-              {groups.map((g) => (
-                <li key={g.key}>
-                  <b>{g.label}.</b> {g.what}
-                </li>
-              ))}
-            </ul>
-          </Explainer>
-        </Section>
+        <div className="dash-rail">
+          <Section
+            title="What kind of week"
+            tools={acting ? <span>{acting.share}% ACTIONABLE</span> : undefined}
+          >
+            <div className="rail-body">
+              <Composition items={groups} total={latest.total} />
+            </div>
+            <Explainer title="What counts as a decision point">
+              <p>
+                <b>This grouping is a judgement, not a measurement.</b> Treating a project
+                or a leadership change as a decision point and a vacancy as routine is an
+                editorial call about what usually merits a call. The signal categories
+                panel below shows what the classifier actually recorded.
+              </p>
+              <ul className="group-notes">
+                {groups.map((g) => (
+                  <li key={g.key}>
+                    <b>{g.label}.</b> {g.what}
+                  </li>
+                ))}
+              </ul>
+            </Explainer>
+          </Section>
 
-        <Section title={`Sectors · ${latest.date}`}>
-          <div style={{ padding: '16px 22px 18px' }}>
-            <Composition items={sectors} total={latest.total} />
-          </div>
-        </Section>
-      </div>
+          <Section title="Sectors">
+            <div className="rail-body">
+              <Composition items={sectors} total={latest.total} />
+            </div>
+          </Section>
 
-      {/* ---------- most active companies ---------- */}
-      <Section
-        title="Most active companies"
-        tools={<span>COLLECTION OF {latest.date}</span>}
-      >
-        {companies.length === 0 ? (
-          <div className="center-empty">No company could be identified in this collection.</div>
-        ) : (
-          <table className="tbl co-table">
-            <thead>
-              <tr>
-                <th>Company</th><th>Sector</th><th>Region</th><th>Relationship</th>
-                <th className="num">Signals</th>
-              </tr>
-            </thead>
-            <tbody>
-              {companies.map((c) => (
-                <tr key={c.name}>
-                  <td className="co-cell">
-                    {/* The row's purpose is to be followed: a company worth
-                        noticing here is one somebody wants the signals for. */}
-                    <Link to="/monitor/feed" search={{ q: c.name }} className="co-link">
-                      {c.name}
-                    </Link>
-                  </td>
-                  <td className="muted">{c.sector}</td>
-                  <td className="muted">{c.region}</td>
-                  <td>
-                    {c.tier
-                      ? <span className="rel-chip client">Tier {c.tier} client</span>
-                      : <span className="rel-chip new">{c.isNew ? 'New name' : 'Not on the list'}</span>}
-                  </td>
-                  <td className="num">
-                    <span className="co-bar" style={{
-                      width: `${(c.count / Math.max(companies[0]!.count, 1)) * 100}%`,
-                    }} />
-                    <b className="tnum">{c.count}</b>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </Section>
+          <Section title="Signal categories">
+            <div className="rail-body">
+              <Composition items={categories} total={latest.total} />
+            </div>
+          </Section>
 
-      {/* ---------- collectors and detail ---------- */}
-      <div className="split-2">
-        <Section title="Where it came from">
-          <div style={{ padding: '16px 22px 18px' }}>
-            <Composition
-              items={sources.map((s) => ({
-                key: s.name, label: s.name, count: s.count, share: s.share,
-              }))}
-              total={sources.reduce((n, s) => n + s.count, 0)}
-            />
-          </div>
-          <Explainer title="Why this adds up differently">
-            <p>
-              These count what each source <i>collected</i>, including rows still awaiting
-              classification — a row not yet read was still collected by its source, and
-              excluding it would understate a scraper that ran perfectly. Every other
-              panel counts classified signals only, so this total can be higher.
-            </p>
-            <p>
-              A source missing from this list contributed nothing to the collection, which
-              is the quickest way to see a scraper that has quietly stopped working.
-              {' '}<Link to="/sources">Source health →</Link>
-            </p>
-          </Explainer>
-        </Section>
-
-        <Section title="Signal categories">
-          <div style={{ padding: '16px 22px 18px' }}>
-            <Composition items={categories} total={latest.total} />
-          </div>
-        </Section>
+          <Section title="Where it came from">
+            <div className="rail-body">
+              <Composition
+                items={sources.map((s) => ({
+                  key: s.name, label: s.name, count: s.count, share: s.share,
+                }))}
+                total={sources.reduce((n, s) => n + s.count, 0)}
+              />
+            </div>
+            <Explainer title="Why this adds up differently">
+              <p>
+                These count what each source <i>collected</i>, including rows still
+                awaiting classification &mdash; a row not yet read was still collected by
+                its source, and excluding it would understate a scraper that ran
+                perfectly. Every other panel counts classified signals only, so this total
+                can be higher.
+              </p>
+              <p>
+                A source missing from this list contributed nothing to the collection,
+                which is the quickest way to see a scraper that has quietly stopped
+                working. <Link to="/sources">Source health &rarr;</Link>
+              </p>
+            </Explainer>
+          </Section>
+        </div>
       </div>
 
     </div>

@@ -1721,6 +1721,84 @@ overflow-x: auto;
 
 .h1-qualifier { color: var(--ink-3); font-weight: 400; }
 
+/* ---------- Dashboard layout ----------
+   A wide main column beside a rail of dense panels. One column of full-width
+   cards made a short page long and left each card mostly empty; the rail gives
+   the compositions somewhere to live at a size that suits them. */
+
+.dash-grid { display: grid; grid-template-columns: minmax(0, 1.95fr) minmax(280px, 1fr); gap: 18px; align-items: start; }
+.dash-main, .dash-rail { min-width: 0; }
+/* The rail's cards are read as a set, so they sit closer together than the
+   main column's. */
+.dash-rail .section { margin-bottom: 14px; }
+.rail-body { padding: 15px 18px 17px; }
+
+@media (max-width: 1080px) {
+  .dash-grid { grid-template-columns: 1fr; }
+}
+
+/* ---------- The chart card's own summary rail ---------- */
+
+.chart-wrap { display: grid; grid-template-columns: minmax(0, 1fr) 208px; }
+.chart-plot { padding: 18px 20px 14px; min-width: 0; }
+.chart-side {
+  border-left: 1px solid var(--line); background: var(--surface-2);
+  padding: 16px 16px; display: flex; flex-direction: column; gap: 4px;
+  justify-content: center;
+}
+@media (max-width: 860px) {
+  .chart-wrap { grid-template-columns: 1fr; }
+  .chart-side { border-left: none; border-top: 1px solid var(--line); flex-direction: row; flex-wrap: wrap; }
+  .chart-stat { flex: 1 1 160px; }
+}
+
+.chart-stat { display: flex; gap: 11px; align-items: flex-start; padding: 9px 0; }
+.chart-stat + .chart-stat { border-top: 1px solid var(--line); }
+/* A filled tile, the way the reference anchors each figure. Square like
+   everything else here rather than the reference's circle. */
+.chart-stat-icon {
+  flex-shrink: 0; width: 30px; height: 30px; border-radius: var(--radius-sm);
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--teal-2); color: var(--on-teal);
+}
+.chart-stat-icon.alt { background: var(--paper-2); color: var(--ink-3); }
+.chart-stat-icon svg { width: 15px; height: 15px; }
+.chart-stat-label {
+  font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.07em;
+  text-transform: uppercase; color: var(--muted);
+}
+.chart-stat-value {
+  font-family: var(--display); font-size: 20px; font-weight: 700;
+  color: var(--ink); line-height: 1.15; margin: 2px 0 1px;
+}
+.chart-stat-note { font-family: var(--small); font-size: 11px; color: var(--ink-3); }
+
+/* ---------- KPI tiles: an anchor and a comparison ---------- */
+
+.kpi2-head { display: flex; align-items: center; gap: 8px; }
+.kpi2-icon {
+  width: 22px; height: 22px; border-radius: var(--radius-sm); flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--teal-bg); color: var(--teal-3);
+}
+.kpi2-icon svg { width: 13px; height: 13px; }
+/* A region has no icon that means anything, and its series colour does. */
+.kpi2-mark { width: 9px; height: 9px; border-radius: 2px; flex-shrink: 0; }
+
+/* ---------- The companies table ---------- */
+
+.co-cell { display: flex; align-items: center; gap: 10px; }
+/* Where the references carry a logo. Derived from the name, so it is always
+   right and never has to be fetched. */
+.co-mark {
+  width: 24px; height: 24px; border-radius: var(--radius-sm); flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--paper-2); border: 1px solid var(--line-2);
+  font-family: var(--display); font-size: 11.5px; font-weight: 700; color: var(--ink-3);
+}
+.co-table tbody tr { transition: background 120ms ease; }
+.co-table tbody tr:hover { background: var(--surface-2); }
+
 /* ---------- Dashboard controls ----------
    In the page header, not a band of their own. A full-width control panel
    between the title and the first figure was the most prominent thing on a
