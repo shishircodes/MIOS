@@ -476,6 +476,16 @@ export function DashboardScreen() {
     { value: coverage.collections, label: 'All' },
   ]
 
+  // The decorative trace behind the hero. Built from the same collections the
+  // chart draws, so it cannot show a different history from the one below it.
+  const traceMax = Math.max(...collections.map((c) => c.total), 1)
+  const heroTrace = collections
+    .map((c, i) => {
+      const x = collections.length === 1 ? 0 : (i / (collections.length - 1)) * 300
+      return `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${(60 - (c.total / traceMax) * 46 - 7).toFixed(1)}`
+    })
+    .join(' ')
+
   const auPoints = collections.map((c) => c.au)
   const pngPoints = collections.map((c) => c.png)
   const totalPoints = collections.map((c) => c.total)
@@ -494,82 +504,83 @@ export function DashboardScreen() {
             {region && <span className="h1-qualifier"> · {REGION_LABEL[region] ?? region}</span>}
           </h1>
         </div>
-        <div className="meta">
-          <div>
-            {coverage.collections} collection{coverage.collections === 1 ? '' : 's'}
-            {coverage.collections > trendWindow && ` · last ${trendWindow} charted`}
-          </div>
-          <div style={{ marginTop: 4 }}>{coverage.from} to {coverage.to}</div>
-        </div>
-      </div>
+        {/* The filters live in the header rather than in a band of their own.
+            A full-width control panel between the title and the first figure
+            was the most prominent thing on a page whose job is to show
+            numbers, and it pushed the data below the fold. Here they are
+            available without being addressed first. */}
+        <div className="meta hdr-meta">
+        <div className={`hdr-controls${isFetching ? ' busy' : ''}`}>
+          <label className="ctl">
+            <span className="ctl-label">Collection</span>
+            <span className="ctl-select">
+              <select
+                value={selected ?? ''}
+                onChange={(e) => narrow({ collection: e.target.value || null })}
+              >
+                {available.map((c) => (
+                  <option key={c.date} value={c.date}>
+                    {c.date} — {c.total} signal{c.total === 1 ? '' : 's'}
+                  </option>
+                ))}
+              </select>
+              <svg className="ctl-caret" viewBox="0 0 10 6" aria-hidden="true">
+                <path d="M1 1l4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.5"
+                      strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </span>
+          </label>
 
-      {/* ---------- controls ----------
-          Above the figures, because they change what every figure below means.
-          A filter discovered after reading the numbers has already misled. */}
-      <div className={`controls${isFetching ? ' busy' : ''}`}>
-        <label className="ctl">
-          <span className="ctl-label">Collection</span>
-          <span className="ctl-select">
-            <select
-              value={selected ?? ''}
-              onChange={(e) => narrow({ collection: e.target.value || null })}
-            >
-              {available.map((c) => (
-                <option key={c.date} value={c.date}>
-                  {c.date} — {c.total} signal{c.total === 1 ? '' : 's'}
-                </option>
-              ))}
-            </select>
-            <svg className="ctl-caret" viewBox="0 0 10 6" aria-hidden="true">
-              <path d="M1 1l4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.5"
-                    strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </span>
-        </label>
-
-        <div className="ctl">
-          <span className="ctl-label">Market</span>
-          <div className="seg" role="group" aria-label="Market">
-            {[
-              { v: null, label: 'Both' },
-              { v: 'AU', label: 'Australia' },
-              { v: 'PNG', label: 'PNG' },
-            ].map((o) => (
-              <button key={o.label} type="button"
-                      className={`seg-btn${(region ?? null) === o.v ? ' on' : ''}`}
-                      aria-pressed={(region ?? null) === o.v}
-                      onClick={() => narrow({ region: o.v })}>
-                {o.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Only the windows that are actually shorter than the history, plus
-            one "All". Offering 4 / 8 / 12 / 26 against six collections gave
-            three buttons that all said "All" and all did the same thing. */}
-        {windowChoices.length > 1 && (
           <div className="ctl">
-            <span className="ctl-label">Chart covers</span>
-            <div className="seg" role="group" aria-label="Collections in the chart">
-              {windowChoices.map((c) => (
-                <button key={c.label} type="button"
-                        className={`seg-btn${trendWindow === c.value ? ' on' : ''}`}
-                        aria-pressed={trendWindow === c.value}
-                        onClick={() => narrow({ trend: c.value })}>
-                  {c.label}
+            <span className="ctl-label">Market</span>
+            <div className="seg" role="group" aria-label="Market">
+              {[
+                { v: null, label: 'Both' },
+                { v: 'AU', label: 'Australia' },
+                { v: 'PNG', label: 'PNG' },
+              ].map((o) => (
+                <button key={o.label} type="button"
+                        className={`seg-btn${(region ?? null) === o.v ? ' on' : ''}`}
+                        aria-pressed={(region ?? null) === o.v}
+                        onClick={() => narrow({ region: o.v })}>
+                  {o.label}
                 </button>
               ))}
             </div>
           </div>
-        )}
 
-        {(selected !== available[0]?.date || region) && (
-          <button className="btn sm ghost ctl-reset"
-                  onClick={() => setFilters({})}>
-            Reset
-          </button>
-        )}
+          {/* Only the windows that are actually shorter than the history, plus
+              one "All". Offering 4 / 8 / 12 / 26 against six collections gave
+              three buttons that all said "All" and all did the same thing. */}
+          {windowChoices.length > 1 && (
+            <div className="ctl">
+              <span className="ctl-label">Chart covers</span>
+              <div className="seg" role="group" aria-label="Collections in the chart">
+                {windowChoices.map((c) => (
+                  <button key={c.label} type="button"
+                          className={`seg-btn${trendWindow === c.value ? ' on' : ''}`}
+                          aria-pressed={trendWindow === c.value}
+                          onClick={() => narrow({ trend: c.value })}>
+                    {c.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {(selected !== available[0]?.date || region) && (
+            <button className="btn sm ghost ctl-reset"
+                    onClick={() => setFilters({})}>
+              Reset
+            </button>
+          )}
+        </div>
+          <div className="hdr-coverage">
+            {coverage.collections} collection{coverage.collections === 1 ? '' : 's'}
+            {coverage.collections > trendWindow && ` · last ${trendWindow} charted`}
+            {' · '}{coverage.from} to {coverage.to}
+          </div>
+        </div>
       </div>
 
       {/* A figure from three weeks ago shown without comment reads as current. */}
@@ -585,14 +596,37 @@ export function DashboardScreen() {
 
       {/* ---------- the hero band ---------- */}
       <div className="hero">
+        {/* The run of collections, drawn faintly across the band. Decorative:
+            the same series is charted properly below with its axis and its
+            readout, and this is here so the headline figure sits on the shape
+            it came from rather than on nothing. */}
+        <svg className="hero-trace" viewBox="0 0 300 60" preserveAspectRatio="none"
+             aria-hidden="true">
+          <path d={heroTrace} fill="none" stroke="currentColor" strokeWidth="1.5"
+                strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+        </svg>
         <div className="hero-main">
           <div className="hero-label">Signals · collection of {latest.date}</div>
           <div className="hero-figure">
             <span className="val tnum" ref={heroRef}>{latest.total}</span>
             <Delta pct={change.total} />
           </div>
+          {/* The split as a bar as well as two figures. Two numbers side by
+              side have to be compared; a bar is already the comparison, and
+              this is the one proportion the page is about. */}
+          <div className="hero-bar" role="img"
+               aria-label={`${latest.au} from Australia, ${latest.png} from Papua New Guinea`}>
+            <span style={{
+              width: `${(latest.au / Math.max(latest.au + latest.png, 1)) * 100}%`,
+              background: 'var(--teal)',
+            }} />
+            <span style={{
+              width: `${(latest.png / Math.max(latest.au + latest.png, 1)) * 100}%`,
+              background: 'var(--moss)',
+            }} />
+          </div>
           <div className="hero-split">
-            <span><i className="swatch" style={{ background: 'var(--teal-2)' }} />
+            <span><i className="swatch" style={{ background: 'var(--teal)' }} />
               {REGION_LABEL.AU} <b className="tnum">{latest.au}</b></span>
             <span><i className="swatch" style={{ background: 'var(--moss)' }} />
               {REGION_LABEL.PNG} <b className="tnum">{latest.png}</b></span>

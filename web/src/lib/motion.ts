@@ -108,7 +108,28 @@ export function useCountUp(
       // Never leave a rounding artefact as the final rendered value.
       onComplete: () => render(value),
     })
+
+    // A safety net, because the animation is the only thing writing this number
+    // once it has started.
+    //
+    // GSAP runs on requestAnimationFrame, which does not fire at all in a
+    // backgrounded tab, in some embedded webviews, or under aggressive power
+    // saving. A tween that never gets a frame freezes wherever it was — and
+    // since it had already overwritten the rendered value, the figure on screen
+    // stays wrong indefinitely. Observed directly: a count-up to 80 stopped at
+    // 31 and stayed there while the API had plainly returned 80.
+    //
+    // setTimeout keeps running where rAF does not, so this guarantees the true
+    // figure lands whatever happens to the frame loop. It fires well after the
+    // tween should have finished, so a normal run has always completed first
+    // and this writes the value that is already there.
+    const settle = setTimeout(
+      () => { if (!tween.isActive() || tween.progress() < 1) render(value) },
+      (delay + duration) * 1000 + 400,
+    )
+
     return () => {
+      clearTimeout(settle)
       tween.kill()
       render(value)
     }
