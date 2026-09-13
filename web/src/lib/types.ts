@@ -614,6 +614,8 @@ export interface DashboardPayload {
     status: string
     finishedAt: string | null
     collected: number
+    /** Set when the run finished but left rows unclassified. */
+    note: string | null
   } | null
   watchlist: {
     total: number

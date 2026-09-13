@@ -280,7 +280,7 @@ def build_dashboard_payload(
             run_row = None
             try:
                 run_row = conn.execute(
-                    "SELECT id, trigger, status, started_at, finished_at, collected "
+                    "SELECT id, trigger, status, started_at, finished_at, collected, note "
                     "FROM pipeline_runs ORDER BY started_at DESC LIMIT 1"
                 ).fetchone()
             except Exception as exc:  # noqa: BLE001 - the log may not exist yet
@@ -390,6 +390,9 @@ def build_dashboard_payload(
             "status": str(run_row["status"] or ""),
             "finishedAt": run_row["finished_at"],
             "collected": int(run_row["collected"] or 0),
+            #: Set when the run finished but left part of its collection
+            #: unclassified, which would otherwise read as a clean run.
+            "note": run_row["note"],
         } if run_row is not None else None),
         "watchlist": watchlist,
         #: What the chart is actually standing on. The page it replaces claimed

@@ -660,8 +660,10 @@ export function DashboardScreen() {
               failed one. */}
           {run ? (
             <>
-              <div className={`run-chip ${run.status === 'ok' ? 'ok' : 'warn'}`}>
-                {run.status === 'ok' ? 'Run completed' : `Run ${run.status}`}
+              {/* A run that finished but left rows unclassified is not a clean
+                  run: its figures here are short by exactly those rows. */}
+              <div className={`run-chip ${run.status === 'ok' && !run.note ? 'ok' : 'warn'}`}>
+                {run.status !== 'ok' ? `Run ${run.status}` : run.note ? 'Run incomplete' : 'Run completed'}
               </div>
               <div className="hero-meta">
                 {run.trigger === 'schedule' ? 'Scheduled run' : `${run.trigger} run`}
@@ -670,6 +672,7 @@ export function DashboardScreen() {
                 })}</>}
               </div>
               <div className="hero-meta">{run.collected} records collected before classification</div>
+              {run.note && <div className="hero-meta">{run.note}</div>}
             </>
           ) : (
             <div className="hero-meta">No run log for this collection.</div>

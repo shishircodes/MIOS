@@ -33,12 +33,16 @@ FUZZY_THRESHOLD = 85
 
 # Free-tier hard limits (as of 2026-05 for gemini-2.5-flash / flash-lite)
 DAILY_API_CALL_LIMIT = 20
-# One batch = whole working set. Set high so a full 80-record run uses 1 quota slot.
-# Gemini 2.5 Flash handles ~1M input tokens; the output cap is what limits us, so we
-# also raise max_output_tokens on the GenerateContentConfig below.
-SIGNALS_PER_API_CALL = 100
+# Signals per call. It was 100, sized so an 80-record run used one quota slot.
+# The output cap, not the input, is what limits a batch, and news articles and
+# tenders produce longer answers than job ads: once the new sources took a run
+# to 180 rows, a 100-row batch overran the cap, the truncated JSON failed to
+# parse, and every row in it stayed unclassified (99 of 180 on 14 Sep 2026).
+# A failed batch also loses all of its rows at once, so a small batch bounds the
+# damage too. 25 keeps a 250-row run to 10 calls, inside the daily limit.
+SIGNALS_PER_API_CALL = 25
 MAX_SIGNAL_CHARS = 3000           # truncate long raw_content to save tokens
-MAX_OUTPUT_TOKENS = 32000         # ~150 tok/record × 100 records, with headroom
+MAX_OUTPUT_TOKENS = 32000         # ~150 tok/record × 25 records, with ample headroom
 
 # Throttle: 6.5s between calls is plenty when you only get 20/day,
 # but keeps you under the per-minute burst limit too.

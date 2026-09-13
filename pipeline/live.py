@@ -51,17 +51,41 @@ def _classified_for_run(db_path: str | Path, run_id: str | None) -> int:
     that never get classified — a spent Gemini quota does exactly that — and
     those cannot appear in a digest.
     """
+    return _count_for_run(db_path, run_id, classified=True)
+
+
+def _count_for_run(db_path: str | Path, run_id: str | None, *, classified: bool) -> int:
+    """This run's rows, classified or still pending."""
     if not run_id:
         return 0
+    state = "IS NOT NULL" if classified else "IS NULL"
     try:
         with connect(db_path, readonly=True) as conn:
             return int(conn.execute(
-                "SELECT count(*) FROM signals WHERE run_id = ? AND classified_at IS NOT NULL",
+                f"SELECT count(*) FROM signals WHERE run_id = ? AND classified_at {state}",
                 (run_id,),
             ).fetchone()[0] or 0)
     except Exception as exc:  # noqa: BLE001 - treat as "nothing of its own"
         log.warning("live: could not count this run's signals (%s)", exc)
         return 0
+
+
+def _unclassified_note(unclassified: int, errors: int, quota_exhausted: bool) -> str | None:
+    """Why a finished run is not the whole story, or None when it is.
+
+    The run of 14 Sep 2026 left 99 of its 180 rows unclassified and still read
+    "Run completed", so the gap was only found by comparing figures by hand.
+    """
+    if unclassified <= 0:
+        return None
+    if quota_exhausted:
+        cause = "the daily AI quota ran out"
+    elif errors:
+        cause = f"the classifier failed on {errors}"
+    else:
+        cause = "they were not reached"
+    return (f"{unclassified} collected rows were left unclassified ({cause}); "
+            "they are retried on the next run")
 
 
 def run_live_cycle(
@@ -157,6 +181,10 @@ def run_live_cycle(
     # that were never classified cannot appear in a digest, which is exactly
     # what a spent Gemini quota leaves behind.
     own_signals = _classified_for_run(db_path, run_id)
+    unclassified = _count_for_run(db_path, run_id, classified=False)
+    if unclassified:
+        log.warning("live: run %s left %d rows unclassified (errors=%d)", run_id,
+                    unclassified, int(classify_counts.get("errors", 0)))
 
     # A run with nothing of its own is not archived, and its digest falls back to
     # the window. Two failures reach here — the scrape returned nothing, or
@@ -254,6 +282,13 @@ def run_live_cycle(
         "filtered_blocklist": int(classify_counts.get("filtered_blocklist", 0)),
         "filtered_too_short": int(classify_counts.get("filtered_too_short", 0)),
         "errors": int(classify_counts.get("errors", 0)),
+        #: This run's rows still waiting for classification after it finished.
+        "unclassified": unclassified,
+        "note": _unclassified_note(
+            unclassified,
+            int(classify_counts.get("errors", 0)),
+            bool(classify_counts.get("quota_exhausted")),
+        ),
         "digest_chars": len(digest_text),
         "slack_ok": slack_ok,
         "digest": digest_text,
@@ -271,7 +306,8 @@ def run_live_cycle(
     # the caller, which records the outcome including any failure this cannot
     # see.
     if own_run and run_id:
-        run_log.finish(run_id, status=run_log.STATUS_OK, collected=scraped, target=db_path)
+        run_log.finish(run_id, status=run_log.STATUS_OK, collected=scraped,
+                       note=summary["note"], target=db_path)
     return summary
 
 

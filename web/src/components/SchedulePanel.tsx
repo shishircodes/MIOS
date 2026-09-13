@@ -26,9 +26,12 @@ function when(iso: string | null, tz: string): string {
 }
 
 function RunRow({ r, tz }: { r: PipelineRun; tz: string }) {
-  const label =
-    r.status === 'ok' ? 'Completed' : r.status === 'failed' ? 'Failed' : 'Running'
-  const cls = r.status === 'ok' ? 'ok' : r.status === 'failed' ? 'err' : 'warn'
+  // A finished run with a note left part of its collection unclassified.
+  const incomplete = r.status === 'ok' && !!r.note
+  const label = incomplete
+    ? 'Incomplete'
+    : r.status === 'ok' ? 'Completed' : r.status === 'failed' ? 'Failed' : 'Running'
+  const cls = incomplete ? 'warn' : r.status === 'ok' ? 'ok' : r.status === 'failed' ? 'err' : 'warn'
 
   return (
     <div className="run-row">
