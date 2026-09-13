@@ -176,6 +176,9 @@ function SignalFeed() {
               <div className="meta-col">
                 <div>conf {s.conf}</div>
                 <div style={{ color: 'var(--ink-3)' }}>{s.source}</div>
+                {s.publication && s.publication.toLowerCase() !== s.source.toLowerCase() && (
+                  <div className="publication">{s.publication}</div>
+                )}
               </div>
             </div>
           ))}

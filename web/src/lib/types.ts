@@ -9,6 +9,10 @@ export interface Collection {
   collected: number
   jobs: number
   news: number
+  /** Approaches to market. Neither a vacancy nor an article. */
+  tenders: number
+  /** Anything no named kind covers, so the parts always sum to `collected`. */
+  other: number
   shown: number
   newNames: number
   sources: number
@@ -41,6 +45,9 @@ export interface Signal {
   action: string | null
   sector: string
   source: string
+  /** The publication behind the collector ("Australian Mining" rather than
+   *  "newsfeed"). Null where the collector's own name already says it. */
+  publication: string | null
   /** Original posting URL when available; null when missing or not http(s). */
   sourceUrl: string | null
   cycle: string

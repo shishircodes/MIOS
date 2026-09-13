@@ -471,6 +471,11 @@ function CollectionBand({
             {c.news}
           </span>{' '}
           news articles
+          {/* Shown only when present, but always counted: the three parts have
+              to add up to the figure above them, which they did not while
+              tenders were collected and left out of the split. */}
+          {c.tenders > 0 && <> · <span className="tnum">{c.tenders}</span> tenders</>}
+          {c.other > 0 && <> · <span className="tnum">{c.other}</span> other</>}
         </div>
       </div>
 
@@ -542,6 +547,11 @@ function SignalRow({ s, onOpen }: { s: Signal; onOpen: () => void }) {
       <div className="meta-col">
         <div>conf {s.conf}</div>
         <div style={{ color: 'var(--ink-3)' }}>{s.source}</div>
+        {/* Which publication, beneath the collector. "newsfeed" covers four
+            titles, and a consultant weighing a story needs to know which. */}
+        {s.publication && s.publication.toLowerCase() !== s.source.toLowerCase() && (
+          <div className="publication">{s.publication}</div>
+        )}
         <CapturedAt at={s.capturedAt} />
       </div>
     </div>
@@ -569,6 +579,9 @@ function SignalDetail({ s }: { s: Signal }) {
         <div>
           <div className="muted" style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Source</div>
           <div style={{ fontWeight: 500, marginTop: 4 }}>{s.source}</div>
+          {s.publication && s.publication.toLowerCase() !== s.source.toLowerCase() && (
+            <div className="publication">{s.publication}</div>
+          )}
         </div>
         <div>
           <div className="muted" style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Confidence</div>
