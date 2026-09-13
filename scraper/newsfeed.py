@@ -57,12 +57,29 @@ class Feed:
 #: The free RSS sources from the data-sources guide that actually serve a feed,
 #: one per market. Both were checked live before being made the default.
 #:
-#: Australian Mining, Energy Magazine, Infrastructure Magazine and Roads &
-#: Infrastructure are all on the same publisher's network and every one of them
-#: answers 403 to a non-browser client, User-Agent or not. Defeating that is the
-#: browser-automation work this source exists to avoid, so they are left out
-#: rather than shipped as a default that fails on every run. Defence Connect and
-#: PNG Business News answer 404 — the URLs in the guide are stale.
+#: Australian Mining and Infrastructure Magazine were previously written off
+#: here as refusing every non-browser client "User-Agent or not". That was
+#: wrong, or has stopped being true. Both sit behind a WAF that refuses an agent
+#: string it does not recognise as a browser, and the conventional bot form —
+#: `Mozilla/5.0 (compatible; Name/version; +url)`, which is what Googlebot and
+#: Bingbot send — is accepted where the bare `MIOS/0.2` was not. Measured:
+#:
+#:                        MIOS/0.2   compatible-form   curl   Chrome
+#:   Australian Mining       403           200          403     200
+#:   Infrastructure Mag      403           200          403     200
+#:   Mining.com.au           200           200          200     403
+#:
+#: Note the last row. Sending a Chrome string everywhere would have unblocked
+#: two feeds and broken a third, so the agent below is the one that satisfies
+#: all of them while still saying honestly what it is.
+#:
+#: robots.txt on both formerly-blocked sites is `User-agent: * / Disallow:` —
+#: they permit crawling; the 403 was a crude rule about agent strings, not a
+#: stated policy.
+#:
+#: PNG Business News serves no feed at all — /feed/, /rss and /rss.xml are all
+#: 404 — so it is scraped from its category pages instead. See
+#: `scraper/pngbusinessnews.py`.
 #:
 #: Mining Technology (https://www.mining-technology.com/feed/) does serve a
 #: feed, but its coverage is global; its headlines are as often about US or
@@ -70,8 +87,79 @@ class Feed:
 #: recruiting into AU and PNG. Add it via NEWS_FEEDS if that changes.
 FEEDS: tuple[Feed, ...] = (
     Feed("Mining.com.au", "https://mining.com.au/feed/", "AU"),
+    Feed("Australian Mining", "https://www.australianmining.com.au/feed/", "AU"),
+    Feed("Infrastructure Magazine", "https://infrastructuremagazine.com.au/feed/", "AU"),
     Feed("Business Advantage PNG", "https://www.businessadvantagepng.com/feed/", "PNG"),
 )
+
+#: Headline words that suggest an article is lifestyle or leisure coverage
+#: rather than industry.
+#:
+#: This exists because Business Advantage PNG is a general business title. Its
+#: mining, energy and company coverage is exactly what MIOS wants — "Papua LNG
+#: gas agreement", "People Moves: Great Pacific Gold, Tolu Minerals" — and it
+#: runs those beside Fiji airline interviews and hotel reviews, which the
+#: classifier then spends a model call deciding to discard.
+OFF_TOPIC_TITLE_WORDS: tuple[str, ...] = (
+    "hotel", "resort", "restaurant", "cuisine", "dining", "tourism", "tourist",
+    "airline", "airways", "holiday", "cruise", "art exhibition", "festival",
+    "fashion", "recipe", "review",
+)
+
+#: Words that mean a headline is about building, digging or hiring something,
+#: whatever else it mentions.
+#:
+#: A keyword list on its own is too blunt to run alone, and this is not
+#: hypothetical: "$249.7M Australian Institute of Sport redevelopment enters
+#: construction phase" was dropped by the word "sport" on the first run. That is
+#: a quarter-billion-dollar construction project — precisely the signal this
+#: pipeline exists to find — discarded by a filter meant to remove hotel
+#: reviews.
+#:
+#: So an off-topic word only disqualifies a headline that carries no industrial
+#: language at all. The asymmetry is deliberate: noise costs one classifier
+#: call, which is bounded and visible in the usage counter, while a dropped
+#: signal is invisible and nobody ever learns it existed. When the two are not
+#: equally costly the filter should not treat them as if they were.
+INDUSTRIAL_TITLE_WORDS: tuple[str, ...] = (
+    "construction", "build", "building", "redevelopment",
+    "development", "project", "contract", "award",
+    "tender", "infrastructure", "mine", "mining", "miner", "drilling", "gas",
+    "lng", "oil", "petroleum", "energy", "power", "grid", "pipeline", "port",
+    "rail", "road", "highway", "bridge", "plant", "refinery", "smelter",
+    "shutdown", "maintenance", "engineering", "workforce", "jobs", "hiring",
+    "recruit", "appoints", "appointment", "expansion", "upgrade", "investment",
+    "acquisition", "merger", "drill", "exploration", "resource", "production",
+)
+
+
+def _has_word(text: str, words: tuple[str, ...]) -> bool:
+    """Word-bounded match, tolerating a plural or past-tense ending.
+
+    Word-bounded so "sport" never matches inside "transport". The optional
+    ending is what makes the lists readable: without it "restaurants" and
+    "reviewed" both slipped past a list containing "restaurant" and "review",
+    and the alternative is spelling out every inflection of forty words.
+    """
+    lowered = (text or "").lower()
+    return any(re.search(rf"(?<!\w){re.escape(w)}(?:s|es|ed)?(?!\w)", lowered)
+               for w in words)
+
+
+def is_off_topic(title: str) -> bool:
+    """Whether a headline is leisure coverage and nothing more.
+
+    Both halves matter. An off-topic word alone is not enough — a hotel being
+    *built* is a construction signal, and an institute of sport being
+    *redeveloped* is a contract — so a headline is only dropped when it carries
+    leisure language and no industrial language whatsoever.
+    """
+    return _has_word(title, OFF_TOPIC_TITLE_WORDS) and not _has_word(
+        title, INDUSTRIAL_TITLE_WORDS)
+
+#: Sent on every feed request. Honest about what it is — the name and a contact
+#: URL are both in there — while taking the shape publishers' filters expect.
+USER_AGENT = "Mozilla/5.0 (compatible; MIOS/0.2; +https://easyskill.com.au)"
 
 #: Atom uses a namespace, RSS does not; strip it rather than branching on it.
 _NS = re.compile(r"^\{[^}]+\}")
@@ -132,12 +220,20 @@ def parse_feed(xml_text: str, feed: Feed) -> list[dict[str, Any]]:
         return []
 
     out: list[dict[str, Any]] = []
+    dropped: list[str] = []
     for entry in root.iter():
         if _local(entry.tag).lower() not in {"item", "entry"}:
             continue
 
         title = _text(_find(entry, "title"))
         if not title:
+            continue
+        # Dropped here rather than after collection, so an off-topic headline
+        # never reaches the classifier and never spends a model call being
+        # rejected. Counted in the log: a filter that silently removes most of
+        # a feed is a filter somebody needs to look at.
+        if is_off_topic(title):
+            dropped.append(title)
             continue
         summary = _text(_find(entry, "description", "summary", "content"))
         if len(summary) > MAX_SUMMARY_CHARS:
@@ -164,7 +260,14 @@ def parse_feed(xml_text: str, feed: Feed) -> list[dict[str, Any]]:
             "geography": feed.geography,
         })
 
-    log.info("newsfeed.parse_feed: %s -> %d articles", feed.name, len(out))
+    if dropped:
+        # Named, not just counted. A publication that has drifted, or a keyword
+        # that has started catching real stories, both show up here first.
+        log.info("newsfeed.parse_feed: %s -> %d articles, %d off-topic dropped (%s)",
+                 feed.name, len(out), len(dropped),
+                 "; ".join(t[:48] for t in dropped[:3]))
+    else:
+        log.info("newsfeed.parse_feed: %s -> %d articles", feed.name, len(out))
     return out
 
 
@@ -197,8 +300,11 @@ def _scrape_sync(limit: int, feeds: tuple[Feed, ...]) -> list[dict[str, Any]]:
             res = requests.get(
                 feed.url,
                 timeout=REQUEST_TIMEOUT,
-                # Some publishers return 403 to an unidentified client.
-                headers={"User-Agent": "MIOS/0.2 (+market intelligence; Easy Skill Australia)"},
+                # The conventional bot form. Still says plainly what this is
+                # and where to complain; the `Mozilla/5.0 (compatible; ...)`
+                # wrapper is what the publishers' WAFs actually check for. See
+                # the table above FEEDS for what each one accepts.
+                headers={"User-Agent": USER_AGENT},
             )
             res.raise_for_status()
             per_feed.append(parse_feed(res.text, feed))

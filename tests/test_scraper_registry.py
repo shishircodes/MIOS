@@ -22,12 +22,12 @@ def _fake_registry(png=None, seek=None, adzuna=None, news=None):
             return list(rows or [])
         return _fn
 
-    return {
-        "pngworkforce": _fixed(png),
-        "seek": _fixed(seek),
-        "adzuna": _fixed(adzuna),
-        "newsfeed": _fixed(news),
-    }
+    # Built from the declared names rather than listed by hand, so adding a
+    # source does not break tests that are not about that source. Anything not
+    # named by the caller returns nothing, which is what a registry entry with
+    # no fixture should do.
+    named = {"pngworkforce": png, "seek": seek, "adzuna": adzuna, "newsfeed": news}
+    return {name: _fixed(named.get(name)) for name in scraper.SOURCE_NAMES}
 
 
 PNG_REC = {"source_url": "https://www.pngworkforce.com/jobs/view/1", "raw_content": "png job"}
@@ -44,6 +44,8 @@ def test_scrape_all_merges_every_source_by_default():
         records = scrape_all(limit=10)
     assert len(records) == 4
     assert {r["source_name"] for r in records} == {"pngworkforce", "seek", "adzuna", "newsfeed"}
+    # The sources with no fixture contributed nothing rather than failing, which
+    # is what keeps this test about merging rather than about the source list.
 
 
 def test_scrape_all_can_select_one_source():

@@ -11,9 +11,12 @@ from pathlib import Path
 import pytest
 
 from scraper.newsfeed import (
+    FEEDS,
     MAX_SUMMARY_CHARS,
+    USER_AGENT,
     Feed,
     _configured_feeds,
+    is_off_topic,
     parse_feed,
 )
 
@@ -191,3 +194,82 @@ def test_settings_repr_does_not_leak_secrets():
         if value:
             assert str(value) not in text, f"{name} appears in repr(Settings)"
     assert "gemini_model" in text, "non-secret fields should still be visible"
+
+
+# ---------- off-topic headlines ----------
+
+
+def test_a_leisure_headline_is_dropped():
+    """Business Advantage PNG is a general business title: its mining and energy
+    coverage is exactly what MIOS wants, and it runs Fiji airline interviews
+    beside it."""
+    assert is_off_topic("Q&A with Fiji Airways CEO Paul Scurrah")
+    assert is_off_topic("Where happiness comes naturally: Fiji tourism")
+    assert is_off_topic("Best restaurants in Lae reviewed")
+
+
+def test_an_industrial_headline_survives_a_leisure_word():
+    """The case that broke the first version of this filter.
+
+    "$249.7M Australian Institute of Sport redevelopment enters construction
+    phase" was dropped by the word "sport" — a quarter-billion-dollar
+    construction project, discarded by a filter meant to remove hotel reviews.
+    An off-topic word only disqualifies a headline carrying no industrial
+    language at all.
+    """
+    assert not is_off_topic(
+        "$249.7M Australian Institute of Sport redevelopment enters construction phase")
+    assert not is_off_topic("New $80M hotel development approved for Port Moresby")
+    assert not is_off_topic("Airline awards ground handling contract at Jacksons")
+
+
+def test_a_leisure_word_inside_another_word_does_not_count():
+    """Word-bounded, so "sport" never matches inside "transport"."""
+    assert not is_off_topic("Transport corridor upgrade for Lae")
+
+
+def test_plurals_and_past_tense_are_caught():
+    """A list containing "restaurant" and "review" let "restaurants" and
+    "reviewed" straight through until the match tolerated an ending."""
+    assert is_off_topic("Hotels and resorts: our favourite holiday escapes")
+    assert is_off_topic("Lae cafes reviewed")
+
+
+def test_industrial_headlines_are_untouched():
+    for title in (
+        "People Moves: Great Pacific Gold, Tolu Minerals, Ok Tedi",
+        "Explainer: Inside Papua New Guinea's revised Papua LNG gas agreement",
+        "PNG Power's sale advances as El Nino tests the grid",
+    ):
+        assert not is_off_topic(title), title
+
+
+def test_an_off_topic_item_never_reaches_the_records():
+    """Dropped during parsing, so it never costs a classifier call."""
+    xml = """<?xml version="1.0"?><rss><channel>
+      <item><title>Q&amp;A with Fiji Airways CEO</title><link>https://x/a</link></item>
+      <item><title>Ok Tedi declares K450 million interim dividend</title><link>https://x/b</link></item>
+    </channel></rss>"""
+
+    records = parse_feed(xml, Feed("Business Advantage PNG", "https://x/feed", "PNG"))
+
+    titles = [r["title"] for r in records]
+    assert titles == ["Ok Tedi declares K450 million interim dividend"]
+
+
+# ---------- the agent that unblocked two publishers ----------
+
+
+def test_the_user_agent_still_identifies_itself():
+    """It takes the conventional bot shape so publishers' filters accept it, but
+    it must still say what it is and where to complain — the point is to be
+    recognisable, not to pass as a browser."""
+    assert "MIOS" in USER_AGENT
+    assert "easyskill" in USER_AGENT.lower()
+    # Not a Chrome string: sending one unblocked two feeds and broke a third.
+    assert "Chrome" not in USER_AGENT
+
+
+def test_the_reachable_publishers_are_all_registered():
+    names = {f.name for f in FEEDS}
+    assert {"Australian Mining", "Infrastructure Magazine"} <= names
