@@ -235,7 +235,13 @@ def test_generated_at_is_still_now(db):
     be confused with the collection date."""
     _add(db, "s1", days_ago=4)
     p = build_digest_payload(db, days=7)
-    assert datetime.now(timezone.utc).strftime("%d %b %Y") in p["generatedAt"]
+    # Sydney's date, not UTC's. `generatedAt` has been rendered in the market's
+    # zone since the digest headings moved there, and this compared against the
+    # UTC date — so it failed for the ten hours a day the two differ, including
+    # on CI for part of every day since that change merged.
+    from zoneinfo import ZoneInfo
+    sydney_today = datetime.now(ZoneInfo("Australia/Sydney")).strftime("%d %b %Y")
+    assert sydney_today in p["generatedAt"]
 
 
 # ---------- region balance under the display cap ----------
@@ -673,8 +679,35 @@ def test_the_kinds_always_add_up_to_the_total(db):
     for i in range(3):
         _add(db, f"n{i}", days_ago=2 + i * 0.1, source_type="news", source="newsfeed")
 
+    for i in range(2):
+        _add(db, f"t{i}", days_ago=2.5 + i * 0.1, source_type="tender", source="austender")
+
     c = build_digest_payload(db, days=7)["collection"]
-    assert c["jobs"] + c["news"] == c["collected"]
+    # Tenders are the case this was written for. Before they were counted they
+    # contributed to `collected` and to no part of the split, so the parts
+    # summed to less than the whole.
+    assert c["tenders"] == 2
+    assert c["jobs"] + c["news"] + c["tenders"] + c["other"] == c["collected"]
+    assert c["other"] == 0
+
+
+def test_an_unrecognised_kind_still_adds_up(db):
+    """A collector with a new source_type must not reopen the same gap before
+    anyone remembers this breakdown exists."""
+    _add(db, "j0", days_ago=1)
+    _add(db, "x0", days_ago=1.1, source_type="webinar", source="somewhere")
+
+    c = build_digest_payload(db, days=7)["collection"]
+    assert c["other"] == 1
+    assert c["jobs"] + c["news"] + c["tenders"] + c["other"] == c["collected"]
+
+
+def test_a_newsfeed_signal_names_its_publication(db):
+    _add(db, "n0", days_ago=1, source_type="news", source="newsfeed")
+
+    sig = build_digest_payload(db, days=7)["signals"][0]
+    assert sig["source"] == "newsfeed"
+    assert "publication" in sig, "the row can say which title it came from"
 
 
 def test_the_regions_always_add_up_to_the_total(db):

@@ -141,7 +141,11 @@ def build_evidence(payload: dict[str, Any]) -> str:
     lines: list[str] = [
         f"Window: {payload.get('weekLabel') or 'this week'}.",
         f"Signals collected: {c.get('collected', 0)} "
-        f"({c.get('jobs', 0)} job postings, {c.get('news', 0)} news articles) "
+        # All the parts, so they sum to the total the line opens with. Leaving
+        # tenders out handed the model a breakdown that did not add up.
+        f"({c.get('jobs', 0)} job postings, {c.get('news', 0)} news articles, "
+        f"{c.get('tenders', 0)} tenders"
+        f"{', ' + str(c.get('other')) + ' other' if c.get('other') else ''}) "
         f"from {c.get('sources', 0)} sources.",
         f"By market: Australia {c.get('regions', {}).get('AU', 0)}, "
         f"Papua New Guinea {c.get('regions', {}).get('PNG', 0)}.",

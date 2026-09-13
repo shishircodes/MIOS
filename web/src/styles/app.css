@@ -1994,6 +1994,13 @@ overflow-x: auto;
 .rel-chip.client { background: var(--moss-bg); color: var(--moss); border-color: rgba(15,110,61,0.3); }
 .rel-chip.new { background: var(--paper-2); color: var(--ink-3); }
 
+/* The publication beneath a collector name in signal rows. Quieter than the
+   collector: it qualifies it rather than competing with it. */
+.publication {
+  font-family: var(--small); font-size: 11px; color: var(--muted);
+  line-height: 1.3; margin-top: 1px;
+}
+
 /* ---------- Collapsed explanations ---------- */
 
 .explainer { border-top: 1px solid var(--line); background: var(--paper); }

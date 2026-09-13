@@ -20,6 +20,7 @@ from typing import Any
 from config.settings import settings
 from delivery.digest import infer_geography, interleave, interleave_regions, rank_signal
 from delivery.pulse import load_pulse
+from scraper.publications import publication_for
 from loader.db import connect, is_postgres, resolve_target
 
 log = logging.getLogger(__name__)
@@ -377,6 +378,9 @@ def shape_signal(r: dict[str, Any], index: int) -> dict[str, Any]:
         "action": (r.get("analysis_notes") or "").strip() or None,
         "sector": SECTOR_PRETTY.get(sector_key, sector_key.title()),
         "source": r.get("source_name") or "pngworkforce",
+        #: The publication behind the collector — "Australian Mining" rather than
+        #: "newsfeed". Null where the collector name already says it.
+        "publication": publication_for(r.get("source_name"), r.get("source_url")),
         "sourceType": r.get("source_type") or "job_board",
         "sourceUrl": source_url,
         "category": r.get("signal_category") or "hiring_velocity",
@@ -615,6 +619,16 @@ def build_digest_payload(
             #: figure honest about what was actually gathered.
             "jobs": kinds.get("job_board", 0),
             "news": kinds.get("news", 0),
+            #: A tender is neither a vacancy nor an article. Before this was
+            #: counted, tenders contributed to `collected` and to neither part,
+            #: so a week with twenty of them read "80 signals · 32 job postings ·
+            #: 48 news articles" — a breakdown that did not add up, and that the
+            #: Market Pulse prompt then repeated to the model.
+            "tenders": kinds.get("tender", 0),
+            #: Whatever no named kind covers. Normally zero; present so the parts
+            #: sum to the whole even when a collector with a new type is added
+            #: before anyone remembers this breakdown exists.
+            "other": classified - sum(kinds.get(k, 0) for k in ("job_board", "news", "tender")),
             "shown": len(shown),
             "newNames": len(new_names),
             "sources": len({s["source"] for s in signals}),
