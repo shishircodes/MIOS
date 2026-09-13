@@ -35,6 +35,14 @@ log = logging.getLogger(__name__)
 #: which is long enough to show a season and short enough to stay legible.
 TREND_COLLECTIONS = 12
 
+#: The most the chart will draw however wide a window is asked for. A line with
+#: sixty points across 700 pixels is a texture, not a trend.
+MAX_TREND_COLLECTIONS = 26
+
+#: Windows the interface offers. The last is "everything there is", which is
+#: capped at MAX_TREND_COLLECTIONS like any other.
+TREND_CHOICES = (4, 8, 12, MAX_TREND_COLLECTIONS)
+
 #: Sector keys are stored as the classifier emits them. The reader should not
 #: have to know that.
 SECTOR_LABELS: dict[str, str] = {
@@ -137,8 +145,37 @@ def _pct_change(now: int, before: int) -> float | None:
     return round((now - before) / before * 100, 1)
 
 
-def build_dashboard_payload(target: str | Path | None = None) -> dict[str, Any]:
-    """Everything the trends dashboard shows, counted from the signals table."""
+def build_dashboard_payload(
+    target: str | Path | None = None,
+    *,
+    collection: str | None = None,
+    region: str | None = None,
+    trend: int | None = None,
+) -> dict[str, Any]:
+    """Everything the dashboard shows, counted from the signals table.
+
+    `collection` selects which collection the composition panels describe, as a
+    YYYY-MM-DD date. Defaults to the most recent. An unrecognised date falls
+    back to the latest rather than returning nothing: a stale link should show
+    the current week, not an empty page.
+
+    `region` narrows every panel to one market. The trend chart still draws both
+    series, because the question it answers — do these two move together — stops
+    existing if one of them is filtered out.
+
+    `trend` caps how many collections the chart covers, so a long history can be
+    read a quarter at a time.
+    """
+    region = (region or "").strip().upper() or None
+    if region not in (None, "AU", "PNG"):
+        region = None
+    window = max(2, min(int(trend or TREND_COLLECTIONS), MAX_TREND_COLLECTIONS))
+
+    # Applied to every per-collection aggregate below. Kept as one pair so a
+    # panel cannot quietly disagree with the others about what is being counted.
+    where_region = " AND upper(coalesce(region, geography, '')) = ? " if region else " "
+    args_region: tuple = (region,) if region else ()
+
     empty = {
         "collections": [], "latest": None, "change": {},
         "sectors": [], "watchlist": {"total": 0, "byTier": {}, "seen": 0, "seenShare": 0.0},
@@ -146,6 +183,7 @@ def build_dashboard_payload(target: str | Path | None = None) -> dict[str, Any]:
         "trendWindow": TREND_COLLECTIONS,
         "categories": [], "groups": [], "sources": [], "companies": [],
         "newNames": 0, "run": None,
+        "available": [], "selected": None, "region": region, "isLatest": True,
     }
 
     try:
@@ -161,7 +199,10 @@ def build_dashboard_payload(target: str | Path | None = None) -> dict[str, Any]:
                 "GROUP BY substr(captured_at, 1, 10) ORDER BY day"
             ).fetchall()
 
-            latest_day = rows[-1]["day"] if rows else None
+            days = [str(r["day"]) for r in rows]
+            # An unrecognised date falls back to the newest rather than showing
+            # nothing: a stale link should land on the current week.
+            latest_day = (collection if collection in days else (days[-1] if days else None))
             sector_rows: list = []
             category_rows: list = []
             source_rows: list = []
@@ -175,15 +216,15 @@ def build_dashboard_payload(target: str | Path | None = None) -> dict[str, Any]:
                 # scan anyway or return a cross product to unpick in Python.
                 sector_rows = conn.execute(
                     "SELECT sector, count(*) AS n FROM signals "
-                    "WHERE classified_at IS NOT NULL AND substr(captured_at, 1, 10) = ? "
-                    "GROUP BY sector ORDER BY n DESC",
-                    (latest_day,),
+                    "WHERE classified_at IS NOT NULL AND substr(captured_at, 1, 10) = ?"
+                    + where_region + "GROUP BY sector ORDER BY n DESC",
+                    (latest_day, *args_region),
                 ).fetchall()
                 category_rows = conn.execute(
                     "SELECT signal_category, count(*) AS n FROM signals "
-                    "WHERE classified_at IS NOT NULL AND substr(captured_at, 1, 10) = ? "
-                    "GROUP BY signal_category ORDER BY n DESC",
-                    (latest_day,),
+                    "WHERE classified_at IS NOT NULL AND substr(captured_at, 1, 10) = ?"
+                    + where_region + "GROUP BY signal_category ORDER BY n DESC",
+                    (latest_day, *args_region),
                 ).fetchall()
                 # Not filtered on classified_at: a source's contribution is what
                 # it collected, and a row still awaiting classification was
@@ -194,9 +235,9 @@ def build_dashboard_payload(target: str | Path | None = None) -> dict[str, Any]:
                 # twice, which reads as two sources rather than one.
                 source_rows = conn.execute(
                     "SELECT source_name, max(source_type) AS source_type, count(*) AS n "
-                    "FROM signals WHERE substr(captured_at, 1, 10) = ? "
-                    "GROUP BY source_name ORDER BY n DESC, source_name",
-                    (latest_day,),
+                    "FROM signals WHERE substr(captured_at, 1, 10) = ?"
+                    + where_region + "GROUP BY source_name ORDER BY n DESC, source_name",
+                    (latest_day, *args_region),
                 ).fetchall()
                 company_rows = conn.execute(
                     "SELECT company_name, count(*) AS n, "
@@ -208,14 +249,16 @@ def build_dashboard_payload(target: str | Path | None = None) -> dict[str, Any]:
                     # identify the employer. Those rows cannot be approached, so
                     # listing them among the most active companies would be
                     # offering a name nobody can act on.
-                    "AND company_name IS NOT NULL AND lower(company_name) <> 'unknown' "
-                    "GROUP BY company_name ORDER BY n DESC, company_name LIMIT ?",
-                    (latest_day, TOP_COMPANIES),
+                    "AND company_name IS NOT NULL AND lower(company_name) <> 'unknown'"
+                    + where_region
+                    + "GROUP BY company_name ORDER BY n DESC, company_name LIMIT ?",
+                    (latest_day, *args_region, TOP_COMPANIES),
                 ).fetchall()
                 new_names = int((conn.execute(
                     "SELECT count(DISTINCT company_name) AS n FROM signals "
                     "WHERE is_new_prospect = 1 AND classified_at IS NOT NULL "
-                    "AND substr(captured_at, 1, 10) = ?", (latest_day,)
+                    "AND substr(captured_at, 1, 10) = ?" + where_region,
+                    (latest_day, *args_region)
                 ).fetchone() or {"n": 0})["n"] or 0)
                 # How much of the watchlist actually appeared. "We watch twenty
                 # and saw seven this week" is the question the tile answers, and
@@ -223,7 +266,8 @@ def build_dashboard_payload(target: str | Path | None = None) -> dict[str, Any]:
                 seen_watchlist = int((conn.execute(
                     "SELECT count(DISTINCT company_name) AS n FROM signals "
                     "WHERE watchlist_tier IS NOT NULL AND classified_at IS NOT NULL "
-                    "AND substr(captured_at, 1, 10) = ?", (latest_day,)
+                    "AND substr(captured_at, 1, 10) = ?" + where_region,
+                    (latest_day, *args_region)
                 ).fetchone() or {"n": 0})["n"] or 0)
 
             tiers = conn.execute(
@@ -267,9 +311,24 @@ def build_dashboard_payload(target: str | Path | None = None) -> dict[str, Any]:
          "au": int(r["au"] or 0), "png": int(r["png"] or 0)}
         for r in rows
     ]
-    recent = collections[-TREND_COLLECTIONS:]
-    latest = recent[-1]
-    previous = recent[-2] if len(recent) > 1 else None
+    # The chart shows the tail; the panels describe the selected collection,
+    # which is usually but not always the last of them.
+    recent = collections[-window:]
+    index = next((i for i, c in enumerate(collections) if c["date"] == latest_day),
+                 len(collections) - 1)
+    latest = collections[index]
+    # Compared against the one before *the selected* collection, not before the
+    # newest. Looking back at an earlier week should show the movement that was
+    # reported at the time.
+    previous = collections[index - 1] if index > 0 else None
+
+    # Region narrows the headline too, or the tiles would disagree with the
+    # panels underneath them.
+    if region:
+        picked = latest[region.lower()]
+        prior = previous[region.lower()] if previous else None
+        latest = {**latest, "total": picked}
+        previous = {**previous, "total": prior} if previous else None
 
     return {
         "collections": recent,
@@ -340,5 +399,19 @@ def build_dashboard_payload(target: str | Path | None = None) -> dict[str, Any]:
             "from": collections[0]["date"],
             "to": latest["date"],
         },
-        "trendWindow": TREND_COLLECTIONS,
+        "trendWindow": window,
+        "trendChoices": list(TREND_CHOICES),
+        #: Every collection that can be selected, newest first, with its size —
+        #: so the picker can say what each one holds rather than listing bare
+        #: dates.
+        "available": [
+            {"date": c["date"], "total": c["total"], "au": c["au"], "png": c["png"]}
+            for c in reversed(collections)
+        ],
+        "selected": latest["date"],
+        "region": region,
+        #: Whether the panels describe the newest collection. The interface says
+        #: so when they do not: a figure from three weeks ago presented without
+        #: comment reads as current.
+        "isLatest": bool(collections and latest["date"] == collections[-1]["date"]),
     }

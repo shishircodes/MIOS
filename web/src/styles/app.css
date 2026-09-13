@@ -124,6 +124,13 @@
      objects on a surface rather than regions fenced off from it. The shadows
      are deliberately far softer than they look in a spec — at this density,
      anything heavier turns a page of twelve panels into a relief map. */
+  /* The scroll area's own colour. Cards are white; the page they sit on is
+     not. Both were #FFFFFF, so every panel was white on white and separated
+     only by a hairline — which is most of why a dense, deliberate layout read
+     as unfinished. Three per cent is enough: any more and the cards start to
+     look like cut-outs rather than paper. */
+  --ground: #F4F6F3;
+
   --radius: 5px;
   --radius-sm: 3px;
   /* Resting: a card sitting on the page. */
@@ -344,7 +351,7 @@ input, textarea, select { font-family: inherit; }
 .app.nav-collapsed .sidebar .footer .rail-dot { display: block; width: 8px; height: 8px; }
 
 /* ---------- Main ---------- */
-.main { grid-row: 2; overflow-y: auto; background: var(--paper); }
+.main { grid-row: 2; overflow-y: auto; background: var(--ground); }
 .page { max-width: 1280px; padding: 22px 28px 80px; margin: 0 auto; }
 .page-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; padding-bottom: 18px; border-bottom: 1px solid var(--line-2); margin-bottom: 22px; }
 .page-header h1 { margin: 0; font-family: var(--display); font-size: 30px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.05; color: var(--ink); }
@@ -356,7 +363,12 @@ input, textarea, select { font-family: inherit; }
   border: 1px solid var(--line); background: var(--surface);
   margin-bottom: 18px; overflow: hidden;
   border-radius: var(--radius); box-shadow: var(--shadow-1);
+  transition: box-shadow 180ms ease, border-color 180ms ease;
 }
+/* A card lifts very slightly under the pointer. Enough to feel like an object
+   being addressed, not enough to be a click affordance on a panel that is not
+   clickable. */
+.section:hover { box-shadow: var(--shadow-2); }
 .section-h {
   display: flex; align-items: center; justify-content: space-between;
   padding: 13px 18px; border-bottom: 1px solid var(--line);
@@ -658,7 +670,7 @@ input, textarea, select { font-family: inherit; }
 .pull { border-left: 3px solid var(--moss); background: var(--moss-bg); padding: 12px 16px; margin: 16px 0; font-family: var(--sans); font-size: 14px; }
 
 /* ---------- Source health ---------- */
-.src-row { display: grid; grid-template-columns: 160px 1fr 80px 80px 80px; gap: 14px; padding: 8px 16px; border-bottom: 1px solid var(--line); align-items: center; font-size: 13.5px; }
+.src-row { display: grid; grid-template-columns: 160px 1fr 80px 80px 80px; gap: 14px; padding: 11px 16px; border-bottom: 1px solid var(--line); align-items: center; font-size: 13.5px; }
 .src-row .name { font-weight: 500; }
 .src-row .hist { display: flex; gap: 2px; }
 .src-row .hist .tick { width: 5px; height: 16px; background: var(--moss); }
@@ -1622,7 +1634,21 @@ overflow-x: auto;
   font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.08em;
   text-transform: uppercase; color: rgba(255, 255, 255, 0.62);
 }
-.hero-figure { display: flex; align-items: baseline; gap: 12px; margin: 6px 0 12px; }
+.hero { position: relative; overflow: hidden; }
+/* Sits behind the text, bled to the band's own edges. Low enough that it never
+   competes with the figure it sits under. */
+.hero-trace {
+  position: absolute; right: 0; bottom: 0; width: 62%; height: 78%;
+  color: var(--teal); opacity: 0.22; pointer-events: none;
+}
+.hero-main, .hero-side { position: relative; z-index: 1; }
+.hero-figure { display: flex; align-items: baseline; gap: 12px; margin: 6px 0 14px; }
+
+.hero-bar {
+  display: flex; height: 6px; width: min(340px, 100%); overflow: hidden;
+  border-radius: 999px; background: rgba(255, 255, 255, 0.14); margin-bottom: 10px;
+}
+.hero-bar span { display: block; height: 100%; }
 .hero-figure .val {
   font-family: var(--display); font-size: 40px; font-weight: 700;
   line-height: 1; color: var(--paper);
@@ -1655,9 +1681,11 @@ overflow-x: auto;
 @media (max-width: 520px) { .kpi2-row { grid-template-columns: 1fr; } }
 .kpi2 {
   background: var(--surface); border: 1px solid var(--line);
-  padding: 14px 16px 0; display: flex; flex-direction: column; overflow: hidden;
+  padding: 16px 18px 0; display: flex; flex-direction: column; overflow: hidden;
   border-radius: var(--radius); box-shadow: var(--shadow-1);
+  transition: box-shadow 180ms ease, transform 180ms ease;
 }
+.kpi2:hover { box-shadow: var(--shadow-2); transform: translateY(-1px); }
 .kpi2-label {
   font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.07em;
   text-transform: uppercase; color: var(--ink-3);
@@ -1690,6 +1718,153 @@ overflow-x: auto;
 .swatch { width: 9px; height: 9px; display: inline-block; flex-shrink: 0; }
 /* The PNG series is dashed as well as differently coloured — WCAG 1.4.1. */
 .swatch.dashed { height: 3px; width: 14px; }
+
+.h1-qualifier { color: var(--ink-3); font-weight: 400; }
+
+/* ---------- Dashboard layout ----------
+   A wide main column beside a rail of dense panels. One column of full-width
+   cards made a short page long and left each card mostly empty; the rail gives
+   the compositions somewhere to live at a size that suits them. */
+
+.dash-grid { display: grid; grid-template-columns: minmax(0, 1.95fr) minmax(280px, 1fr); gap: 18px; align-items: start; }
+.dash-main, .dash-rail { min-width: 0; }
+/* The rail's cards are read as a set, so they sit closer together than the
+   main column's. */
+.dash-rail .section { margin-bottom: 14px; }
+.rail-body { padding: 15px 18px 17px; }
+
+@media (max-width: 1080px) {
+  .dash-grid { grid-template-columns: 1fr; }
+}
+
+/* ---------- The chart card's own summary rail ---------- */
+
+.chart-wrap { display: grid; grid-template-columns: minmax(0, 1fr) 208px; }
+.chart-plot { padding: 18px 20px 14px; min-width: 0; }
+.chart-side {
+  border-left: 1px solid var(--line); background: var(--surface-2);
+  padding: 16px 16px; display: flex; flex-direction: column; gap: 4px;
+  justify-content: center;
+}
+@media (max-width: 860px) {
+  .chart-wrap { grid-template-columns: 1fr; }
+  .chart-side { border-left: none; border-top: 1px solid var(--line); flex-direction: row; flex-wrap: wrap; }
+  .chart-stat { flex: 1 1 160px; }
+}
+
+.chart-stat { display: flex; gap: 11px; align-items: flex-start; padding: 9px 0; }
+.chart-stat + .chart-stat { border-top: 1px solid var(--line); }
+/* A filled tile, the way the reference anchors each figure. Square like
+   everything else here rather than the reference's circle. */
+.chart-stat-icon {
+  flex-shrink: 0; width: 30px; height: 30px; border-radius: var(--radius-sm);
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--teal-2); color: var(--on-teal);
+}
+.chart-stat-icon.alt { background: var(--paper-2); color: var(--ink-3); }
+.chart-stat-icon svg { width: 15px; height: 15px; }
+.chart-stat-label {
+  font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.07em;
+  text-transform: uppercase; color: var(--muted);
+}
+.chart-stat-value {
+  font-family: var(--display); font-size: 20px; font-weight: 700;
+  color: var(--ink); line-height: 1.15; margin: 2px 0 1px;
+}
+.chart-stat-note { font-family: var(--small); font-size: 11px; color: var(--ink-3); }
+
+/* ---------- KPI tiles: an anchor and a comparison ---------- */
+
+.kpi2-head { display: flex; align-items: center; gap: 8px; }
+.kpi2-icon {
+  width: 22px; height: 22px; border-radius: var(--radius-sm); flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--teal-bg); color: var(--teal-3);
+}
+.kpi2-icon svg { width: 13px; height: 13px; }
+/* A region has no icon that means anything, and its series colour does. */
+.kpi2-mark { width: 9px; height: 9px; border-radius: 2px; flex-shrink: 0; }
+
+/* ---------- The companies table ---------- */
+
+.co-cell { display: flex; align-items: center; gap: 10px; }
+/* Where the references carry a logo. Derived from the name, so it is always
+   right and never has to be fetched. */
+.co-mark {
+  width: 24px; height: 24px; border-radius: var(--radius-sm); flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--paper-2); border: 1px solid var(--line-2);
+  font-family: var(--display); font-size: 11.5px; font-weight: 700; color: var(--ink-3);
+}
+.co-table tbody tr { transition: background 120ms ease; }
+.co-table tbody tr:hover { background: var(--surface-2); }
+
+/* ---------- Dashboard controls ----------
+   In the page header, not a band of their own. A full-width control panel
+   between the title and the first figure was the most prominent thing on a
+   page whose job is to show numbers, and it pushed the data below the fold. */
+
+.hdr-meta { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+.hdr-controls {
+  display: flex; align-items: flex-end; gap: 14px; flex-wrap: wrap;
+  justify-content: flex-end;
+  transition: opacity 160ms ease;
+}
+/* While the next payload is in flight the controls dim slightly rather than the
+   page blanking to a spinner. The figures stay on screen — react query keeps
+   the previous result — so a filter change reads as the numbers updating
+   rather than the page reloading. */
+.hdr-controls.busy { opacity: 0.55; }
+.hdr-coverage {
+  font-family: var(--mono); font-size: 11px; color: var(--muted);
+  letter-spacing: 0.04em; text-align: right;
+}
+
+.ctl { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
+.ctl-label {
+  font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.09em;
+  text-transform: uppercase; color: var(--muted);
+}
+.ctl-select { position: relative; display: inline-flex; }
+.ctl-select select {
+  font: inherit; font-family: var(--sans); font-size: 13px;
+  padding: 4px 27px 4px 9px; color: var(--ink);
+  background: var(--surface); border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm); cursor: pointer; min-width: 186px;
+  appearance: none; -webkit-appearance: none;
+  transition: border-color 120ms, background 120ms;
+}
+.ctl-select select:hover { border-color: var(--teal); background: var(--surface); }
+.ctl-select select:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+.ctl-caret {
+  position: absolute; right: 9px; top: 50%; transform: translateY(-50%);
+  width: 10px; height: 6px; color: var(--ink-3); pointer-events: none;
+}
+.ctl .seg-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.ctl .seg-btn:disabled:hover { background: var(--surface); color: var(--ink-3); }
+.ctl-reset { align-self: flex-end; padding: 4px 10px; }
+
+.viewing-past { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
+/* A button that reads as a link, because it navigates rather than acts. */
+.linkish {
+  background: none; border: none; padding: 0; cursor: pointer;
+  font: inherit; color: var(--teal-3); text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.linkish:hover { color: var(--teal-2); }
+.linkish:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+
+/* Narrow: the header stacks, so the controls become a left-aligned row under
+   the title rather than a right-aligned cluster beside it. */
+@media (max-width: 900px) {
+  .hdr-meta { align-items: flex-start; width: 100%; }
+  .hdr-controls { justify-content: flex-start; }
+  .hdr-coverage { text-align: left; }
+}
+@media (max-width: 560px) {
+  .ctl-select select { min-width: 0; width: 100%; }
+  .ctl { width: 100%; }
+}
 
 /* ---------- Trend chart: the interactive parts ---------- */
 
