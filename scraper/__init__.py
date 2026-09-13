@@ -27,7 +27,9 @@ class ScrapeFn(Protocol):
 
 def _registry() -> dict[str, ScrapeFn]:
     # Imported lazily so `import scraper` doesn't drag in bs4/crawlee.
-    from scraper import adzuna, newsfeed, pngbusinessnews, pngworkforce, seek
+    from scraper import (
+        adzuna, austender, newsfeed, pngbusinessnews, pngworkforce, seek,
+    )
 
     return {
         "pngworkforce": pngworkforce.scrape_async,
@@ -35,11 +37,12 @@ def _registry() -> dict[str, ScrapeFn]:
         "adzuna": adzuna.scrape_async,
         "newsfeed": newsfeed.scrape_async,
         "pngbusinessnews": pngbusinessnews.scrape_async,
+        "austender": austender.scrape_async,
     }
 
 
 SOURCE_NAMES: tuple[str, ...] = (
-    "pngworkforce", "seek", "adzuna", "newsfeed", "pngbusinessnews",
+    "pngworkforce", "seek", "adzuna", "newsfeed", "pngbusinessnews", "austender",
 )
 
 
