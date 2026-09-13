@@ -231,7 +231,11 @@ def test_only_the_enabled_sources_are_scraped(db, monkeypatch):
     monkeypatch.setattr(live, "save_pulse", lambda *a, **k: None)
 
     live.run_live_cycle(db_path=db, do_slack=False)
-    assert seen == [["pngworkforce", "newsfeed"]]
+    # Derived, not listed: this test is about the two that were switched off,
+    # and hardcoding the survivors makes every new source look like a failure.
+    from scraper import SOURCE_NAMES
+    expected = [n for n in SOURCE_NAMES if n not in ("seek", "adzuna")]
+    assert seen == [expected]
 
 
 # ---------- failing open ----------

@@ -63,6 +63,8 @@ SOURCE_INFO: dict[str, dict[str, str]] = {
     "seek": {"label": "SEEK", "market": "AU", "kind": "Job board"},
     "adzuna": {"label": "Adzuna", "market": "AU", "kind": "JSON API"},
     "newsfeed": {"label": "Industry news", "market": "AU + PNG", "kind": "RSS"},
+    "pngbusinessnews": {"label": "PNG Business News", "market": "PNG", "kind": "News site"},
+    "austender": {"label": "AusTender", "market": "AU", "kind": "Tenders"},
 }
 
 
