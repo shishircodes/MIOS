@@ -3,15 +3,20 @@ import { API_BASE } from './config'
 import { fetchJson } from './auth'
 import type {
   AccessPayload,
+  DashboardPayload,
+  DigestArchiveEntry,
   DigestPayload,
   FeedPayload,
   FeedQuery,
   MatchResponse,
+  OutcomeSummary,
   ParsedCV,
   ProfileDraft,
   Report,
+  LlmSettingsPayload,
   ReportSummary,
   SchedulePayload,
+  ScoringModel,
   SourcesPayload,
   StoredProfile,
   WatchlistResponse,
@@ -29,6 +34,24 @@ export const digestQueryOptions = queryOptions({
   // A 401 means "sign in", not "retry" — the auth gate handles it.
   retry: false,
 })
+
+/** The archive: every past digest, newest first, without payloads. */
+export const digestArchiveQueryOptions = queryOptions({
+  queryKey: ['digest', 'archive'],
+  queryFn: () => fetchJson<{ digests: DigestArchiveEntry[] }>('/api/digests'),
+  retry: false,
+})
+
+/** One past digest, exactly as it was published. `runId` empty means "latest",
+ *  which is what the page shows until somebody picks an earlier week. */
+export function digestByRunQueryOptions(runId: string) {
+  return queryOptions({
+    queryKey: ['digest', 'run', runId],
+    queryFn: () => fetchJson<DigestPayload>(`/api/digest/${encodeURIComponent(runId)}`),
+    enabled: runId !== '',
+    retry: false,
+  })
+}
 
 // ---------- Signal Feed ----------
 
@@ -188,6 +211,37 @@ export async function fetchMatches(profileId: string): Promise<MatchResponse> {
   return fetchJson<MatchResponse>(`/api/push/profiles/${profileId}/matches`)
 }
 
+/** Record what the team did with one ranked company.
+ *
+ *  The score travels with the decision rather than being looked up server-side:
+ *  it has to be the number the consultant was actually looking at, or the model
+ *  ends up judged against a later version of itself. */
+export async function recordOutcome(
+  profileId: string,
+  body: {
+    company: string
+    outcome: string
+    score?: number
+    confidence?: string
+    assessable?: number
+    rank?: number
+    note?: string
+  },
+): Promise<{ recorded: boolean; outcomes: Record<string, { outcome: string }> }> {
+  return postOrExplain(`/api/push/profiles/${encodeURIComponent(profileId)}/outcomes`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+}
+
+/** How much outcome data exists, and whether it is yet enough to calibrate. */
+export const outcomeSummaryQueryOptions = queryOptions({
+  queryKey: ['push', 'outcomes'],
+  queryFn: () => fetchJson<OutcomeSummary>('/api/push/outcomes'),
+  retry: false,
+})
+
 /** Rank companies for a draft without storing the person. */
 export async function matchDraft(draft: ProfileDraft): Promise<MatchResponse> {
   return postOrExplain<MatchResponse>('/api/push/match', {
@@ -276,4 +330,92 @@ export async function saveSchedule(next: {
 export async function runPipelineNow(): Promise<{ started: boolean; runId: string; note: string }> {
   return postOrExplain('/api/admin/schedule/run', { method: 'POST' })
 }
+
+/** Model routing, provider status and today's usage. Admin only. */
+export const llmSettingsQueryOptions = queryOptions({
+  queryKey: ['admin', 'llm'],
+  queryFn: () => fetchJson<LlmSettingsPayload>('/api/admin/llm'),
+  retry: false,
+})
+
+export async function setLlmRoute(
+  purpose: string,
+  provider: string,
+  model: string,
+): Promise<LlmSettingsPayload> {
+  return postOrExplain<LlmSettingsPayload>(`/api/admin/llm/${encodeURIComponent(purpose)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ provider, model }),
+  })
+}
+
+/** Return a purpose to the server setting, or the built-in default. */
+export async function clearLlmRoute(purpose: string): Promise<LlmSettingsPayload> {
+  return postOrExplain<LlmSettingsPayload>(`/api/admin/llm/${encodeURIComponent(purpose)}`, {
+    method: 'DELETE',
+  })
+}
+
+/** Store an API key for a provider.
+ *
+ *  Write-only: the response carries a hint and who set it, never the key. */
+export async function setProviderKey(
+  provider: string,
+  key: string,
+): Promise<LlmSettingsPayload> {
+  return postOrExplain<LlmSettingsPayload>(
+    `/api/admin/llm/keys/${encodeURIComponent(provider)}`,
+    {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key }),
+    },
+  )
+}
+
+/** Forget a stored key, returning the provider to its server setting. */
+export async function clearProviderKey(provider: string): Promise<LlmSettingsPayload> {
+  return postOrExplain<LlmSettingsPayload>(
+    `/api/admin/llm/keys/${encodeURIComponent(provider)}`,
+    { method: 'DELETE' },
+  )
+}
+
+/** Spend one real call to find out whether the key works.
+ *
+ *  Stored is not the same as working — a key can be truncated by a paste,
+ *  revoked, or belong to a project with the API switched off, and all three
+ *  look identical here until the Monday run fails. */
+export async function testProviderKey(
+  provider: string,
+  model?: string,
+): Promise<LlmSettingsPayload> {
+  return postOrExplain<LlmSettingsPayload>(
+    `/api/admin/llm/keys/${encodeURIComponent(provider)}/test`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: model ?? '' }),
+    },
+  )
+}
+
+/** How the match score is calculated. Read from the scorer, not written out in
+ *  the interface, so the two cannot disagree. */
+export const scoringModelQueryOptions = queryOptions({
+  queryKey: ['push', 'scoring'],
+  queryFn: () => fetchJson<ScoringModel>('/api/push/scoring'),
+  retry: false,
+  // The weights change when somebody tunes them, which is rare; there is no
+  // reason to re-ask on every mount.
+  staleTime: 10 * 60 * 1000,
+})
+
+/** Hiring trends, counted per collection. */
+export const dashboardQueryOptions = queryOptions({
+  queryKey: ['dashboard'],
+  queryFn: () => fetchJson<DashboardPayload>('/api/dashboard'),
+  retry: false,
+})
 

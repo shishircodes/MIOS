@@ -311,3 +311,91 @@ export function useFigure(value: number, opts?: { duration?: number; delay?: num
   useCountUp(ref, value, opts)
   return ref
 }
+
+/**
+ * Draw an SVG path on, as though it were being written.
+ *
+ * `stroke-dasharray` set to the path's own length with the offset animated to
+ * zero. The length is measured from the live element rather than estimated:
+ * a path built from data has no length anybody can predict, and a guess leaves
+ * either a gap at the end or a line that finishes early.
+ *
+ * `key` re-runs it, so toggling a series re-draws rather than snapping in.
+ */
+export function useDrawPath(
+  ref: RefObject<SVGPathElement | null>,
+  { key, duration = 0.9, delay = 0 }: { key?: string | number; duration?: number; delay?: number } = {},
+) {
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    // The final state is a fully drawn line, which is also the correct state
+    // with no animation at all.
+    if (skipMotion()) {
+      el.style.strokeDasharray = ''
+      el.style.strokeDashoffset = ''
+      return
+    }
+    let length = 0
+    try {
+      length = el.getTotalLength()
+    } catch {
+      // jsdom and some older engines have no geometry for an unrendered path.
+      return
+    }
+    if (!length) return
+    const tween = gsap.fromTo(
+      el,
+      { strokeDasharray: length, strokeDashoffset: length },
+      {
+        strokeDashoffset: 0, duration, delay, ease: 'power2.out',
+        onComplete: () => {
+          // Cleared, so a dashed series keeps its own dash pattern afterwards.
+          el.style.strokeDasharray = ''
+          el.style.strokeDashoffset = ''
+        },
+      },
+    )
+    return () => {
+      tween.kill()
+      el.style.strokeDasharray = ''
+      el.style.strokeDashoffset = ''
+    }
+  }, [ref, key, duration, delay])
+}
+
+/**
+ * Grow a set of elements from zero along one axis.
+ *
+ * For composition bars, where each slice is a share of a whole: they grow
+ * together rather than in sequence, because the bar is one figure divided up
+ * and staggering it would read as five separate measurements.
+ */
+export function useGrowSlices(
+  scope: RefObject<HTMLElement | null>,
+  selector: string,
+  { key, duration = 0.7, delay = 0.05 }: { key?: string | number; duration?: number; delay?: number } = {},
+) {
+  useEffect(() => {
+    const root = scope.current
+    if (!root) return
+    const els = Array.from(root.querySelectorAll<HTMLElement>(selector))
+    if (!els.length) return
+    if (skipMotion()) {
+      for (const el of els) el.style.transform = ''
+      return
+    }
+    // scaleX from a left origin rather than animating width: width is laid out
+    // by the browser on every frame, transform is not, and a dozen slices
+    // re-laying out together is visible on a modest machine.
+    const tween = gsap.fromTo(
+      els,
+      { scaleX: 0, transformOrigin: 'left center' },
+      { scaleX: 1, duration, delay, ease: 'power3.out', stagger: 0 },
+    )
+    return () => {
+      tween.kill()
+      for (const el of els) el.style.transform = ''
+    }
+  }, [scope, selector, key, duration, delay])
+}

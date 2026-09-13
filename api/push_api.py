@@ -25,6 +25,10 @@ from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, Upload
 from api.auth import require_user
 from push.cv_extract import MAX_BYTES, CVExtractionError, extract_text
 from push.matcher import match_profile
+from push.outcomes import OUTCOMES, UnknownOutcome, for_profile, record, summary
+from push.rarity import MIN_CORPUS as RARITY_MIN_CORPUS
+from push.rarity import build as build_rarity
+from push.rationale import ANNOTATE_TOP_N, annotate
 from push.profile_parser import parse_profile
 from push.store import (
     DEFAULT_MATCH_WINDOW_DAYS,
@@ -43,17 +47,54 @@ router = APIRouter(prefix="/api/push", tags=["push"])
 MAX_RESULTS = 25
 
 
-def _matches_for(profile: dict[str, Any], *, days: int, limit: int) -> dict[str, Any]:
+def _matches_for(profile: dict[str, Any], *, days: int, limit: int,
+                 explain: bool = True) -> dict[str, Any]:
     signals = signals_for_matching(days=days)
-    results = match_profile(profile, signals, limit=limit)
+    # Built once here rather than inside the matcher, so the payload can report
+    # whether it applied — the same object that scored is the one described.
+    rarity = build_rarity(signals)
+    results = match_profile(profile, signals, limit=limit, rarity_model=rarity)
+    matches = [m.to_dict(rank=i + 1) for i, m in enumerate(results)]
+
+    # The written half. Deliberately after the ranking is fixed and unable to
+    # change it — see push/rationale.py. Every failure here returns the ranking
+    # unannotated, so a spent quota costs the prose and not the result.
+    note = None
+    if explain:
+        matches, note = annotate(profile, matches)
+
+    # What has already been decided about these companies for this candidate, so
+    # a consultant is not asked twice and can see what a colleague did.
+    decided = for_profile(str(profile.get("id") or "")) if profile.get("id") else {}
+    for m in matches:
+        prior = decided.get(m["co"])
+        if prior:
+            m["outcome"] = {
+                "outcome": prior.get("outcome"),
+                "by": prior.get("recorded_by"),
+                "at": prior.get("recorded_at"),
+                "note": prior.get("note"),
+            }
+
     return {
         "profile": profile,
-        "matches": [m.to_dict(rank=i + 1) for i, m in enumerate(results)],
+        "matches": matches,
+        #: Why there is no written rationale, when there is none. Absent when
+        #: the annotation worked.
+        "rationaleNote": note,
         "windowDays": days,
         #: How much evidence the ranking is standing on. A short list of matches
         #: means something different when it came from 12 signals than from 900,
         #: and the UI says which.
         "signalsConsidered": len(signals),
+        #: Whether rarity weighting was in play. A score computed with it and
+        #: one computed without are different numbers, and a reader comparing
+        #: across weeks should be told which they are looking at.
+        "rarity": {
+            "applies": rarity.applies,
+            "corpusSize": rarity.corpus_size,
+            "minimum": RARITY_MIN_CORPUS,
+        },
     }
 
 
@@ -177,3 +218,155 @@ def match_unsaved(
 #: Re-exported so the web app can enforce the same limit before uploading and
 #: give an instant error instead of a round trip.
 UPLOAD_LIMIT_BYTES = MAX_BYTES
+
+
+@router.get("/scoring")
+def scoring_model(user: dict[str, Any] = Depends(require_user)) -> dict[str, Any]:
+    """How a match score is arrived at.
+
+    Served from the scorer's own constants rather than written out in the
+    interface. A description of the model kept separately from the model drifts
+    the first time a weight is tuned, and it drifts silently — the screen would
+    keep explaining a calculation that no longer happens.
+    """
+    from llm import PURPOSE_PUSH, available_providers, resolve
+    from push import matcher
+
+    provider, model = resolve(PURPOSE_PUSH)
+    # The human label, not the internal key: "gemini · gemini-2.5-flash" reads
+    # like a stutter on screen.
+    label = next((p["label"] for p in available_providers() if p["name"] == provider), provider)
+    return {
+        "total": (matcher.W_ROLE + matcher.W_SKILLS + matcher.W_SIGNAL_QUALITY
+                  + matcher.W_SECTOR + matcher.W_MOMENTUM + matcher.W_VOLUME
+                  + matcher.W_RELATIONSHIP + matcher.W_SENIORITY + matcher.W_REGION
+                  + matcher.W_RECENCY),
+        "contributors": [
+            {"key": "role", "weight": matcher.W_ROLE, "label": "Role demand",
+             "what": "How closely the roles they are advertising match the candidate's job "
+                     "title. Compared loosely, so “Snr Maint. Planner” and “Senior "
+                     "Maintenance Planner” count as the same discipline."},
+            {"key": "skills", "weight": matcher.W_SKILLS, "label": "Skills overlap",
+             "what": "How many of the candidate's skills actually appear in the adverts. "
+                     "Matched as whole words: a skill is something an employer either asked "
+                     "for or did not."},
+            {"key": "signalQuality", "weight": matcher.W_SIGNAL_QUALITY,
+             "label": "Signal quality",
+             "what": "What kind of signals these are, not just how many. A new project or a "
+                     "leadership change is a decision point; routine vacancies mean the "
+                     "company is ticking over."},
+            {"key": "sector", "weight": matcher.W_SECTOR, "label": "Sector fit",
+             "what": "How much of their hiring is in the candidate's sector."},
+            {"key": "momentum", "weight": matcher.W_MOMENTUM, "label": "Momentum",
+             "what": "Whether their hiring is accelerating against their own recent average — "
+                     "the difference between a good account and a good week to call one."},
+            {"key": "volume", "weight": matcher.W_VOLUME, "label": "Hiring volume",
+             "what": "How much they are hiring right now, levelling off past a handful of "
+                     "roles."},
+            {"key": "relationship", "weight": matcher.W_RELATIONSHIP, "label": "Relationship",
+             "what": "Whether they are already a watchlist client. A new name still scores — "
+                     "it is a genuine opportunity, just a colder one."},
+            {"key": "seniority", "weight": matcher.W_SENIORITY, "label": "Seniority fit",
+             "what": "Whether the level being advertised matches the candidate's experience. "
+                     "Silent when either is unknown rather than assuming a fit."},
+            {"key": "region", "weight": matcher.W_REGION, "label": "Region fit",
+             "what": "Whether they are hiring in the candidate's market."},
+            {"key": "recency", "weight": matcher.W_RECENCY, "label": "Recency",
+             "what": "How fresh the signals are, fading to nothing over a month."},
+        ],
+        "normalisation": (
+            "A contributor that has nothing to judge — no skills recorded on the "
+            "profile, no seniority stated in the adverts, no earlier week to measure "
+            "a trend against — is left out of the total rather than scored zero. "
+            "Charging a company for a gap in our own data would make it look worse "
+            "than the evidence says. The points earned are then scaled to 100, so a "
+            "company judged on 86 points that earns 60 of them shows as 70. Each row "
+            "says what it was assessed on when that is not the whole model."
+        ),
+        "confidence": [
+            {"level": "high", "what": "Eight or more signals across more than one collection."},
+            {"level": "medium", "what": "At least three signals."},
+            {"level": "low", "what": "One or two signals — a lead, not a finding. Also "
+                                     "used whenever less than 60 of the 100 points could "
+                                     "be judged, however many signals there are: a score "
+                                     "scaled up from a narrow assessment is arithmetically "
+                                     "right and a poor thing to act on."},
+        ],
+        "llm": {
+            "provider": label,
+            "model": model,
+            "annotatesTop": ANNOTATE_TOP_N,
+            "what": "A model writes the rationale and gives its own read of the fit. It "
+                    "cannot change the score or the order — the ranking has to stay "
+                    "reproducible, so where the model disagrees it is shown as a flag "
+                    "for you to look at rather than applied to the number.",
+        },
+        "caveat": "The weights are judgement, not calibration: nobody has been placed "
+                  "through this yet. Every score is shown broken down so the judgement can "
+                  "be argued with, and the weights are expected to change once the team can "
+                  "say what actually predicts a placement.",
+    }
+
+
+# --------------------------------------------------------------------------
+# What happened to a match
+# --------------------------------------------------------------------------
+
+
+@router.post("/profiles/{profile_id}/outcomes")
+def record_outcome(
+    profile_id: str,
+    payload: dict[str, Any] = Body(...),
+    user: dict[str, Any] = Depends(require_user),
+) -> dict[str, Any]:
+    """Record what the team did with one ranked company.
+
+    The score is taken from the request rather than recomputed, and that is
+    deliberate: it must be the number the consultant was actually looking at
+    when they decided. Recomputing it here would judge the decision against a
+    model and a signal set that did not exist at the time — which is how a
+    scoring model comes to confirm whatever it currently believes.
+    """
+    company = str(payload.get("company") or "").strip()
+    outcome = str(payload.get("outcome") or "").strip()
+    if not company:
+        raise HTTPException(status_code=400, detail="A company is required.")
+
+    def _int_or_none(key: str) -> int | None:
+        value = payload.get(key)
+        try:
+            return int(value) if value is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    try:
+        record(
+            profile_id,
+            company,
+            outcome,
+            score=_int_or_none("score"),
+            confidence=str(payload.get("confidence") or "") or None,
+            assessable=_int_or_none("assessable"),
+            rank_shown=_int_or_none("rank"),
+            note=str(payload.get("note") or "") or None,
+            recorded_by=user["email"],
+        )
+    except UnknownOutcome as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return {"recorded": True, "company": company, "outcome": outcome,
+            "outcomes": for_profile(profile_id)}
+
+
+@router.get("/outcomes")
+def outcome_summary(user: dict[str, Any] = Depends(require_user)) -> dict[str, Any]:
+    """How much outcome data exists, and whether it is yet enough to calibrate.
+
+    Deliberately returns counts and a threshold rather than a success rate. A
+    precision figure over a handful of decisions is not a rough measurement, it
+    is a wrong one, and the interface has to be able to say "not yet" rather
+    than print a number that looks like an answer.
+    """
+    return {"verbs": OUTCOMES, **summary()}

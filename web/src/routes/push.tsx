@@ -1,19 +1,16 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
 import { useRef, useState } from 'react'
+import { ScoringExplainer } from '~/components/ScoringExplainer'
 import { Icons, RegionChip, Section } from '~/components/ui'
 import { useCountUpAll, useReveal } from '~/lib/motion'
-import {
-  deleteProfile,
-  fetchMatches,
-  matchDraft,
-  parseCV,
-  profilesQueryOptions,
-  saveProfile,
-} from '~/lib/api'
+import { deleteProfile, fetchMatches, matchDraft, parseCV, profilesQueryOptions, recordOutcome, saveProfile, scoringModelQueryOptions } from '~/lib/api'
 import { UnauthenticatedError } from '~/lib/auth'
 import { useAuth } from '~/lib/auth-context'
-import type { Confidence, Match, ParsedCV, ProfileDraft, StoredProfile } from '~/lib/types'
+import type {
+  Confidence, Match, ParsedCV, ProfileDraft, RarityState, StoredProfile,
+} from '~/lib/types'
+import { MatchDetail } from '~/components/MatchDetail'
 
 export const Route = createFileRoute('/push')({
   head: () => ({ meta: [{ title: 'Push · MIOS' }] }),
@@ -27,6 +24,20 @@ const EMPTY: ProfileDraft = {
 }
 
 const SECTORS = ['mining', 'oil_gas', 'construction', 'defence', 'energy_transition', 'other']
+/** Why the AI notes are missing, in a sentence rather than a provider's raw
+ *  error. The full text is a JSON blob with a support URL in it; a consultant
+ *  needs to know whether to wait, ask an admin, or ignore it. */
+function explainNote(note: string): string {
+  const n = note.toLowerCase()
+  if (n.includes('429') || n.includes('quota') || n.includes('resource_exhausted')) {
+    return 'the daily model allowance is spent. The ranking below is unaffected.'
+  }
+  if (n.includes('api_key') || n.includes('not set') || n.includes('not configured')) {
+    return 'no model is configured. An administrator can set one under Models & cost.'
+  }
+  return 'the model could not be reached. The ranking below is unaffected.'
+}
+
 const SECTOR_LABEL: Record<string, string> = {
   mining: 'Mining', oil_gas: 'Oil & Gas', construction: 'Construction',
   defence: 'Defence', energy_transition: 'Energy Transition', other: 'Other',
@@ -153,10 +164,28 @@ function PushScreen() {
   const [origin, setOrigin] = useState<{ source: 'cv_upload' | 'manual_form'; filename: string | null }>(
     { source: 'manual_form', filename: null },
   )
+  const [explainOpen, setExplainOpen] = useState(false)
+  // The denominator, read from the scorer rather than written as 100 here. The
+  // weights sum to 100 and a test keeps them there, but a number on screen
+  // should follow the calculation instead of restating a fact about it.
+  const scoring = useQuery(scoringModelQueryOptions)
+  const scoreTotal = scoring.data?.total ?? 100
   const [matches, setMatches] = useState<Match[] | null>(null)
   const [matchMeta, setMatchMeta] = useState<{ windowDays: number; considered: number } | null>(null)
+  // Why the AI notes are missing, when they are. A silent absence would leave
+  // nobody able to tell a spent quota from a model that had nothing to say.
+  const [rationaleNote, setRationaleNote] = useState<string | null>(null)
   const [subject, setSubject] = useState<string>('')
   const [error, setError] = useState<string | null>(null)
+  //: Which half of the page is showing. Results are a view, not a section
+  //: appended below the form.
+  const [view, setView] = useState<'form' | 'results'>('form')
+  //: The company whose full working is open in the drawer.
+  const [openMatch, setOpenMatch] = useState<Match | null>(null)
+  const [rarity, setRarity] = useState<RarityState | undefined>(undefined)
+  //: Outcomes attach to a stored profile. A draft match has nobody to attach
+  //: to, so the buttons are not offered rather than failing on use.
+  const [matchedProfileId, setMatchedProfileId] = useState<string | null>(null)
 
   const profiles = useQuery(profilesQueryOptions)
 
@@ -172,10 +201,24 @@ function PushScreen() {
     setDraft((d) => ({ ...d, [key]: value }))
   }
 
-  function applyMatches(res: { matches: Match[]; windowDays: number; signalsConsidered: number }, who: string) {
+  function applyMatches(
+    res: { matches: Match[]; windowDays: number; signalsConsidered: number
+           rationaleNote?: string | null; rarity?: RarityState },
+    who: string,
+    forProfileId?: string,
+  ) {
     setMatches(res.matches)
     setMatchMeta({ windowDays: res.windowDays, considered: res.signalsConsidered })
+    setRationaleNote(res.rationaleNote ?? null)
+    setRarity(res.rarity)
     setSubject(who)
+    setMatchedProfileId(forProfileId ?? null)
+    // Results own the screen from here. The form is one click away and keeps
+    // its contents — the previous version left a ranking buried under a long
+    // form, so reading it meant scrolling past the fields that produced it.
+    setView('results')
+    setOpenMatch(null)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
   const upload = useMutation({
@@ -222,7 +265,7 @@ function PushScreen() {
     onSuccess: ({ stored, res }) => {
       setError(null)
       void qc.invalidateQueries({ queryKey: ['push', 'profiles'] })
-      applyMatches(res, stored.fullName || stored.id)
+      applyMatches(res, stored.fullName || stored.id, stored.id)
     },
     onError: (e: Error) => setError(e.message),
   })
@@ -236,7 +279,7 @@ function PushScreen() {
       setParsed(null)
       setDraft({ ...EMPTY, ...p })
       setOrigin({ source: p.intakeSource, filename: p.sourceFilename })
-      applyMatches(res, p.fullName || p.id)
+      applyMatches(res, p.fullName || p.id, p.id)
     },
     onError: (e: Error) => setError(e.message),
   })
@@ -244,6 +287,28 @@ function PushScreen() {
   const remove = useMutation({
     mutationFn: deleteProfile,
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['push', 'profiles'] }),
+    onError: (e: Error) => setError(e.message),
+  })
+
+  const mark = useMutation({
+    mutationFn: (v: { company: string; verb: string; m: Match }) =>
+      recordOutcome(matchedProfileId!, {
+        company: v.company,
+        outcome: v.verb,
+        // The score as displayed, not as recomputed. It has to be the number
+        // the consultant was looking at when they decided.
+        score: v.m.score,
+        confidence: v.m.confidence,
+        assessable: v.m.assessable,
+        rank: v.m.rank,
+      }),
+    onSuccess: (_res, v) => {
+      setError(null)
+      const stamped = { outcome: v.verb }
+      setMatches((list) => list?.map(
+        (m) => (m.co === v.company ? { ...m, outcome: stamped } : m)) ?? null)
+      setOpenMatch((m) => (m && m.co === v.company ? { ...m, outcome: stamped } : m))
+    },
     onError: (e: Error) => setError(e.message),
   })
 
@@ -280,6 +345,171 @@ function PushScreen() {
     }
   }
 
+  // ---------- Results view ----------
+  //
+  // A view rather than a section under the form. The ranking is the answer to
+  // the question the page asks, and it used to sit below every field that
+  // produced it — so reading it meant scrolling past the CV, and comparing two
+  // companies meant scrolling between them.
+  if (view === 'results' && matches !== null) {
+    return (
+      <div className="page" ref={scope}>
+        <div className="results-bar">
+          <button className="btn sm ghost" onClick={() => setView('form')}>
+            ← Back to the profile
+          </button>
+          <div className="results-subject">
+            <strong>{subject || 'this profile'}</strong>
+            <span className="muted">
+              {[draft.currentTitle, draft.sector && (SECTOR_LABEL[draft.sector] ?? draft.sector),
+                draft.region].filter(Boolean).join(' · ') || 'no details recorded'}
+            </span>
+          </div>
+          <button className="btn sm ghost" onClick={() => setExplainOpen(true)}>
+            How does the scoring work?
+          </button>
+        </div>
+
+        <div className="page-header">
+          <div>
+            <div className="kicker">Mode Push · Ranked matches</div>
+            <h1>Who to approach about {subject || 'this candidate'}</h1>
+          </div>
+          <div className="meta">
+            <div>{matches.length} result{matches.length === 1 ? '' : 's'}</div>
+            <div style={{ marginTop: 4 }}>
+              from {matchMeta?.considered ?? 0} signals over {matchMeta?.windowDays ?? 30} days
+            </div>
+          </div>
+        </div>
+
+        {error && <div className="notice err" role="alert">{error}</div>}
+
+        {/* Whether rarity weighting was in play. Two scores computed under
+            different models are not comparable, and the reader is told which
+            one they are looking at rather than left to assume. */}
+        {rarity && !rarity.applies && (
+          <div className="notice warn" role="status">
+            <strong>Skills were not weighted by rarity this run.</strong> {rarity.corpusSize}{' '}
+            advert{rarity.corpusSize === 1 ? '' : 's'} is below the {rarity.minimum} needed to
+            tell a rare skill from a common one, so every skill counted equally. Scores are
+            still comparable with each other, but not with a run that had more to measure.
+          </div>
+        )}
+
+        {matches.length > 0 && rationaleNote && (
+          <div className="scoring-hint">
+            <span className="muted">No AI notes this time — {explainNote(rationaleNote)}</span>
+          </div>
+        )}
+
+        {matches.length === 0 && (
+          <div className="center-empty">
+            No companies matched.
+            {matchMeta?.considered === 0
+              ? ' No market activity has been collected yet for this period.'
+              : ' Try widening the sector or region, or clearing the current title.'}
+          </div>
+        )}
+
+        {matches.map((m) => (
+          <div
+            className="match-row clickable"
+            key={m.rank}
+            role="button"
+            tabIndex={0}
+            aria-label={`${m.co}, scored ${m.score}. Open the full breakdown.`}
+            onClick={() => setOpenMatch(m)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault()
+                setOpenMatch(m)
+              }
+            }}
+          >
+            <div className="rank">{m.rank}</div>
+            <div>
+              <p className="co-name">{m.co}</p>
+              <div className="co-meta">
+                <span>{m.rel}</span><span>·</span><span>{m.region}</span>
+                <span>·</span><span>{SECTOR_LABEL[m.sector] ?? m.sector}</span>
+                {m.outcome && (
+                  <>
+                    <span>·</span>
+                    <span className="outcome-tag">{m.outcome.outcome.replace('_', ' ')}</span>
+                  </>
+                )}
+              </div>
+              <ul className="ev-list">
+                {m.evidence.slice(0, 3).map((e, i) => <li key={i}>{e}</li>)}
+              </ul>
+              {m.evidence.length > 3 && (
+                <div className="ev-more">
+                  +{m.evidence.length - 3} more · open for the full breakdown
+                </div>
+              )}
+
+              {/* The written half. Marked as written by a model, because a
+                  sentence a consultant may repeat to a client should say where
+                  it came from. */}
+              {m.rationale && (
+                <div className={`match-note${m.disagrees ? ' flagged' : ''}`}>
+                  <div className="match-note-head">
+                    <span className="match-note-tag">AI note</span>
+                    {m.fit && <span className={`fit-chip ${m.fit}`}>{m.fit} fit</span>}
+                    {m.disagrees && (
+                      <span className="fit-chip disagrees">disagrees with the score</span>
+                    )}
+                  </div>
+                  <p>{m.rationale}</p>
+                  {m.caveat && <p className="match-caveat">Check first: {m.caveat}</p>}
+                </div>
+              )}
+            </div>
+            <div className="score">
+              <div className="score-line">
+                {/* The number stays alone in .big: the count-up animation
+                    rewrites its text content. */}
+                <span className="big">{m.score}</span>
+                <span className="out-of">/ {scoreTotal}</span>
+              </div>
+              match score
+              {/* Only when it is not the whole model. Saying "scored on 100 of
+                  100" on every row would be noise; saying nothing when it was
+                  86 would hide that the number is a scaling. */}
+              {m.assessable !== undefined && m.assessable < scoreTotal && (
+                <div className="assessed-on">
+                  {m.earned}/{m.assessable} assessed
+                </div>
+              )}
+              {/* Beside the score, never folded into it: a thin case and a
+                  strong one can reach the same number. */}
+              {m.confidence && (
+                <div className={`conf-chip ${m.confidence}`}>{m.confidence} confidence</div>
+              )}
+              <div style={{ marginTop: 10 }}>
+                <span className="btn rust sm">{Icons.push} Why this score</span>
+              </div>
+            </div>
+          </div>
+        ))}
+
+        <MatchDetail
+          match={openMatch}
+          rarity={rarity}
+          busy={mark.isPending}
+          onClose={() => setOpenMatch(null)}
+          // Outcomes attach to a stored profile. A draft has no id to attach
+          // to, so the buttons are absent rather than failing when pressed.
+          onOutcome={matchedProfileId && openMatch
+            ? (verb) => mark.mutate({ company: openMatch.co, verb, m: openMatch })
+            : undefined}
+        />
+        <ScoringExplainer open={explainOpen} onClose={() => setExplainOpen(false)} />
+      </div>
+    )
+  }
+
   return (
     <div className="page" ref={scope}>
       <div className="page-header">
@@ -290,6 +520,15 @@ function PushScreen() {
         <div className="meta">
           <div>{profiles.data?.length ?? 0} saved profile(s)</div>
           <div style={{ marginTop: 4 }}>Matched against the last 30 days of signals</div>
+          {/* In the header, not beside the results: "how does this decide who to
+              contact?" is a question somebody asks before trusting it with a
+              candidate, and answering it only after they already have a ranking
+              is answering it too late. */}
+          <div style={{ marginTop: 8 }}>
+            <button className="btn sm ghost" onClick={() => setExplainOpen(true)}>
+              How does the scoring work?
+            </button>
+          </div>
         </div>
       </div>
 
@@ -502,55 +741,11 @@ function PushScreen() {
         </div>
       </Section>
 
-      {/* ---------- Results ---------- */}
-      <Section
-        title={subject ? `Ranked matches for ${subject}` : 'Ranked matches'}
-        tools={
-          <span>
-            {matches === null
-              ? 'NO SEARCH YET'
-              : `${matches.length} RESULTS · ${matchMeta?.considered ?? 0} SIGNALS · ${matchMeta?.windowDays ?? 30}D`}
-          </span>
-        }
-      >
-        {matches === null && (
-          <div className="center-empty">
-            Upload a CV or fill in the form above, then choose “Find matches”.
-          </div>
-        )}
-        {matches !== null && matches.length === 0 && (
-          <div className="center-empty">
-            No companies matched.
-            {matchMeta?.considered === 0
-              ? ' No market activity has been collected yet for this period.'
-              : ' Try widening the sector or region, or clearing the current title.'}
-          </div>
-        )}
-        {matches?.map((m) => (
-          <div className="match-row" key={m.rank}>
-            <div className="rank">{m.rank}</div>
-            <div>
-              <p className="co-name">{m.co}</p>
-              <div className="co-meta">
-                <span>{m.rel}</span><span>·</span><span>{m.region}</span>
-                <span>·</span><span>{SECTOR_LABEL[m.sector] ?? m.sector}</span>
-              </div>
-              <ul className="ev-list">
-                {m.evidence.map((e, i) => <li key={i}>{e}</li>)}
-              </ul>
-            </div>
-            <div className="score">
-              <span className="big">{m.score}</span>
-              match score
-              <div style={{ marginTop: 10 }}>
-                <button className="btn rust sm">{Icons.push} {m.action}</button>
-              </div>
-            </div>
-          </div>
-        ))}
-      </Section>
+      {/* Results live in their own view — see the results branch above. */}
 
       {/* ---------- Saved profiles ---------- */}
+      <ScoringExplainer open={explainOpen} onClose={() => setExplainOpen(false)} />
+
       <Section title="Saved profiles" tools={<span>{profiles.data?.length ?? 0} STORED</span>}>
         <table className="tbl">
           <thead>

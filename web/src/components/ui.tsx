@@ -78,10 +78,20 @@ export function RegionChip({ region }: { region: string }) {
 }
 
 // ----- Sparkbar -----
-export function SparkBar({ data, color = 'var(--ink-3)', height = 24 }: { data: number[]; color?: string; height?: number }) {
+export function SparkBar({
+  data,
+  color = 'var(--ink-3)',
+  height = 24,
+  fill = false,
+}: { data: number[]; color?: string; height?: number; fill?: boolean }) {
   const max = Math.max(...data, 1)
+  // `fill` spreads the bars across the available width instead of drawing them
+  // at a fixed 6px. Inline in a table row, fixed width is right — the chart
+  // should not change size with the number of points. As a panel-width chart it
+  // is wrong: five collections rendered into 30px of a 700px card, which reads
+  // as a broken chart rather than as a short history.
   return (
-    <div className="spark" style={{ height }}>
+    <div className={`spark${fill ? ' fill' : ''}`} style={{ height }}>
       {data.map((v, i) => (
         <span key={i} style={{ background: color, height: `${(v / max) * 100}%` }} />
       ))}
@@ -101,6 +111,30 @@ export function Section({ title, tools, children }: { title?: string; tools?: Re
       )}
       <div>{children}</div>
     </div>
+  )
+}
+
+/** Collapsed explanation beneath a panel.
+ *
+ *  The admin screens each carry a few paragraphs on why something behaves as it
+ *  does — why a stored key beats an environment one, why a source that ships off
+ *  ships off, why a failed model call still counts against the allowance. All of
+ *  it is worth having and none of it is worth reading twice, so it opens on
+ *  demand rather than sitting between an administrator and the controls.
+ *
+ *  A `<details>` rather than a custom disclosure: it is keyboard-operable and
+ *  announced correctly with no work, it prints expanded, and the browser's find
+ *  can reach the text inside it.
+ *
+ *  `title` should name the question the text answers. "Notes" tells nobody
+ *  whether opening it is worth the click.
+ */
+export function Explainer({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <details className="explainer">
+      <summary>{title}</summary>
+      <div className="explainer-body">{children}</div>
+    </details>
   )
 }
 

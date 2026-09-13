@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { CapturedAt, Drawer, Icons, Loading, Section, SparkBar, TierChip, Trend } from '~/components/ui'
-import { digestQueryOptions } from '~/lib/api'
+import { digestArchiveQueryOptions, digestByRunQueryOptions, digestQueryOptions } from '~/lib/api'
 import { UnauthenticatedError } from '~/lib/auth'
 import { useAuth } from '~/lib/auth-context'
 import { useFigure, useGrowBar, useGrowBars, useReveal } from '~/lib/motion'
@@ -34,7 +34,15 @@ export const Route = createFileRoute('/monitor/digest')({
 })
 
 function WeeklyDigest() {
-  const { data, isLoading, isError, error } = useQuery(digestQueryOptions)
+  // Empty means "the latest", which is what the page opens on. Picking an
+  // earlier week swaps in that run's stored digest.
+  const [runId, setRunId] = useState('')
+  const latest = useQuery(digestQueryOptions)
+  const chosen = useQuery(digestByRunQueryOptions(runId))
+  const archive = useQuery(digestArchiveQueryOptions)
+
+  const active = runId === '' ? latest : chosen
+  const { data, isLoading, isError, error } = active
   const { refresh } = useAuth()
   const [drawer, setDrawer] = useState<Signal | null>(null)
   const { q: urlQuery } = Route.useSearch()
@@ -149,12 +157,50 @@ function WeeklyDigest() {
           <h1>{data.weekLabel}</h1>
         </div>
         <div className="meta">
-          <div style={{ marginTop: 6, display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
-            <span className={`mode-banner ${data.sourceMode}`}>
-              <span className={data.sourceMode === 'live' ? 'dot-ok' : 'dot-warn'} />
-              {data.sourceMode === 'live' ? 'Live data' : 'Sample data'}
-            </span>
-          </div>
+          {/* Past digests. Each entry is one pipeline run, so choosing a week
+              shows exactly what that run collected and what was published from
+              it — not a recomputation, which later re-classification or a
+              watchlist edit would quietly change. */}
+          {(archive.data?.digests.length ?? 0) > 1 && (
+            <label className="digest-pick">
+              <span className="digest-pick-label">Showing</span>
+              <span className="digest-pick-control">
+                <select value={runId} onChange={(e) => setRunId(e.target.value)}>
+                  <option value="">Latest collection</option>
+                  {archive.data?.digests.map((d) => (
+                    <option key={d.runId} value={d.runId}>
+                      {new Date(d.windowTo).toLocaleDateString('en-AU', {
+                        day: 'numeric', month: 'short', year: 'numeric',
+                      })} — {d.signalCount} signal{d.signalCount === 1 ? '' : 's'}
+                    </option>
+                  ))}
+                </select>
+                {/* Drawn rather than left to the platform: a bare select renders
+                    three different ways across browsers, which is most of why
+                    this control looked unfinished next to the app's own. */}
+                <svg className="digest-pick-caret" viewBox="0 0 10 6" aria-hidden="true">
+                  <path d="M1 1l4 4 4-4" fill="none" stroke="currentColor"
+                        strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </span>
+            </label>
+          )}
+          {/* No "Archived" or "Live data" chip. Every digest is archived and
+              every digest is live, so both said the same thing on every visit —
+              a badge that never varies is furniture, and the week selector
+              beside it already says which collection is on screen.
+
+              Sample data is the exception and stays: that badge is the only
+              thing on the page distinguishing a real week from a demonstration
+              one, and it is not the normal state. */}
+          {data.sourceMode !== 'live' && (
+            <div style={{ marginTop: 6, display: 'flex', justifyContent: 'flex-end' }}>
+              <span className="mode-banner synthetic">
+                <span className="dot-warn" />
+                Sample data
+              </span>
+            </div>
+          )}
         </div>
       </div>
 
@@ -297,8 +343,14 @@ function WeeklyDigest() {
       </div>
 
       <div style={{ textAlign: 'center', padding: '24px 0', fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--muted)', letterSpacing: '0.08em' }}>
-        END OF DIGEST · {data.sourceMode === 'live' ? 'LIVE DATA' : 'SAMPLE DATA'}
-        {data.sourceMode === 'live' && ` · ${data.windowEmpty ? 'MOST RECENT COLLECTION' : `LAST ${data.windowDays} DAYS`}`}
+        {/* "LIVE DATA" is dropped here for the same reason as the badge above.
+            "SAMPLE DATA" is not: it is the one case worth repeating at the foot
+            of a long page, where a reader who scrolled past the header would
+            otherwise have no reminder that none of this is real. */}
+        END OF DIGEST
+        {data.sourceMode === 'live'
+          ? ` · ${data.windowEmpty ? 'MOST RECENT COLLECTION' : `LAST ${data.windowDays} DAYS`}`
+          : ' · SAMPLE DATA'}
       </div>
 
       <Drawer open={!!drawer} onClose={() => setDrawer(null)} title={drawer ? `Signal · ${drawer.id.slice(0, 12)}` : ''}>
@@ -331,28 +383,36 @@ function MarketPulseSection({ pulse }: { pulse: MarketPulse }) {
   useReveal(scope, '.pulse-item', { key: pulse.generatedAt, delay: 0.15, stagger: 0.06 })
 
   return (
-    <div className="pulse" ref={scope}>
-      <div className="pulse-head">
-        <span className="kicker">Market Pulse</span>
-        <span className="muted">
-          Written from {pulse.signalsAnalysed.toLocaleString()} signals
-        </span>
-      </div>
-      <ul className="pulse-list">
-        {pulse.bullets.map((b, i) => (
-          <li key={i} className={`pulse-item ${b.kind}`}>
-            <span className="pulse-text">{b.text}</span>
-            {b.kind === 'interpretation' && (
-              <span
-                className="pulse-tag"
-                title="A reading of the data, not a measurement from it"
-              >
-                interpretation
-              </span>
-            )}
-          </li>
-        ))}
-      </ul>
+    // The same chassis as every other block on the page. It used to be a
+    // bespoke card — its own border weight, its own gradient, its own header —
+    // which made the one written passage on the screen look like something
+    // pasted in from a different product rather than the read of the week the
+    // tables underneath it support.
+    //
+    // What is kept is the part that carries meaning: the bullets stay larger
+    // than body text, because this is the conclusion and the tables around it
+    // are the evidence.
+    <div ref={scope}>
+      <Section
+        title="Market Pulse"
+        tools={<span>{pulse.signalsAnalysed.toLocaleString()} SIGNALS READ</span>}
+      >
+        <ul className="pulse-list">
+          {pulse.bullets.map((b, i) => (
+            <li key={i} className={`pulse-item ${b.kind}`}>
+              <span className="pulse-text">{b.text}</span>
+              {b.kind === 'interpretation' && (
+                <span
+                  className="pulse-tag"
+                  title="A reading of the data, not a measurement from it"
+                >
+                  interpretation
+                </span>
+              )}
+            </li>
+          ))}
+        </ul>
+      </Section>
     </div>
   )
 }

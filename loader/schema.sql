@@ -256,3 +256,122 @@ CREATE TABLE IF NOT EXISTS pipeline_runs (
 CREATE INDEX IF NOT EXISTS idx_pipeline_runs_started ON pipeline_runs(started_at);
 CREATE UNIQUE INDEX IF NOT EXISTS ux_pipeline_runs_due ON pipeline_runs(due_at);
 
+
+-- ---------------------------------------------------------------------------
+-- One digest per run, kept
+-- ---------------------------------------------------------------------------
+
+-- The digest used to be recomputed from a rolling seven-day window on every
+-- page load, which meant two things at once. It blended runs: a digest built
+-- the day after a Monday scrape showed the previous Monday's signals beside
+-- it, under a heading claiming to be one week. And it had no past: a new run
+-- simply changed what the single page said, so last week's digest could not be
+-- read back.
+--
+-- So a digest is now a snapshot, written once when the run that produced it
+-- finishes, and kept.
+--
+-- `payload` is the rendered dashboard payload as JSON. Storing the finished
+-- shape rather than re-deriving it is deliberate: signals get re-classified,
+-- watchlists change, and competitor lists are edited. Re-deriving would let any
+-- of those silently rewrite a digest that was published weeks ago and possibly
+-- acted on. What is stored is what was sent.
+CREATE TABLE IF NOT EXISTS digests (
+    -- The run this digest belongs to. One run, one digest.
+    run_id       TEXT PRIMARY KEY,
+    -- The capture window this run actually covered, from its own signals.
+    window_from  TEXT NOT NULL,
+    window_to    TEXT NOT NULL,
+    generated_at TEXT NOT NULL,
+    -- How many classified signals the digest was built from, so the archive
+    -- list can be useful without parsing every payload.
+    signal_count INTEGER NOT NULL DEFAULT 0,
+    payload      TEXT NOT NULL,
+    -- The Slack text as posted, so the archive can show what was actually sent
+    -- rather than a re-render of it.
+    digest_text  TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_digests_window_to ON digests(window_to);
+
+
+-- ---------------------------------------------------------------------------
+-- Which model answers which question
+-- ---------------------------------------------------------------------------
+
+-- Only deviations, like `source_settings`: a purpose with no row sits at
+-- whatever LLM_ROUTING or the built-in default says. So a default can be
+-- revised later without rewriting every row that merely agreed with the old
+-- one, and "reset this purpose" is a delete rather than a second kind of state.
+CREATE TABLE IF NOT EXISTS llm_settings (
+    purpose    TEXT PRIMARY KEY,
+    provider   TEXT NOT NULL,
+    model      TEXT NOT NULL,
+    -- Who chose it. A model choice changes what the pipeline costs and how it
+    -- reads, so "why is Market Pulse suddenly different?" needs an answer.
+    changed_by TEXT,
+    changed_at TEXT NOT NULL
+);
+
+
+
+-- ---------------------------------------------------------------------------
+-- Provider API keys entered in the panel
+-- ---------------------------------------------------------------------------
+
+-- Only deviations, like `llm_settings` above: a provider with no row falls back
+-- to its environment variable. That is what keeps `GEMINI_API_KEY` working on a
+-- deployment nobody has touched the panel on, and makes "forget this key" a
+-- delete rather than a second kind of state.
+--
+-- `secret` is a Fernet token, not the key. It is encrypted with a value derived
+-- from MIOS_CREDENTIAL_KEY, which lives in the environment and never in this
+-- table -- so a database dump, a leaked read-only DATABASE_URL or a Neon
+-- console session yields ciphertext rather than working credentials. Nothing
+-- else in this file is defended that way because nothing else in it is a
+-- bearer token that spends money.
+--
+-- `hint` is the last four characters, stored in clear on purpose: an
+-- administrator has to be able to tell which key is loaded without the app
+-- being able to show them the key.
+CREATE TABLE IF NOT EXISTS llm_credentials (
+    provider   TEXT PRIMARY KEY,
+    secret     TEXT NOT NULL,
+    hint       TEXT,
+    changed_by TEXT,
+    changed_at TEXT NOT NULL
+);
+
+
+-- ---------------------------------------------------------------------------
+-- What happened to a Mode Push match
+-- ---------------------------------------------------------------------------
+
+-- The weights in push/matcher.py encode judgement, not evidence: nobody has
+-- been placed through this, so nothing has been calibrated against an outcome.
+-- This is the table that changes that. Each row records what the BD team did
+-- with one ranked company, and the score AS IT STOOD when they did it.
+--
+-- Storing the score alongside the outcome is the whole point. Recomputing it
+-- later would score the decision against a model that did not exist when the
+-- decision was made, and against signals collected since -- which is how a
+-- model gets to mark its own homework and always pass.
+CREATE TABLE IF NOT EXISTS match_outcomes (
+    outcome_id   TEXT PRIMARY KEY,
+    profile_id   TEXT NOT NULL,
+    company_name TEXT NOT NULL,
+    -- 'contacted', 'not_relevant', 'placed'. Not an enum: SQLite has none and
+    -- a CHECK that has to be migrated to add a verb is worse than a value the
+    -- API validates.
+    outcome      TEXT NOT NULL,
+    -- The score, its confidence, and how much of the model applied, frozen at
+    -- the moment of the decision.
+    score        INTEGER,
+    confidence   TEXT,
+    assessable   INTEGER,
+    rank_shown   INTEGER,
+    note         TEXT,
+    recorded_by  TEXT,
+    recorded_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_outcomes_profile ON match_outcomes(profile_id);
+CREATE INDEX IF NOT EXISTS idx_outcomes_outcome ON match_outcomes(outcome);

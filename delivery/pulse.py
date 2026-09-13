@@ -239,19 +239,27 @@ def generate_pulse(
     evidence = build_evidence(payload)
 
     if gemini_caller is None:
-        if not settings.gemini_api_key:
-            return PulseOutcome([], STATUS_FAILED, "No Gemini key configured.", signals_analysed)
-
         from publish.rewrite import _remaining_quota
 
         if _remaining_quota(target) <= 0:
             return PulseOutcome(
                 [], STATUS_FAILED,
-                "Daily Gemini quota exhausted before the digest ran.", signals_analysed,
+                "Daily model quota exhausted before the digest ran.", signals_analysed,
             )
-        from agents.signal_analyst import _build_gemini_caller
 
-        gemini_caller = _build_gemini_caller()
+        # No Gemini-specific key check any more: this purpose may be routed to
+        # another provider entirely, and asking about GEMINI_API_KEY would
+        # refuse a perfectly configured Claude. `caller_for` raises with the
+        # name of whatever is actually missing.
+        from llm import PURPOSE_PULSE, LLMError, caller_for
+
+        try:
+            gemini_caller = caller_for(PURPOSE_PULSE)
+        except LLMError as exc:
+            # Same shape as a failed generation: the section is omitted and the
+            # reason recorded. An unconfigured model must not stop the pipeline
+            # any more than an unreachable one does.
+            return PulseOutcome([], STATUS_FAILED, str(exc), signals_analysed)
 
     if signals_analysed == 0:
         return PulseOutcome([], STATUS_FAILED, "No signals in the window.", signals_analysed)

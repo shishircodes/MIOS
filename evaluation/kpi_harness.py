@@ -127,10 +127,18 @@ def _name_matches(predicted: str | None, expected: str | None) -> bool:
 
 
 def _reset_daily_quota(db_path: Path) -> None:
-    """Clear the daily API call counter so each evaluation run gets a fresh quota."""
+    """Clear the daily API call counter so each evaluation run gets a fresh quota.
+
+    The prefix has to track `llm.usage.KEY_PREFIX`. It stopped doing so once
+    already: the counter moved to `llm_calls:<provider>:<date>` while this kept
+    deleting the old `gemini_api_calls_*` rows, so the reset silently cleared
+    nothing and each run inherited the previous run's count.
+    """
+    from llm.usage import KEY_PREFIX
+
     with connect(db_path) as conn:
-        conn.execute("DELETE FROM kv_store WHERE key LIKE 'gemini_api_calls_%'")
-        log.debug("Reset daily Gemini quota counter")
+        conn.execute("DELETE FROM kv_store WHERE key LIKE ?", (f"{KEY_PREFIX}:%",))
+        log.debug("Reset daily model call counter")
 
 
 # --------------------------------------------------------------------------

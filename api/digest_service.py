@@ -79,8 +79,15 @@ SELECT_SIGNALS = (
 def _rows_from_db(
     target: str | Path | None = None,
     since: datetime | None = None,
+    run_id: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Classified rows, newest first. `since` restricts to a capture window.
+    """Classified rows, newest first.
+
+    `run_id` restricts to the signals one pipeline run collected, which is what
+    a stored digest covers. `since` restricts to a capture window instead, which
+    is what the live dashboard uses before any run has been archived. They are
+    alternatives: a run already defines its own window, so combining them could
+    only ever remove rows the run did collect.
 
     Returns [] rather than raising when the database isn't usable yet: the caller
     falls back to the synthetic dataset, so a fresh checkout with no database
@@ -94,7 +101,12 @@ def _rows_from_db(
         return []
     try:
         with connect(resolved, readonly=True) as conn:
-            if since is not None:
+            if run_id is not None:
+                rows = conn.execute(
+                    SELECT_SIGNALS + "AND run_id = ? ORDER BY captured_at DESC",
+                    (run_id,),
+                ).fetchall()
+            elif since is not None:
                 rows = conn.execute(
                     SELECT_SIGNALS + "AND captured_at >= ? ORDER BY captured_at DESC",
                     (since.isoformat(timespec="seconds"),),
@@ -177,9 +189,40 @@ DEFAULT_WINDOW_DAYS = 7
 MAX_SIGNALS_SHOWN = 40
 
 
+def _local(d: datetime) -> datetime:
+    """A stored timestamp in the market's own timezone, for display.
+
+    Everything is stored in UTC, which is right, and was then formatted in UTC,
+    which was not. The weekly run fires at 05:00 Australia/Sydney — 19:00 UTC
+    the previous day for most of the year — so a digest collected at 05:01 on
+    Monday 7 September was headed "Week of 6 September", a Sunday. The pipeline
+    was correct and only the label was wrong, which is the harder kind of wrong
+    to notice: nothing failed, the date was simply a day out and named the wrong
+    weekday.
+
+    The zone comes from `loader.schedule`, which is where the run is scheduled,
+    so the date a digest is named after and the date it was scheduled for cannot
+    disagree. A second constant here would be a second thing to keep in step.
+
+    Falls back to the value as given if the zone database is unavailable — a
+    slim container without tzdata should mislabel a heading, not fail a page.
+    """
+    from loader.schedule import DEFAULT_TIMEZONE
+
+    if d.tzinfo is None:
+        d = d.replace(tzinfo=timezone.utc)
+    try:
+        from zoneinfo import ZoneInfo
+
+        return d.astimezone(ZoneInfo(DEFAULT_TIMEZONE))
+    except Exception as exc:  # noqa: BLE001 - a heading is not worth a 500
+        log.warning("digest: could not localise a timestamp (%s)", exc)
+        return d
+
+
 def _fmt_day(d: datetime) -> str:
     # Windows-safe: %-d is not supported by the MSVC strftime.
-    return d.strftime("%d %B %Y").lstrip("0")
+    return _local(d).strftime("%d %B %Y").lstrip("0")
 
 
 #: How many earlier windows the hiring-velocity baseline averages over. Four
@@ -289,10 +332,14 @@ def _collection_label(start: datetime | None, end: datetime | None) -> str:
     """
     if start is None or end is None:
         return "Sample dataset"
-    if start.date() == end.date():
+    # Compared in local time as well as formatted in it: a scrape that starts at
+    # 05:00 Sydney and finishes minutes later is one day to a reader here, but
+    # spans two UTC dates whenever it straddles 10:00 UTC.
+    local_start, local_end = _local(start), _local(end)
+    if local_start.date() == local_end.date():
         return f"Week of {_fmt_day(end)}"
-    if (start.year, start.month) == (end.year, end.month):
-        return f"{start.day} – {_fmt_day(end)}"
+    if (local_start.year, local_start.month) == (local_end.year, local_end.month):
+        return f"{local_start.day} – {_fmt_day(end)}"
     return f"{_fmt_day(start)} – {_fmt_day(end)}"
 
 
@@ -345,14 +392,30 @@ def shape_signal(r: dict[str, Any], index: int) -> dict[str, Any]:
 def build_digest_payload(
     db_path: str | Path | None = None,
     days: int = DEFAULT_WINDOW_DAYS,
+    run_id: str | None = None,
 ) -> dict[str, Any]:
-    """Build the dashboard payload for the last `days` of captured signals.
+    """Build the dashboard payload.
+
+    With `run_id`, the payload covers exactly the signals that run collected —
+    one run, one digest. Without it, the payload covers the last `days` of
+    captures, which is what the live dashboard shows until a run has been
+    archived.
+
+    Note what stays unscoped either way: the velocity baselines below read the
+    full history on purpose. The signals a digest *reports* belong to one run;
+    the figure it compares them against is everything before. Scoping the
+    baseline to the run too would make every company look new every week.
 
     Three outcomes, reported so the UI can be honest about which it got:
 
     * signals in the window          -> sourceMode="live",      windowEmpty=False
     * none in the window, some older -> sourceMode="live",      windowEmpty=True
     * nothing classified at all      -> sourceMode="synthetic", windowEmpty=False
+
+    Neither fallback applies when `run_id` is given: a run that collected
+    nothing reports nothing, because both alternatives would misattribute — one
+    files another run's signals under this one, the other stores the demo
+    dataset as a published digest.
 
     The middle case is why this isn't a plain time filter. A strict window would
     blank the dashboard in any week the pipeline hasn't run; falling back to the
@@ -370,16 +433,22 @@ def build_digest_payload(
     # have produced different headline figures from identical data.
     since = _day_after(datetime.now(timezone.utc)) - timedelta(days=days)
 
-    rows = _rows_from_db(db_path, since=since)
+    rows = (_rows_from_db(db_path, run_id=run_id) if run_id is not None
+            else _rows_from_db(db_path, since=since))
     source_mode = "live"
     window_empty = False
 
-    if not rows:
+    # Neither fallback applies to a run-scoped digest, and both would be wrong.
+    # A run collected what it collected: showing older signals instead would
+    # file another run's rows under this one, and showing the synthetic demo set
+    # would store fabricated companies as a published digest that somebody could
+    # act on. An empty run is a real outcome and is reported as one.
+    if not rows and run_id is None:
         # Nothing captured in the window — show the latest we do have, flagged.
         rows = _rows_from_db(db_path)
         window_empty = bool(rows)
 
-    if not rows:
+    if not rows and run_id is None:
         rows = _rows_from_synthetic(settings.synthetic_postings_path)
         source_mode = "synthetic"
         window_empty = False
@@ -524,9 +593,14 @@ def build_digest_payload(
         #: data is from today" even when the last scrape was a week ago.
         "collectedFrom": collected_from.isoformat() if collected_from else None,
         "collectedTo": collected_to.isoformat() if collected_to else None,
-        "week": (collected_to or datetime.now(timezone.utc)).strftime("WEEK %d %b %Y").upper(),
+        "week": _local(collected_to or datetime.now(timezone.utc))
+        .strftime("WEEK %d %b %Y").upper(),
         "weekLabel": week_label,
-        "generatedAt": datetime.now(timezone.utc).strftime("%a %d %b %Y · %H:%M UTC"),
+        #: Local time, and labelled with the zone rather than left ambiguous. It
+        #: said UTC before, which was at least honest, but put the one timestamp
+        #: on the page in a different zone from every date beside it.
+        "generatedAt": _local(datetime.now(timezone.utc))
+        .strftime("%a %d %b %Y · %H:%M %Z"),
         #: What this week's collection actually consisted of.
         #:
         #: This replaced four KPI tiles that did not survive checking. Two of

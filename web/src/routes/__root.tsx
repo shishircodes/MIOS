@@ -38,6 +38,11 @@ export const Route = createRootRouteWithContext<RouterContext>()({
 // so the only one here is the watchlist count, which is read from the API. The
 // previous 'LIVE', '3' and 'Q1' were hardcoded strings that looked like state.
 const NAV = [
+  // The dashboard sits first and alone: it is the landing page, and it answers
+  // "what happened this week" before anybody chooses which of the modes to open.
+  // It used to sit under REFERENCE, three groups down, which put the overview
+  // below the detail it summarises.
+  { group: 'OVERVIEW', items: [{ to: '/dashboard', label: 'Dashboard', icon: 'dash' }] },
   {
     group: 'INTELLIGENCE',
     items: [
@@ -51,7 +56,6 @@ const NAV = [
     group: 'REFERENCE',
     items: [
       { to: '/watchlist', label: 'Watchlist', icon: 'watch' },
-      { to: '/dashboard', label: 'Dashboard', icon: 'dash' },
     ],
   },
   {
@@ -60,10 +64,15 @@ const NAV = [
     // endpoint re-checks the role, so a member who types the URL still gets
     // nothing back.
     adminOnly: true,
+    // Named for what each page manages, and matching the heading it opens on.
+    // "Tokens & cost" was wrong twice over: the page counts *requests* against a
+    // provider's daily allowance, never tokens, and it has since become where
+    // API keys are entered and a model is chosen per job. Somebody looking for
+    // "why is Market Pulse using that model" would not have looked here.
     items: [
-      { to: '/sources', label: 'Sources health', icon: 'src' },
+      { to: '/sources', label: 'Data sources', icon: 'src' },
       { to: '/access', label: 'People & access', icon: 'people' },
-      { to: '/tokens', label: 'Tokens & cost', icon: 'tokens' },
+      { to: '/tokens', label: 'Models & keys', icon: 'tokens' },
     ],
   },
 ] as const
@@ -74,10 +83,10 @@ const CRUMBS: Record<string, string[]> = {
   '/push': ['Mode Push', 'Submit profile'],
   '/publish': ['Mode Publish', 'Quarterly report'],
   '/watchlist': ['Reference', 'Watchlist'],
-  '/dashboard': ['Reference', 'Dashboard'],
-  '/sources': ['Admin', 'Source health'],
+  '/dashboard': ['Overview', 'Dashboard'],
+  '/sources': ['Admin', 'Data sources'],
   '/access': ['Admin', 'People & access'],
-  '/tokens': ['Admin', 'Tokens & cost'],
+  '/tokens': ['Admin', 'Models & keys'],
 }
 
 /** The footer dot said "Connected" unconditionally, including when nothing was
@@ -89,7 +98,9 @@ const CONNECTION = {
 } as const
 
 const SIGNIN_PATH = '/signin'
-const DEFAULT_LANDING = '/monitor/digest'
+//: Where a signed-in user lands. The dashboard rather than the digest: it says
+//: what the week looked like in one screen, and the digest is one click from it.
+const DEFAULT_LANDING = '/dashboard'
 
 /**
  * Routes between the sign-in screen and the dashboard, and supplies the shell.
@@ -278,7 +289,7 @@ function Shell({ children }: { children: ReactNode }) {
           {Icons.panel}
         </button>
         <div className="brand">
-          <div className="brand-mark" />
+          {/* Wordmark only until a logo is chosen — see SignIn.tsx. */}
           <span>MIOS</span>
         </div>
         {/* flex:1 so the badge and user menu sit hard right now that the

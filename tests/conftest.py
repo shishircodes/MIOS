@@ -53,6 +53,51 @@ def pytest_configure(config: pytest.Config) -> None:
         "real_database: allow this test to reach the configured database rather "
         "than a scratch one. Needs a deliberate reason.",
     )
+    config.addinivalue_line(
+        "markers",
+        "real_llm: allow this test to call a live model. Needs a deliberate "
+        "reason, and spends real daily quota.",
+    )
+
+
+@pytest.fixture(autouse=True)
+def _never_a_live_model(request, monkeypatch):
+    """No test reaches a real model.
+
+    The same lesson as the database guard, learned the same way: wiring the Mode
+    Push rationale into the API made `tests/test_push_api.py` build a real
+    Gemini client and call it. The tests passed, so nothing said so — the only
+    evidence was a `google.genai` import warning in the output and a daily
+    allowance quietly shorter than it should have been.
+
+    Worse than the database case, because it leaves the machine: prompts
+    assembled from whatever the test happened to seed are sent to a third party,
+    and the free tier permits twenty requests a day, so a full suite run could
+    exhaust the pipeline's own budget.
+
+    `caller_for` is made to raise instead. Every caller in this codebase already
+    handles an unavailable model by carrying on without one, so the tests
+    exercise that path rather than the network. A test that wants to drive the
+    logic passes its own fake caller, which does not come through here.
+    """
+    if "real_llm" in request.keywords:
+        return
+
+    import llm.providers as providers
+
+    def refuse(model: str):
+        raise providers.ProviderNotConfigured(
+            f"tests must not call a live model ({model}). Pass a fake caller, or "
+            "mark the test @pytest.mark.real_llm if it genuinely needs one."
+        )
+
+    # Blocked at the provider rather than at `caller_for`. Routing, purpose
+    # resolution and usage counting are all worth exercising in tests; what must
+    # not happen is a request leaving the machine. Patching the router instead
+    # made the seam itself untestable, and a test that cannot reach the code it
+    # is about tends to get written around.
+    for provider in providers._PROVIDERS.values():
+        monkeypatch.setattr(provider, "build", refuse)
 
 
 @pytest.fixture(autouse=True)

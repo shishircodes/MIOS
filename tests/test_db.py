@@ -40,11 +40,11 @@ def test_question_marks_inside_string_literals_are_left_alone():
 
 
 def test_percent_is_escaped_so_psycopg_does_not_read_it_as_a_placeholder():
-    # Regression: `LIKE 'gemini_api_calls_%'` in the KPI harness. Unescaped, the
-    # driver reads %' as a placeholder and the statement blows up.
-    sql = "DELETE FROM kv_store WHERE key LIKE 'gemini_api_calls_%' AND id = ?"
+    # Regression: an inline LIKE pattern in the KPI harness's quota reset.
+    # Unescaped, the driver reads %' as a placeholder and the statement blows up.
+    sql = "DELETE FROM kv_store WHERE key LIKE 'llm_calls:%' AND id = ?"
     out = _to_pg(sql)
-    assert "'gemini_api_calls_%%'" in out
+    assert "'llm_calls:%%'" in out
     assert out.endswith("id = %s")
 
 

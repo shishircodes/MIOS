@@ -193,6 +193,13 @@ jobs:
             DATABASE_URL=${{ secrets.PROD_DATABASE_URL }}
             GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}
             GEMINI_MODEL=${{ vars.GEMINI_MODEL || 'gemini-2.5-flash' }}
+            ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}
+            # Encrypts the provider API keys entered in the Admin panel. Must
+            # stay stable: change it and every stored key becomes undecryptable
+            # (the panel says so rather than reporting them as absent). Without
+            # it the app runs normally on the keys above, and panel entry is
+            # disabled.
+            MIOS_CREDENTIAL_KEY=${{ secrets.MIOS_CREDENTIAL_KEY }}
             SLACK_WEBHOOK_URL=${{ secrets.SLACK_WEBHOOK_URL }}
             ADZUNA_APP_ID=${{ secrets.ADZUNA_APP_ID }}
             ADZUNA_APP_KEY=${{ secrets.ADZUNA_APP_KEY }}

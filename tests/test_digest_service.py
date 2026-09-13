@@ -33,9 +33,18 @@ def db(tmp_path, watchlist):
     return path
 
 
-def _add(db, signal_id: str, *, days_ago: float, company="BHP", tier="A",
-         source_type="job_board", source="seek", is_new=0):
-    captured = (datetime.now(timezone.utc) - timedelta(days=days_ago)).isoformat(timespec="seconds")
+def _add(db, signal_id: str, *, days_ago: float | None = None, company="BHP", tier="A",
+         source_type="job_board", source="seek", is_new=0, captured: str | None = None):
+    """`captured` pins an exact timestamp, for the tests that are about one.
+
+    Most tests want "recently" and say so with `days_ago`. The heading tests are
+    about a specific UTC-to-local offset, which a relative date stops exercising
+    the moment the suite runs at a different hour.
+    """
+    if captured is None:
+        captured = (datetime.now(timezone.utc)
+                    - timedelta(days=days_ago if days_ago is not None else 1)
+                    ).isoformat(timespec="seconds")
     with connect(db) as conn:
         conn.execute(
             "INSERT INTO signals (signal_id, source_type, source_name, source_url, "
@@ -144,15 +153,55 @@ def test_payload_always_declares_the_window(db):
 # ---------- collection date in the heading ----------
 
 
+def _sydney_day(dt: datetime) -> str:
+    """A timestamp as the date a reader in the market would call it.
+
+    The heading is rendered in Australia/Sydney, so an expectation computed in
+    UTC is wrong for the eight hours a day the two dates differ — which would
+    make this test pass all morning and fail all afternoon.
+    """
+    from zoneinfo import ZoneInfo
+
+    return dt.astimezone(ZoneInfo("Australia/Sydney")).strftime("%d %B %Y").lstrip("0")
+
+
 def test_heading_names_the_scrape_date_not_today(db):
     """Regression: the heading was `datetime.now()`, so a dashboard opened a week
     after the last scrape still announced today's date as if the data were fresh."""
     _add(db, "s1", days_ago=4)
 
     p = build_digest_payload(db, days=7)
-    expected = (datetime.now(timezone.utc) - timedelta(days=4)).strftime("%d %B %Y").lstrip("0")
+    expected = _sydney_day(datetime.now(timezone.utc) - timedelta(days=4))
     assert p["weekLabel"] == f"Week of {expected}"
-    assert datetime.now(timezone.utc).strftime("%d %B %Y").lstrip("0") not in p["weekLabel"]
+    assert _sydney_day(datetime.now(timezone.utc)) not in p["weekLabel"]
+
+
+def test_the_heading_names_the_day_the_market_calls_it(db):
+    """The weekly run fires at 05:00 Australia/Sydney, which is 19:00 UTC the day
+    before for most of the year. Formatted in UTC, the 7 September run was headed
+    "Week of 6 September" — a Sunday, for a pipeline that only runs on Mondays.
+
+    Pinned to that exact timestamp rather than a relative one: this is a bug
+    about a specific offset, and a relative date would stop exercising it the
+    moment the test ran at a different hour.
+    """
+    _add(db, "s1", captured="2026-09-06T19:01:19+00:00")
+
+    label = build_digest_payload(db, days=7)["weekLabel"]
+
+    assert label == "Week of 7 September 2026", label
+
+
+def test_a_scrape_that_straddles_a_utc_date_is_still_one_local_day(db):
+    """05:00 Sydney sits either side of 10:00 UTC across daylight saving, so a
+    single morning's collection can span two UTC dates. It is one day here, and
+    the heading has to say so rather than showing a range."""
+    _add(db, "a", captured="2026-09-06T23:50:00+00:00")
+    _add(db, "b", captured="2026-09-07T00:10:00+00:00")
+
+    label = build_digest_payload(db, days=7)["weekLabel"]
+
+    assert label == "Week of 7 September 2026", label
 
 
 def test_heading_shows_a_range_when_collection_spans_days(db):

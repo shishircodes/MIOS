@@ -166,14 +166,14 @@ def test_kv_store_counter_increments_on_postgres(pg):
 
 
 def test_like_pattern_survives_placeholder_translation(pg):
-    """`LIKE 'gemini_api_calls_%'` must not be mangled into a bad placeholder."""
+    """A `%` in a LIKE literal must not be mangled into a bad placeholder."""
     from agents.signal_analyst import _ensure_kv_store, _increment_daily_api_calls
 
     with connect(pg) as conn:
         _ensure_kv_store(conn)
         _increment_daily_api_calls(conn)
     with connect(pg) as conn:
-        conn.execute("DELETE FROM kv_store WHERE key LIKE 'gemini_api_calls_%'")
+        conn.execute("DELETE FROM kv_store WHERE key LIKE 'llm_calls:%'")
     with connect(pg) as conn:
         assert conn.execute("SELECT COUNT(*) FROM kv_store").fetchone()[0] == 0
 
