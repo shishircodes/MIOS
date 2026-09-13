@@ -134,3 +134,47 @@ def test_live_cycle_scrape_failure_still_posts_digest(db, monkeypatch):
     assert mock_post.call_count == 1
     posted_text = mock_post.call_args.kwargs["json"]["text"]
     assert "Newmont" in posted_text  # the pre-existing classified row is in the digest
+
+
+def test_a_clean_run_has_no_note(db, monkeypatch):
+    monkeypatch.setattr("pipeline.live.scrape_all", lambda **_kw: [
+        {"source_url": "https://x/job/1",
+         "raw_content": "Process Operator at Newmont Lihir, PNG. FIFO ex-Cairns 4/4."},
+    ])
+    monkeypatch.setattr("pipeline.live.settings",
+                        type("S", (), {"db_path": db, "slack_webhook_url": ""})())
+    summary = run_live_cycle(scrape_limit=10, db_path=db, do_scrape=True, do_slack=False,
+                             gemini_caller=_fake_gemini({
+                                 "company_name": "Newmont", "sector": "mining",
+                                 "signal_category": "hiring_velocity", "review_cycle": "weekly",
+                                 "watchlist_match": "Newmont", "is_new_prospect": False,
+                                 "reasoning": "",
+                             }))
+    assert summary["unclassified"] == 0
+    assert summary["note"] is None
+
+
+def test_a_run_that_leaves_rows_unclassified_says_so(db, monkeypatch):
+    """Regression: the run of 14 Sep 2026 left 99 of 180 rows unclassified and
+    still read "Run completed". The run log now carries why."""
+    from loader import run_log
+
+    monkeypatch.setattr("pipeline.live.scrape_all", lambda **_kw: [
+        {"source_url": f"https://x/job/{i}",
+         "raw_content": f"Process Operator {i} at Newmont Lihir, PNG. FIFO ex-Cairns 4/4."}
+        for i in range(3)
+    ])
+    monkeypatch.setattr("pipeline.live.settings",
+                        type("S", (), {"db_path": db, "slack_webhook_url": ""})())
+
+    def broken(*_a, **_kw):
+        raise ValueError("truncated JSON")
+
+    summary = run_live_cycle(scrape_limit=10, db_path=db, do_scrape=True, do_slack=False,
+                             gemini_caller=broken)
+
+    assert summary["unclassified"] == 3
+    assert "3 collected rows were left unclassified" in summary["note"]
+    assert "classifier failed on 3" in summary["note"]
+    run = run_log.recent(1, target=db)[0]
+    assert run["note"] == summary["note"]

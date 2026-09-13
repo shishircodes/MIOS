@@ -214,6 +214,41 @@ def test_classify_pending_still_honours_an_explicit_batch_size(db):
     assert left == 20, "the rest stay pending for the next run"
 
 
+def test_a_failed_batch_only_loses_its_own_rows(db):
+    """Regression: batches of 100 meant one truncated answer left 99 of a run's
+    180 rows unclassified. A failure now costs one small batch, not the run."""
+    from agents.signal_analyst import SIGNALS_PER_API_CALL
+
+    assert SIGNALS_PER_API_CALL <= 25
+    ingest(
+        [
+            {"source_url": f"f{i}",
+             "raw_content": f"Maintenance Planner {i} at BHP Pilbara, FIFO 8/6 ex-Perth, multiple roles."}
+            for i in range(SIGNALS_PER_API_CALL * 3)
+        ],
+        db,
+    )
+    ok = _fake_caller_factory({
+        "company_name": "BHP", "sector": "mining",
+        "signal_category": "hiring_velocity", "review_cycle": "weekly",
+        "watchlist_match": "BHP", "is_new_prospect": False, "reasoning": "hiring",
+    })
+    sizes: list[int] = []
+
+    def flaky(sys_prompt, user_prompt, schema=None, **kw):
+        sizes.append(user_prompt.upper().count("SIGNAL "))
+        if len(sizes) == 2:
+            raise ValueError("truncated JSON")
+        return ok(sys_prompt, user_prompt, schema=schema, **kw)
+
+    counts = classify_pending(db, gemini_caller=flaky)
+
+    # Three calls for three batches' worth; the failed one cost exactly a batch.
+    assert len(sizes) == 3
+    assert counts["errors"] == SIGNALS_PER_API_CALL
+    assert counts["classified"] == SIGNALS_PER_API_CALL * 2
+
+
 def test_classify_pending_prefilter_short(db):
     ingest([{"source_url": "u-short", "raw_content": "tiny"}], db)
     # raw_content="tiny" gets stripped by ingest? It's < MIN but not empty,

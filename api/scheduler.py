@@ -96,7 +96,8 @@ async def execute_run(run_id: str) -> dict[str, Any]:
             run_log.finish, run_id,
             status=run_log.STATUS_OK,
             collected=int(summary.get("scraped") or 0),
-            note=None,
+            # Why a run that finished is not the whole story, when it is not.
+            note=summary.get("note"),
         )
         return {"runId": run_id, **summary}
     finally:

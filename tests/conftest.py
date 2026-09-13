@@ -101,6 +101,16 @@ def _never_a_live_model(request, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_classifier_throttle(monkeypatch):
+    """The classifier waits 13 s between calls to respect the free tier's burst
+    limit. With batches of 25, a test of a realistic run makes several calls, and
+    the wait would only slow the suite: no test reaches a real model."""
+    import agents.signal_analyst as analyst
+
+    monkeypatch.setattr(analyst, "_throttle", lambda: None)
+
+
+@pytest.fixture(autouse=True)
 def _never_the_real_database(request, tmp_path_factory, monkeypatch):
     """Redirect the default target to a scratch SQLite file for each test.
 
