@@ -350,6 +350,15 @@ export async function setLlmRoute(
   })
 }
 
+/** Switch Mode Push's AI notes on or off. Scores are unaffected either way. */
+export async function setPushRationale(enabled: boolean): Promise<LlmSettingsPayload> {
+  return postOrExplain<LlmSettingsPayload>('/api/admin/push-rationale', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled }),
+  })
+}
+
 /** Return a purpose to the server setting, or the built-in default. */
 export async function clearLlmRoute(purpose: string): Promise<LlmSettingsPayload> {
   return postOrExplain<LlmSettingsPayload>(`/api/admin/llm/${encodeURIComponent(purpose)}`, {

@@ -546,6 +546,19 @@ export interface LlmSettingsPayload {
   note?: string | null
   /** The result of pressing Test on a provider. */
   test?: { provider: string; ok: boolean; message: string } | null
+  /** Whether Mode Push asks a model for written notes at all. */
+  pushRationale: FeatureSetting
+}
+
+/** An optional feature an administrator can switch off. */
+export interface FeatureSetting {
+  name: string
+  label: string
+  what: string
+  enabled: boolean
+  default: boolean
+  changedBy: string | null
+  changedAt: string | null
 }
 
 /** How a Mode Push score is arrived at. Served from the scorer's own constants,
@@ -561,6 +574,8 @@ export interface ScoringModel {
     model: string
     annotatesTop: number
     what: string
+    /** False when an administrator has switched the notes off. */
+    enabled: boolean
   }
   caveat: string
 }

@@ -28,6 +28,7 @@ from push.matcher import match_profile
 from push.outcomes import OUTCOMES, UnknownOutcome, for_profile, record, summary
 from push.rarity import MIN_CORPUS as RARITY_MIN_CORPUS
 from push.rarity import build as build_rarity
+from loader.feature_settings import PUSH_RATIONALE, is_enabled
 from push.rationale import ANNOTATE_TOP_N, annotate
 from push.profile_parser import parse_profile
 from push.store import (
@@ -59,8 +60,11 @@ def _matches_for(profile: dict[str, Any], *, days: int, limit: int,
     # The written half. Deliberately after the ranking is fixed and unable to
     # change it — see push/rationale.py. Every failure here returns the ranking
     # unannotated, so a spent quota costs the prose and not the result.
+    # An administrator can switch the notes off. Checked per request, so the
+    # change applies to the next search without a restart.
+    rationale_on = is_enabled(PUSH_RATIONALE)
     note = None
-    if explain:
+    if explain and rationale_on:
         matches, note = annotate(profile, matches)
 
     # What has already been decided about these companies for this candidate, so
@@ -82,6 +86,9 @@ def _matches_for(profile: dict[str, Any], *, days: int, limit: int,
         #: Why there is no written rationale, when there is none. Absent when
         #: the annotation worked.
         "rationaleNote": note,
+        #: False when an administrator has switched the notes off. Kept apart
+        #: from the note so "off" never reads as "something went wrong".
+        "rationaleEnabled": rationale_on,
         "windowDays": days,
         #: How much evidence the ranking is standing on. A short list of matches
         #: means something different when it came from 12 signals than from 900,
@@ -267,8 +274,11 @@ def scoring_model(user: dict[str, Any] = Depends(require_user)) -> dict[str, Any
              "what": "Whether they are already a watchlist client. A new name still scores — "
                      "it is a genuine opportunity, just a colder one."},
             {"key": "seniority", "weight": matcher.W_SENIORITY, "label": "Seniority fit",
-             "what": "Whether the level being advertised matches the candidate's experience. "
-                     "Silent when either is unknown rather than assuming a fit."},
+             "what": "Whether the candidate's experience suits the level being advertised. "
+                     "Each level is a band — a graduate role asks for 0–2 years, a principal "
+                     "role 10 or more — and experience inside the band is a full fit. Falling "
+                     "short costs points quickly; being well above a junior band costs them "
+                     "slowly. Silent when either side is unknown rather than assuming a fit."},
             {"key": "region", "weight": matcher.W_REGION, "label": "Region fit",
              "what": "Whether they are hiring in the candidate's market."},
             {"key": "recency", "weight": matcher.W_RECENCY, "label": "Recency",
@@ -296,6 +306,8 @@ def scoring_model(user: dict[str, Any] = Depends(require_user)) -> dict[str, Any
             "provider": label,
             "model": model,
             "annotatesTop": ANNOTATE_TOP_N,
+            #: Whether an administrator has left the notes on.
+            "enabled": is_enabled(PUSH_RATIONALE),
             "what": "A model writes the rationale and gives its own read of the fit. It "
                     "cannot change the score or the order — the ranking has to stay "
                     "reproducible, so where the model disagrees it is shown as a flag "

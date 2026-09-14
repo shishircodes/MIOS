@@ -28,6 +28,9 @@ from loader.credentials import (
     clear_key,
     set_key,
 )
+from loader.feature_settings import PUSH_RATIONALE
+from loader.feature_settings import describe as describe_feature
+from loader.feature_settings import set_enabled as set_feature_enabled
 from loader.llm_settings import UnknownPurpose, clear_route, set_route
 from loader.db import connect
 from loader.schedule import (
@@ -472,6 +475,8 @@ def llm_settings(user: dict[str, Any] = Depends(require_admin)) -> dict[str, Any
         "providers": available_providers(),
         "usage": budget(),
         "history": history(14),
+        #: Whether Mode Push asks a model for its written notes at all.
+        "pushRationale": describe_feature(PUSH_RATIONALE),
         "you": user["email"],
     }
 
@@ -521,6 +526,24 @@ def clear_llm_route(
     """Return a purpose to the environment setting, or the built-in default."""
     clear_route(purpose)
     log.info("admin: %s reset the model for %s", user["email"], purpose)
+    return llm_settings(user)
+
+
+@router.put("/push-rationale")
+def set_push_rationale(
+    payload: dict[str, Any] = Body(...),
+    user: dict[str, Any] = Depends(require_admin),
+) -> dict[str, Any]:
+    """Switch Mode Push's AI notes on or off.
+
+    Offered because the notes never touch a score or the order, so turning them
+    off changes what a consultant reads and what the allowance is spent on, and
+    nothing about who is contacted. Applies to the next search.
+    """
+    enabled = payload.get("enabled")
+    if not isinstance(enabled, bool):
+        raise HTTPException(status_code=400, detail="Say whether the notes should be on or off.")
+    set_feature_enabled(PUSH_RATIONALE, enabled, changed_by=user["email"])
     return llm_settings(user)
 
 

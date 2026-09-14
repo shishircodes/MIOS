@@ -343,6 +343,22 @@ CREATE TABLE IF NOT EXISTS llm_credentials (
 
 
 -- ---------------------------------------------------------------------------
+-- Optional features an administrator can switch off
+-- ---------------------------------------------------------------------------
+
+-- Only deviations, like the settings tables above: a feature with no row sits
+-- at its default in loader/feature_settings.py. The first is Mode Push's AI
+-- notes, which never affect a score, so switching them off is an
+-- administrator's call rather than a deploy.
+CREATE TABLE IF NOT EXISTS feature_settings (
+    name       TEXT PRIMARY KEY,
+    enabled    INTEGER NOT NULL,
+    changed_by TEXT,
+    changed_at TEXT NOT NULL
+);
+
+
+-- ---------------------------------------------------------------------------
 -- What happened to a Mode Push match
 -- ---------------------------------------------------------------------------
 
