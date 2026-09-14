@@ -4,7 +4,7 @@ import { useRef, useState } from 'react'
 import { AdminOnly } from '~/components/AdminOnly'
 import { SchedulePanel } from '~/components/SchedulePanel'
 import { Explainer, Loading, Section } from '~/components/ui'
-import { setSourceEnabled, sourceHealthQueryOptions } from '~/lib/api'
+import { scheduleQueryOptions, setSourceEnabled, sourceHealthQueryOptions } from '~/lib/api'
 import { useFigure, useReveal } from '~/lib/motion'
 import type { SourceHealth, SourceStatus } from '~/lib/types'
 
@@ -125,6 +125,12 @@ function SourceRow({
 function SourcesScreen() {
   const qc = useQueryClient()
   const { data, isPending, error } = useQuery(sourceHealthQueryOptions)
+  // Started here as well as in the panel, and waited for below. The page used
+  // to render as soon as source health arrived, and the Automatic run panel
+  // then appeared above Collectors when its own request finished, pushing the
+  // table down after it was already on screen. Both requests start together,
+  // and the panel reads the same cached result, so it renders in the first pass.
+  const schedule = useQuery(scheduleQueryOptions)
   const [problem, setProblem] = useState<string | null>(null)
   const [caution, setCaution] = useState<string | null>(null)
 
@@ -149,7 +155,7 @@ function SourcesScreen() {
   const totalRef = useFigure(data?.totalRecords ?? 0, { delay: 0.1 })
   useReveal(scope, '.src-row', { key: data?.sources.length ?? 0, delay: 0.12, max: 10 })
 
-  if (isPending) return <div className="page"><Loading lines={['Checking each source', 'Counting what came back']} /></div>
+  if (isPending || schedule.isPending) return <div className="page"><Loading lines={['Checking each source', 'Counting what came back']} /></div>
   if (error) return <div className="page"><div className="notice err">Could not load source health. {error.message}</div></div>
 
   const healthy = data.sources.filter((s) => s.status === 'ok').length

@@ -53,7 +53,12 @@ function RunRow({ r, tz }: { r: PipelineRun; tz: string }) {
 export function SchedulePanel() {
   const qc = useQueryClient()
   const { data, isPending, error } = useQuery(scheduleQueryOptions)
-  const [draft, setDraft] = useState<SchedulePayload | null>(null)
+  // Seeded from the cache when the schedule is already loaded. Starting at null
+  // made the first render return nothing even with the data in hand, so the
+  // panel always appeared one render late and pushed the page below it down.
+  const [draft, setDraft] = useState<SchedulePayload | null>(
+    () => qc.getQueryData(scheduleQueryOptions.queryKey) ?? null,
+  )
   const [problem, setProblem] = useState<string | null>(null)
   const [started, setStarted] = useState<string | null>(null)
 

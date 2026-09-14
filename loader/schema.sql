@@ -350,6 +350,27 @@ CREATE TABLE IF NOT EXISTS llm_credentials (
 -- at its default in loader/feature_settings.py. The first is Mode Push's AI
 -- notes, which never affect a score, so switching them off is an
 -- administrator's call rather than a deploy.
+CREATE TABLE IF NOT EXISTS llm_call_log (
+    -- One row per model call, successful or not, with the tokens the provider
+    -- reported. The daily counter in kv_store answers "how much of today's
+    -- allowance is left"; this answers "what did it cost, and which job spent
+    -- it" over any time frame. Token columns are NULL when unknown (a failed
+    -- call, or a provider that reported nothing), never zero.
+    id                 TEXT PRIMARY KEY,
+    called_at          TEXT NOT NULL,
+    purpose            TEXT,
+    provider           TEXT NOT NULL,
+    model              TEXT,
+    ok                 INTEGER NOT NULL,
+    input_tokens       INTEGER,
+    output_tokens      INTEGER,
+    cache_read_tokens  INTEGER,
+    cache_write_tokens INTEGER,
+    note               TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_llm_call_log_called_at ON llm_call_log (called_at);
+
+
 CREATE TABLE IF NOT EXISTS feature_settings (
     name       TEXT PRIMARY KEY,
     enabled    INTEGER NOT NULL,

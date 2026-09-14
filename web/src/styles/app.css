@@ -2064,6 +2064,36 @@ overflow-x: auto;
 .usage-num { font-family: var(--mono); font-size: 12px; white-space: nowrap; }
 
 .usage-history { padding: 8px 16px 14px; }
+
+/* ---------- Tokens & estimated cost ---------- */
+.cost-range { display: inline-flex; border: 1px solid var(--line); border-radius: var(--radius-sm); overflow: hidden; }
+.cost-range button {
+  font: inherit; font-family: var(--mono); font-size: 11px; letter-spacing: 0.04em;
+  padding: 4px 10px; background: var(--surface); color: var(--ink-3); border: 0; cursor: pointer;
+}
+.cost-range button + button { border-left: 1px solid var(--line); }
+.cost-range button.on { background: var(--teal-2); color: #fff; }
+.cost-range button:focus-visible { outline: 2px solid var(--teal); outline-offset: -2px; }
+.cost-body { padding: 14px 16px 6px; transition: opacity 0.15s; }
+.cost-body.is-stale { opacity: 0.6; }
+.cost-tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 14px; }
+@media (max-width: 900px) { .cost-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.cost-tile { border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 10px 12px; background: var(--surface); }
+.cost-label { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-3); }
+.cost-value { font-size: 22px; font-weight: 600; color: var(--ink); margin-top: 4px; }
+.cost-sub { font-size: 12px; color: var(--ink-3); margin-top: 2px; }
+.cost-plot { margin: 4px 0 14px; }
+.cost-tables { display: grid; grid-template-columns: 3fr 2fr; gap: 16px; overflow-x: auto; }
+@media (max-width: 900px) { .cost-tables { grid-template-columns: 1fr; } }
+.cost-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.cost-table caption { text-align: left; font-weight: 600; font-size: 13px; padding-bottom: 6px; }
+.cost-table th {
+  font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--ink-3); text-align: left; font-weight: 500; padding: 6px 8px; border-bottom: 1px solid var(--line-2);
+}
+.cost-table td { padding: 7px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.cost-table .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.cost-rates { margin-top: 10px; }
 .usage-hist-row {
   display: grid; grid-template-columns: 110px 1fr auto; gap: 12px;
   padding: 5px 0; font-size: 12.5px; border-top: 1px solid var(--line);
