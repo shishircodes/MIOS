@@ -171,6 +171,20 @@ class GeminiProvider:
             )
             import json
 
+            # Tokens for the cost estimate. Cached tokens are part of the prompt
+            # count, so they are taken out of it and priced separately; thinking
+            # tokens are billed as output, so they join it.
+            meta = getattr(response, "usage_metadata", None)
+            if meta is not None:
+                prompt = meta.prompt_token_count or 0
+                cached = meta.cached_content_token_count or 0
+                _call.last_usage = {
+                    "input_tokens": max(0, prompt - cached),
+                    "output_tokens": (meta.candidates_token_count or 0)
+                    + (meta.thoughts_token_count or 0),
+                    "cache_read_tokens": cached,
+                    "cache_write_tokens": 0,
+                }
             return json.loads(response.text or "null")
 
         return _call
@@ -192,14 +206,18 @@ class AnthropicProvider:
 
     name = "anthropic"
     label = "Anthropic Claude"
-    default_model = "claude-sonnet-4-5"
+    default_model = "claude-sonnet-5"
 
     def configured(self, rows: dict[str, dict[str, Any]] | None = None) -> bool:
         return bool(_key(self.name, getattr(settings, "anthropic_api_key", ""), rows))
 
     def models(self) -> list[str]:
-        """Suggestions, not a whitelist. See `GeminiProvider.models`."""
-        return ["claude-sonnet-4-5", "claude-opus-4-1", "claude-haiku-4-5"]
+        """Suggestions, not a whitelist. See `GeminiProvider.models`.
+
+        Current models only, and each has a published rate in `llm.pricing`, so
+        anything picked here shows an estimated cost on the usage panel.
+        """
+        return ["claude-sonnet-5", "claude-opus-5", "claude-haiku-4-5", "claude-fable-5-1"]
 
     def sdk_installed(self) -> bool:
         from importlib.util import find_spec
@@ -240,6 +258,16 @@ class AnthropicProvider:
                 system=instruction,
                 messages=[{"role": "user", "content": user_prompt}],
             )
+            # Tokens for the cost estimate. Claude reports uncached input, cache
+            # reads and cache writes separately, and each has its own rate.
+            used = getattr(message, "usage", None)
+            if used is not None:
+                _call.last_usage = {
+                    "input_tokens": getattr(used, "input_tokens", 0) or 0,
+                    "output_tokens": getattr(used, "output_tokens", 0) or 0,
+                    "cache_read_tokens": getattr(used, "cache_read_input_tokens", 0) or 0,
+                    "cache_write_tokens": getattr(used, "cache_creation_input_tokens", 0) or 0,
+                }
             text = "".join(b.text for b in message.content if getattr(b, "type", "") == "text")
             return json.loads(text or "null")
 
@@ -319,7 +347,10 @@ def caller_for(purpose: str) -> Caller:
             if any(w in message for w in ("quota", "429", "resource_exhausted", "rate")):
                 raise QuotaExhausted(str(exc)) from exc
             raise
-        record(purpose, provider_name, model, ok=True)
+        # A provider's callable leaves the tokens its last response reported on
+        # itself, so the caller signature every module uses stays unchanged.
+        tokens = getattr(inner, "last_usage", None) or {}
+        record(purpose, provider_name, model, ok=True, **tokens)
         return result
 
     log.info("llm: %s -> %s/%s", purpose, provider_name, model)

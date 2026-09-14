@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
 import { useState } from 'react'
 import { AdminOnly } from '~/components/AdminOnly'
+import { UsageCostPanel } from '~/components/UsageCostPanel'
 import { Explainer, Loading, Section } from '~/components/ui'
 import {
   clearLlmRoute,
@@ -437,6 +438,8 @@ function ModelsScreen() {
                   onClick={() => setCaution(null)}>Dismiss</button>
         </div>
       )}
+
+      <UsageCostPanel />
 
       <Section title="Today’s usage" tools={<span>RESETS MIDNIGHT PACIFIC</span>}>
         <div className="usage-list">

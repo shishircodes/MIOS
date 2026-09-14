@@ -14,6 +14,7 @@ import type {
   ProfileDraft,
   Report,
   LlmSettingsPayload,
+  UsageReport,
   ReportSummary,
   SchedulePayload,
   ScoringModel,
@@ -349,6 +350,15 @@ export async function setLlmRoute(
     body: JSON.stringify({ provider, model }),
   })
 }
+
+/** Tokens used and estimated cost across a time frame. Admin only. */
+export const llmUsageQueryOptions = (range: string) =>
+  queryOptions({
+    queryKey: ['admin', 'llm', 'usage', range],
+    queryFn: () =>
+      fetchJson<UsageReport>(`/api/admin/llm/usage?range=${encodeURIComponent(range)}`),
+    retry: false,
+  })
 
 /** Switch Mode Push's AI notes on or off. Scores are unaffected either way. */
 export async function setPushRationale(enabled: boolean): Promise<LlmSettingsPayload> {

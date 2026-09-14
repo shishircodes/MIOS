@@ -481,6 +481,22 @@ def llm_settings(user: dict[str, Any] = Depends(require_admin)) -> dict[str, Any
     }
 
 
+@router.get("/llm/usage")
+def llm_usage(
+    range: str = "30d",  # noqa: A002 - the query parameter's public name
+    user: dict[str, Any] = Depends(require_admin),
+) -> dict[str, Any]:
+    """Tokens used and estimated cost across a time frame.
+
+    Estimated at list prices (see `llm.pricing`): a free-tier deployment is not
+    billed at all, so this is what the same usage would cost on a paid plan —
+    which is the question before routing a purpose to Claude.
+    """
+    from llm.usage import report
+
+    return report(range)
+
+
 @router.put("/llm/{purpose}")
 def set_llm_route(
     purpose: str,

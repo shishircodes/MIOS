@@ -550,6 +550,47 @@ export interface LlmSettingsPayload {
   pushRationale: FeatureSetting
 }
 
+/** Token and cost figures for one slice of usage: a model, a purpose, a day. */
+export interface UsageBucket {
+  calls: number
+  failed: number
+  inputTokens: number
+  outputTokens: number
+  cacheReadTokens: number
+  cacheWriteTokens: number
+  /** Estimated at list prices. Excludes calls with no published rate. */
+  costUsd: number
+  /** Calls with tokens but no published rate for their model. */
+  unpricedCalls: number
+  /** Successful calls the provider reported no tokens for. */
+  untrackedCalls: number
+}
+
+export interface UsageReport {
+  range: string
+  label: string
+  ranges: { key: string; label: string }[]
+  since: string
+  until: string
+  /** When token tracking began; earlier calls carry no tokens. */
+  trackedSince: string | null
+  pricesAsOf: string
+  priceSources: Record<string, string>
+  totals: UsageBucket
+  byModel: (UsageBucket & { provider: string; providerLabel: string; model: string; priced: boolean })[]
+  byPurpose: (UsageBucket & { purpose: string; label: string })[]
+  daily: (UsageBucket & { date: string })[]
+  rates: {
+    provider: string
+    model: string
+    input: number
+    output: number
+    cacheRead: number
+    cacheWrite: number
+    longPromptThreshold: number | null
+  }[]
+}
+
 /** An optional feature an administrator can switch off. */
 export interface FeatureSetting {
   name: string
