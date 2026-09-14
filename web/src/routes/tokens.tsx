@@ -9,9 +9,10 @@ import {
   llmSettingsQueryOptions,
   setLlmRoute,
   setProviderKey,
+  setPushRationale,
   testProviderKey,
 } from '~/lib/api'
-import type { LlmProvider, LlmRoute, LlmUsage } from '~/lib/types'
+import type { FeatureSetting, LlmProvider, LlmRoute, LlmUsage } from '~/lib/types'
 
 export const Route = createFileRoute('/tokens')({
   head: () => ({ meta: [{ title: 'Models & cost · MIOS' }] }),
@@ -270,6 +271,50 @@ function RouteRow({
   )
 }
 
+/** The on/off switch for Mode Push's AI notes. Sits with the model choices
+ *  because turning it off is a decision about what the allowance is spent on. */
+function PushRationaleRow({ feature }: { feature: FeatureSetting }) {
+  const qc = useQueryClient()
+  const [problem, setProblem] = useState<string | null>(null)
+  const toggle = useMutation({
+    mutationFn: (enabled: boolean) => setPushRationale(enabled),
+    onSuccess: (payload) => {
+      qc.setQueryData(llmSettingsQueryOptions.queryKey, payload)
+      // The scoring drawer on Mode Push describes whether notes are on.
+      qc.invalidateQueries({ queryKey: ['push', 'scoring'] })
+      setProblem(null)
+    },
+    onError: (e: Error) => setProblem(e.message),
+  })
+
+  return (
+    <div className="llm-row">
+      <div>
+        <div className="llm-purpose">{feature.label}</div>
+        <div className="llm-needs">{feature.what}</div>
+        <div className="llm-meta">
+          {feature.changedBy
+            ? `Switched ${feature.enabled ? 'on' : 'off'} by ${feature.changedBy}`
+            : `Default · ${feature.default ? 'on' : 'off'}`}
+        </div>
+        {problem && <div className="llm-meta llm-warn">{problem}</div>}
+      </div>
+      <div className="llm-pick">
+        <label className="switch" title={feature.enabled ? 'AI notes are written' : 'No model is called'}>
+          <input
+            type="checkbox"
+            checked={feature.enabled}
+            disabled={toggle.isPending}
+            onChange={(e) => toggle.mutate(e.target.checked)}
+          />
+          <span className="switch-track" aria-hidden="true" />
+          <span className="switch-label">{feature.enabled ? 'On' : 'Off'}</span>
+        </label>
+      </div>
+    </div>
+  )
+}
+
 function ModelsScreen() {
   const qc = useQueryClient()
   const { data, isPending, error } = useQuery(llmSettingsQueryOptions)
@@ -462,6 +507,7 @@ function ModelsScreen() {
       </Section>
 
       <Section title="Model for each job">
+        {data.pushRationale && <PushRationaleRow feature={data.pushRationale} />}
         {data.routing.map((r) => (
           <RouteRow
             key={r.purpose}

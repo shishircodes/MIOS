@@ -69,11 +69,18 @@ export function ScoringExplainer({ open, onClose }: { open: boolean; onClose: ()
 
           <h4>What the AI does, and does not</h4>
           <p>{data.llm.what}</p>
-          <p className="muted" style={{ fontSize: 12.5 }}>
-            Currently {data.llm.provider} · {data.llm.model}, in a single call covering the
-            top {data.llm.annotatesTop} companies. An administrator can change which model
-            that is under Admin → Models &amp; cost.
-          </p>
+          {data.llm.enabled ? (
+            <p className="muted" style={{ fontSize: 12.5 }}>
+              Currently {data.llm.provider} · {data.llm.model}, in a single call covering the
+              top {data.llm.annotatesTop} companies. An administrator can change which model
+              that is, or switch the notes off, under Admin → Models &amp; keys.
+            </p>
+          ) : (
+            <p className="muted" style={{ fontSize: 12.5 }}>
+              AI notes are switched off by an administrator, so no model is called. Scores
+              and their order are exactly the same either way.
+            </p>
+          )}
 
           <div className="score-caveat">
             <strong>Worth knowing.</strong> {data.caveat}

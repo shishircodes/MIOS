@@ -97,17 +97,30 @@ CATEGORY_WEIGHT: dict[str, float] = {
 }
 DEFAULT_CATEGORY_WEIGHT = 0.5
 
-#: Words that place a role's seniority. Deliberately small and explicit: an
-#: inferred ladder would be guesswork dressed as a measurement.
-SENIORITY_MARKERS: tuple[tuple[str, int], ...] = (
-    ("graduate", 0), ("trainee", 0), ("apprentice", 0), ("junior", 1),
-    ("intermediate", 4), ("senior", 8), ("lead", 10), ("principal", 12),
-    ("manager", 10), ("head of", 14), ("superintendent", 12), ("director", 16),
+#: Words that place a role's seniority, as the band of experience the level
+#: usually asks for: (word, minimum years, maximum years or None for no ceiling).
+#: Deliberately small and explicit: an inferred ladder would be guesswork
+#: dressed as a measurement.
+#:
+#: A band, not a point. The first version mapped each word to one number —
+#: "principal" meant exactly 12 years — and scored the distance from it, so a
+#: 16-year candidate lost more than half the points for a principal role they
+#: are plainly qualified for. Senior levels have a floor and no ceiling: nobody
+#: is too experienced to be a principal or a director.
+SENIORITY_BANDS: tuple[tuple[str, int, int | None], ...] = (
+    ("graduate", 0, 2), ("trainee", 0, 2), ("apprentice", 0, 2), ("entry level", 0, 2),
+    ("junior", 0, 3), ("intermediate", 3, 7), ("mid level", 3, 7),
+    ("senior", 6, None), ("lead", 8, None), ("manager", 8, None),
+    ("principal", 10, None), ("superintendent", 10, None), ("head of", 12, None),
+    ("director", 15, None), ("general manager", 15, None), ("chief", 18, None),
 )
 
-#: How far a candidate's experience may sit from a role's implied level before
-#: the fit stops counting. Wide, because titles are a blunt instrument.
-SENIORITY_TOLERANCE_YEARS = 6
+#: How far below a band's floor the fit fades to nothing. Narrow, because
+#: missing experience is the gap a client notices first.
+SENIORITY_SHORTFALL_YEARS = 5
+#: How far above a band's ceiling it fades to nothing. Wide, because an
+#: experienced candidate in a junior role is a risk, not a mismatch of skills.
+SENIORITY_OVERQUALIFIED_YEARS = 10
 
 #: Below this much of the model being applicable, a score is reported at low
 #: confidence whatever it says. Normalising to 100 means a company judged on a
@@ -607,24 +620,53 @@ def _seniority_fit(years: int | None,
     if years is None:
         return None, None
 
-    levels: list[int] = []
+    fits: list[float] = []
+    bands: list[tuple[int, int | None]] = []
     for s in signals:
-        head = (s.get("raw_content") or "").split("|", 1)[0].lower()
-        for marker, implied in SENIORITY_MARKERS:
-            if marker in head:
-                levels.append(implied)
-                break
-    if not levels:
+        band = _advertised_band((s.get("raw_content") or "").split("|", 1)[0])
+        if band is None:
+            continue
+        low, high = band
+        bands.append(band)
+        # Scored advert by advert. Averaging the implied years of a graduate
+        # role and a director role would invent a mid-career one nobody posted.
+        if years < low:
+            fits.append(max(0.0, 1 - (low - years) / SENIORITY_SHORTFALL_YEARS))
+        elif high is not None and years > high:
+            fits.append(max(0.0, 1 - (years - high) / SENIORITY_OVERQUALIFIED_YEARS))
+        else:
+            fits.append(1.0)
+    if not fits:
         # The adverts do not state a level, so there is nothing to compare with.
         return None, None
 
-    implied = sum(levels) / len(levels)
-    gap = abs(years - implied)
-    if gap >= SENIORITY_TOLERANCE_YEARS:
-        return 0, (f"Roles look pitched around {implied:.0f} years' experience; "
-                   f"the candidate has {years}")
-    scaled = round(W_SENIORITY * (1 - gap / SENIORITY_TOLERANCE_YEARS))
-    return scaled, f"Roles pitched around {implied:.0f} years — candidate has {years}"
+    pts = round(W_SENIORITY * sum(fits) / len(fits))
+
+    # The evidence names the level most of the adverts are pitched at.
+    low, high = max(set(bands), key=bands.count)
+    level = f"{low}+ years" if high is None else f"{low}–{high} years"
+    if years < low:
+        verdict = f"the candidate's {years} is {low - years} short"
+    elif high is not None and years > high:
+        verdict = f"the candidate's {years} is {years - high} above it"
+    else:
+        verdict = f"the candidate's {years} fits"
+    return pts, f"Roles pitched at {level} — {verdict}"
+
+
+def _advertised_band(title: str) -> tuple[int, int | None] | None:
+    """The experience band a job title implies, or None when it states no level.
+
+    Whole words only, so "Leading Hand" is not a lead role and "Asset Management
+    Planner" is not a manager. Where a title carries several levels ("Senior
+    Project Manager") the most senior one decides, because that is the job.
+    """
+    title = title.lower()
+    found = [(low, high) for word, low, high in SENIORITY_BANDS
+             if re.search(rf"\b{re.escape(word)}\b", title)]
+    if not found:
+        return None
+    return max(found, key=lambda band: band[0])
 
 
 def _confidence(signals: list[dict], now: datetime,

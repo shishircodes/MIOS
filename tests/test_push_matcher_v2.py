@@ -207,6 +207,48 @@ def test_an_unknown_level_is_unassessable():
     assert _seniority_fit(None, [sig(content="Senior Planner | BHP")]) == (None, None)
 
 
+def test_more_experience_than_a_senior_level_asks_for_is_a_full_fit():
+    """Regression: "principal" meant exactly 12 years, so a 16-year candidate
+    scored 2 of 5 for a principal role they are plainly qualified for. Senior
+    levels have a floor, not a ceiling."""
+    pts, ev = _seniority_fit(16, [sig(content="Principal Planning Engineer | BHP")])
+    assert pts == W_SENIORITY
+    assert "16" in ev and "10+" in ev
+
+
+def test_falling_short_of_the_level_costs_points():
+    """Three years short of a principal role's floor: partial credit, and the
+    evidence says how short."""
+    pts, ev = _seniority_fit(7, [sig(content="Principal Planning Engineer | BHP")])
+    assert 0 < pts < W_SENIORITY
+    assert "3 short" in ev
+
+
+def test_far_short_of_the_level_is_no_fit():
+    pts, _ = _seniority_fit(4, [sig(content="Principal Planning Engineer | BHP")])
+    assert pts == 0
+
+
+def test_the_most_senior_word_in_a_title_sets_the_level():
+    """"Senior Project Manager" is a manager role, not merely a senior one."""
+    _, ev = _seniority_fit(9, [sig(content="Senior Project Manager | BHP")])
+    assert "8+" in ev
+
+
+def test_seniority_words_match_whole_words_only():
+    """"Leading" and "management" in a title do not make it a lead or a manager role."""
+    assert _seniority_fit(2, [sig(content="Leading Hand Scaffolder | BHP")]) == (None, None)
+    assert _seniority_fit(2, [sig(content="Asset Management Planner | BHP")]) == (None, None)
+
+
+def test_mixed_levels_are_scored_advert_by_advert():
+    """Averaging the implied years of a graduate advert and a director advert
+    invents a mid-career role nobody posted. Each advert is judged on its own."""
+    rows = [sig(content="Graduate Engineer | BHP"), sig(content="Director of Operations | BHP")]
+    pts, _ = _seniority_fit(20, rows)
+    assert pts == round(W_SENIORITY * 0.5)
+
+
 # ---------- confidence ----------
 
 
