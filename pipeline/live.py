@@ -166,6 +166,17 @@ def run_live_cycle(
     else:
         log.info("live: --no-scrape; skipping fetch")
 
+    # The watchlist first, so this run's signals are tagged against the client's
+    # current tiers in HubSpot. Only once an administrator has synced by hand,
+    # and never fatal: an outage leaves the run on the list it already has.
+    hubspot_sync = None
+    try:
+        from loader.hubspot_watchlist import auto_sync
+
+        hubspot_sync = auto_sync(db_path)
+    except Exception as exc:  # noqa: BLE001 - never stop a run over the watchlist
+        log.warning("live: HubSpot watchlist sync failed (%s) — using the current watchlist", exc)
+
     classify_counts = classify_pending(
         db_path,
         # No batch cap: classify whatever is pending, bounded by the daily Gemini
@@ -282,6 +293,9 @@ def run_live_cycle(
         "filtered_blocklist": int(classify_counts.get("filtered_blocklist", 0)),
         "filtered_too_short": int(classify_counts.get("filtered_too_short", 0)),
         "errors": int(classify_counts.get("errors", 0)),
+        #: The pre-run HubSpot watchlist sync: None when not set up, else its
+        #: summary, or {"error": ...} when HubSpot could not be read.
+        "hubspot": hubspot_sync,
         #: This run's rows still waiting for classification after it finished.
         "unclassified": unclassified,
         "note": _unclassified_note(

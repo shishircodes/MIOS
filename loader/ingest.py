@@ -35,6 +35,11 @@ ADDED_COLUMNS: tuple[tuple[str, str, str], ...] = (
     # digests were kept per run have no run to point at, and inventing one
     # would fabricate an archive entry that never existed.
     ("signals", "run_id", "TEXT"),
+    # Where a watchlist row came from. NULL is the hand-kept JSON seed;
+    # 'hubspot' rows are owned by the HubSpot sync and the seed leaves them alone.
+    ("watchlist", "source", "TEXT"),
+    ("watchlist", "external_id", "TEXT"),
+    ("watchlist", "synced_at", "TEXT"),
 )
 
 #: Indexes that depend on a migrated column, so they cannot live in schema.sql —
@@ -192,6 +197,18 @@ def init_db(target: str | Path | None = None, watchlist_path: str | Path | None 
 
 
 def _seed_watchlist(conn, watchlist_path: Path) -> None:
+    # Once the watchlist has been synced from HubSpot, the CRM is the list. This
+    # runs on every pipeline run, so seeding regardless would put back companies
+    # the client had dropped and reset tiers the client had changed.
+    try:
+        synced = conn.execute(
+            "SELECT count(*) FROM watchlist WHERE source = 'hubspot'").fetchone()[0]
+    except Exception:  # noqa: BLE001 - column not migrated yet, so nothing is synced
+        synced = 0
+    if synced:
+        log.info("watchlist seed skipped: %d companies are synced from HubSpot", synced)
+        return
+
     entries = json.loads(watchlist_path.read_text(encoding="utf-8"))
     rows = [
         (

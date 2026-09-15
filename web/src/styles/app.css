@@ -2094,6 +2094,19 @@ overflow-x: auto;
 .cost-table td { padding: 7px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
 .cost-table .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .cost-rates { margin-top: 10px; }
+
+/* ---------- HubSpot watchlist ---------- */
+.hs-map { display: flex; flex-wrap: wrap; gap: 10px 14px; margin-top: 10px; }
+.hs-map label { display: flex; flex-direction: column; gap: 4px; min-width: 160px; }
+.hs-map select {
+  font: inherit; font-size: 13px; padding: 5px 8px; color: var(--ink);
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-sm);
+}
+.hs-auto { margin-top: 12px; }
+.hs-summary { margin-top: 10px; font-size: 13px; }
+.hs-note { margin-top: 6px; color: var(--ink-3); }
+.hs-lists { margin-top: 8px; display: grid; gap: 4px; font-size: 12.5px; }
+.hs-lists b { font-weight: 600; margin-right: 4px; }
 .usage-hist-row {
   display: grid; grid-template-columns: 110px 1fr auto; gap: 12px;
   padding: 5px 0; font-size: 12.5px; border-top: 1px solid var(--line);

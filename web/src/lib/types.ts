@@ -96,6 +96,63 @@ export type WatchlistCompany = {
 export type WatchlistResponse = {
   total: number
   companies: WatchlistCompany[]
+  /** How many companies came from the client's HubSpot. */
+  fromHubspot?: number
+  /** When the most recent HubSpot sync wrote the list, if one has. */
+  lastSyncedAt?: string | null
+}
+
+// ---------- HubSpot watchlist sync (api/hubspot_api.py) ----------
+
+export interface HubSpotMapping {
+  tierProperty: string
+  tierMap: Record<string, string>
+  industryProperty: string | null
+  autoSync: boolean
+  changedBy?: string
+  changedAt?: string
+}
+
+export interface HubSpotSyncSummary {
+  at: string
+  by: string
+  dryRun: boolean
+  fetched: number
+  truncated: boolean
+  total: number
+  tiers: Record<string, number>
+  added: number
+  updated: number
+  unchanged: number
+  removed: number
+  skippedUnmapped: Record<string, number>
+  skippedNoName: number
+  tierProperty: string
+  refused?: string
+  retagged?: { scanned: number; changed: number } | null
+  preview?: {
+    added: { company_name: string; tier: string; sector?: string; hubspotName?: string }[]
+    updated: { company_name: string; tier: string; previousTier?: string; hubspotName?: string }[]
+    removed: { company_name: string; tier: string; source?: string | null }[]
+  }
+}
+
+export interface HubSpotStatus {
+  key: { source: 'panel' | 'environment' | 'none'; hint: string | null; shadowsEnvironment: boolean; unreadable: boolean }
+  canStoreKey: boolean
+  keyEnv: string
+  mapping: HubSpotMapping
+  lastSync: HubSpotSyncSummary | null
+  watchlist: { fromHubspot: number; fromSeed: number }
+  note?: string
+  result?: HubSpotSyncSummary
+}
+
+export interface HubSpotProperty {
+  name: string
+  label: string
+  type: string
+  options: { value: string; label: string }[]
 }
 
 // ---------- Mode Publish (api/publish_api.py) ----------
