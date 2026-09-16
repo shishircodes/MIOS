@@ -2,6 +2,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useRef, useState } from 'react'
 import { AdminOnly } from '~/components/AdminOnly'
+import { HubSpotPanel } from '~/components/HubSpotPanel'
 import { SchedulePanel } from '~/components/SchedulePanel'
 import { Explainer, Loading, Section } from '~/components/ui'
 import { scheduleQueryOptions, setSourceEnabled, sourceHealthQueryOptions } from '~/lib/api'
@@ -257,6 +258,10 @@ function SourcesScreen() {
           )}
         </Explainer>
       </Section>
+
+      {/* Not a collector: it decides which companies the collected signals are
+          matched against, so it sits after what is collected. */}
+      <HubSpotPanel />
     </div>
   )
 }

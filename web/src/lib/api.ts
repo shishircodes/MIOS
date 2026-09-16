@@ -15,6 +15,9 @@ import type {
   Report,
   LlmSettingsPayload,
   UsageReport,
+  HubSpotMapping,
+  HubSpotProperty,
+  HubSpotStatus,
   ReportSummary,
   SchedulePayload,
   ScoringModel,
@@ -92,6 +95,52 @@ export const watchlistQueryOptions = queryOptions({
   // A 401 means "sign in", not "retry" — the auth gate handles it.
   retry: false,
 })
+
+// ---------- HubSpot watchlist sync ----------
+
+export const hubspotStatusQueryOptions = queryOptions({
+  queryKey: ['admin', 'hubspot'],
+  queryFn: () => fetchJson<HubSpotStatus>('/api/admin/hubspot'),
+  retry: false,
+})
+
+/** Store the service key, encrypted. The response never contains it. */
+export async function setHubSpotKey(key: string): Promise<HubSpotStatus> {
+  return postOrExplain<HubSpotStatus>('/api/admin/hubspot/key', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ key }),
+  })
+}
+
+export async function clearHubSpotKey(): Promise<HubSpotStatus> {
+  return postOrExplain<HubSpotStatus>('/api/admin/hubspot/key', { method: 'DELETE' })
+}
+
+/** Company fields from HubSpot — also the check that the key works. */
+export async function fetchHubSpotProperties(): Promise<{
+  properties: HubSpotProperty[]
+  tierCandidates: HubSpotProperty[]
+}> {
+  return postOrExplain('/api/admin/hubspot/properties', { method: 'GET' })
+}
+
+export async function saveHubSpotMapping(mapping: Partial<HubSpotMapping>): Promise<HubSpotStatus> {
+  return postOrExplain<HubSpotStatus>('/api/admin/hubspot/mapping', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(mapping),
+  })
+}
+
+/** Preview (dryRun) or apply a sync. */
+export async function syncHubSpot(dryRun: boolean): Promise<HubSpotStatus> {
+  return postOrExplain<HubSpotStatus>('/api/admin/hubspot/sync', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ dryRun }),
+  })
+}
 
 /**
  * Several endpoints answer a rejected request with a written explanation — an

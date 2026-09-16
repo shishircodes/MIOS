@@ -96,6 +96,77 @@ export type WatchlistCompany = {
 export type WatchlistResponse = {
   total: number
   companies: WatchlistCompany[]
+  /** How many companies came from the client's HubSpot. */
+  fromHubspot?: number
+  /** When the most recent HubSpot sync wrote the list, if one has. */
+  lastSyncedAt?: string | null
+}
+
+// ---------- HubSpot watchlist sync (api/hubspot_api.py) ----------
+
+export interface HubSpotMapping {
+  tierProperty: string
+  tierMap: Record<string, string>
+  industryProperty: string | null
+  /** Read only companies ticked as HubSpot target accounts. */
+  targetAccountsOnly: boolean
+  targetProperty: string
+  /** The tier for a target account nobody has tiered; null leaves them off. */
+  untieredTier: 'A' | 'B' | 'C' | null
+  autoSync: boolean
+  changedBy?: string
+  changedAt?: string
+}
+
+export interface HubSpotSyncSummary {
+  at: string
+  by: string
+  dryRun: boolean
+  fetched: number
+  truncated: boolean
+  total: number
+  tiers: Record<string, number>
+  added: number
+  updated: number
+  unchanged: number
+  removed: number
+  skippedUnmapped: Record<string, number>
+  skippedNoName: number
+  targetsWithoutTier: number
+  targetAccountsOnly: boolean
+  tierProperty: string
+  /** True for the sync before a pipeline run, which removes nothing. */
+  unattended: boolean
+  /** Removals an unattended sync held back for an administrator. */
+  removalsHeld: number
+  pendingRemovals: string[]
+  refused?: string
+  retagged?: { scanned: number; changed: number } | null
+  preview?: {
+    added: { company_name: string; tier: string; sector?: string; hubspotName?: string }[]
+    updated: { company_name: string; tier: string; previousTier?: string; hubspotName?: string }[]
+    removed: { company_name: string; tier: string; source?: string | null }[]
+    /** HubSpot names that landed on a watchlist row under a different name. */
+    matched: { hubspotName: string; company_name: string }[]
+  }
+}
+
+export interface HubSpotStatus {
+  key: { source: 'panel' | 'environment' | 'none'; hint: string | null; shadowsEnvironment: boolean; unreadable: boolean }
+  canStoreKey: boolean
+  keyEnv: string
+  mapping: HubSpotMapping
+  lastSync: HubSpotSyncSummary | null
+  watchlist: { fromHubspot: number; fromSeed: number }
+  note?: string
+  result?: HubSpotSyncSummary
+}
+
+export interface HubSpotProperty {
+  name: string
+  label: string
+  type: string
+  options: { value: string; label: string }[]
 }
 
 // ---------- Mode Publish (api/publish_api.py) ----------

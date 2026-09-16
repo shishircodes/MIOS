@@ -20,6 +20,14 @@ function WatchlistScreen() {
     C: watchlist.filter((w) => w.tier === 'C').length,
   }
 
+  // Where the list came from, because it decides how far to trust it: tiers
+  // read from the client's CRM, or the built-in list typed by hand.
+  const origin = data?.lastSyncedAt
+    ? `Synced from HubSpot · ${new Date(data.lastSyncedAt).toLocaleString('en-AU', {
+        day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
+      })}`
+    : 'From the built-in list · not yet synced from HubSpot'
+
   return (
     <div className="page">
       <div className="page-header">
@@ -38,7 +46,7 @@ function WatchlistScreen() {
           </div>
 
           <div style={{ marginTop: 4 }}>
-            Synced from watchlist database
+            {isLoading ? '' : origin}
           </div>
         </div>
       </div>
