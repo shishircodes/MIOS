@@ -7,10 +7,17 @@ it, and the dashboard counts how much of it appeared. Until now it was
 last edited it. The client's own CRM already records which companies matter and
 how much, so this reads it from there.
 
-**Read-only against HubSpot.** Two requests: the company property definitions
-(`crm.schemas.companies.read`), to offer the tier field's options, and a search
-for companies that have a tier (`crm.objects.companies.read`). Nothing is ever
-written back.
+**Read-only against HubSpot, on its current API version.** Two requests, both on
+the date-versioned API (`2026-09`, the version HubSpot recommends for new
+integrations): the company property definitions (`crm.schemas.companies.read`),
+to offer the tier field's options, and a search for companies
+(`crm.objects.companies.read`). Nothing is ever written back.
+
+**Target accounts, as HubSpot models them.** HubSpot's account-based marketing
+uses two fields: a "Target account" checkbox (`hs_is_target_account`) and an
+"Ideal Customer Profile Tier". By default only companies ticked as target
+accounts are read; a target account with no tier is counted in the preview and
+left off unless an administrator chooses a tier for them.
 
 **Which field is "tier" is a setting, not an assumption.** HubSpot's built-in
 field is "Ideal Customer Profile Tier" (`hs_ideal_customer_profile`, values
@@ -33,6 +40,11 @@ is added as one more alias. Hand-written notes on those rows are kept too.
 every company to nothing, and applying that would strip every client's tier
 from every signal. The preview shows it instead.
 
+**Nothing is removed unattended.** The sync before each pipeline run adds and
+updates companies, but holds back removals until an administrator applies a
+sync from the panel. A client clearing tiers by mistake then costs a warning,
+not a week of untagged signals.
+
 The service key is stored exactly like a model API key — encrypted in
 `llm_credentials` under the name "hubspot" — or read from HUBSPOT_SERVICE_KEY.
 It is never logged or returned.
@@ -53,6 +65,11 @@ from loader.db import connect
 log = logging.getLogger(__name__)
 
 BASE_URL = "https://api.hubapi.com"
+#: HubSpot's date-based API version. New versions ship in March and September
+#: and each is supported for 18 months; move this forward when one is released.
+API_VERSION = "2026-09"
+PROPERTIES_PATH = f"/crm/properties/{API_VERSION}/companies"
+SEARCH_PATH = f"/crm/objects/{API_VERSION}/companies/search"
 KEY_NAME = "hubspot"
 KEY_ENV = "HUBSPOT_SERVICE_KEY"
 
@@ -65,13 +82,20 @@ DEFAULT_MAPPING: dict[str, Any] = {
     "tierProperty": "hs_ideal_customer_profile",
     "tierMap": {"tier_1": "A", "tier_2": "B", "tier_3": "C"},
     "industryProperty": "industry",
+    #: Only companies ticked as target accounts. Off reads every company with a
+    #: value in the tier field instead.
+    "targetAccountsOnly": True,
+    "targetProperty": "hs_is_target_account",
+    #: The tier for a target account with no tier; None leaves them off.
+    "untieredTier": None,
     #: Sync before each pipeline run, once a first sync has been done by hand.
     "autoSync": True,
 }
 
 #: HubSpot's search stops paging at 10,000 results.
 MAX_RESULTS = 10_000
-PAGE_SIZE = 100
+#: The most the 2026-09 search returns per page.
+PAGE_SIZE = 200
 #: The search API allows five requests a second per account.
 PAGE_PAUSE_SECONDS = 0.25
 REQUEST_TIMEOUT_SECONDS = 20
@@ -162,13 +186,23 @@ def set_mapping(mapping: dict[str, Any], *, changed_by: str,
     bad = sorted({v for v in tier_map.values() if v not in TIERS})
     if bad:
         raise ValueError(f"Tiers must be A, B or C; got {', '.join(bad)}.")
-    if not tier_map:
+    untiered_given = str(mapping.get("untieredTier") or "").strip()
+    if not tier_map and not untiered_given:
         raise ValueError("Map at least one HubSpot value to a tier, or no company can be synced.")
+
+    target_only = bool(mapping.get("targetAccountsOnly", True))
+    target_property = str(mapping.get("targetProperty") or "").strip() or DEFAULT_MAPPING["targetProperty"]
+    untiered = str(mapping.get("untieredTier") or "").strip().upper() or None
+    if untiered is not None and untiered not in TIERS:
+        raise ValueError(f"A tier for untiered target accounts must be A, B or C; got {untiered}.")
 
     stored = {
         "tierProperty": tier_property,
         "tierMap": tier_map,
         "industryProperty": str(mapping.get("industryProperty") or "").strip() or None,
+        "targetAccountsOnly": target_only,
+        "targetProperty": target_property,
+        "untieredTier": untiered if target_only else None,
         "autoSync": bool(mapping.get("autoSync", True)),
         "changedBy": changed_by,
         "changedAt": _now(),
@@ -231,7 +265,7 @@ class HubSpotClient:
             if status == 401:
                 raise HubSpotError(
                     "HubSpot refused the service key. It may be mistyped, rotated or "
-                    "deleted — check it under Settings → Integrations → Service Keys.", 401)
+                    "deleted — check it in HubSpot under Development → Keys → Service keys.", 401)
             if status == 403:
                 raise HubSpotError(
                     "The service key is missing a permission this needs. It requires "
@@ -243,7 +277,7 @@ class HubSpotClient:
 
     def company_properties(self) -> list[dict[str, Any]]:
         """Company fields, for choosing which one holds the tier."""
-        body = self._request("GET", "/crm/v3/properties/companies")
+        body = self._request("GET", PROPERTIES_PATH)
         out = []
         for p in body.get("results") or []:
             if p.get("archived") or p.get("hidden"):
@@ -259,14 +293,14 @@ class HubSpotClient:
             })
         return sorted(out, key=lambda p: str(p["label"]).lower())
 
-    def search_companies(self, properties: list[str], tier_property: str) -> tuple[list[dict[str, Any]], bool]:
-        """Every company with a value in the tier field. Returns (companies, truncated)."""
+    def search_companies(self, properties: list[str],
+                         filters: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], bool]:
+        """Every company matching all `filters`. Returns (companies, truncated)."""
         results: list[dict[str, Any]] = []
         after: str | None = None
         while True:
             body: dict[str, Any] = {
-                "filterGroups": [{"filters": [
-                    {"propertyName": tier_property, "operator": "HAS_PROPERTY"}]}],
+                "filterGroups": [{"filters": filters}],
                 "properties": properties,
                 "limit": PAGE_SIZE,
                 # A stable order, so paging cannot skip or repeat a company.
@@ -274,7 +308,7 @@ class HubSpotClient:
             }
             if after:
                 body["after"] = after
-            page = self._request("POST", "/crm/v3/objects/companies/search", json=body)
+            page = self._request("POST", SEARCH_PATH, json=body)
             results.extend(page.get("results") or [])
             after = ((page.get("paging") or {}).get("next") or {}).get("after")
             if not after:
@@ -329,6 +363,10 @@ def plan(companies: list[dict[str, Any]], existing: list[dict[str, Any]],
     chosen: dict[str, dict[str, Any]] = {}
     skipped_unmapped: Counter[str] = Counter()
     skipped_no_name = 0
+    targets_without_tier = 0
+    #: HubSpot names that landed on a watchlist row under a different name, so
+    #: an administrator can check the matcher's judgement before applying.
+    matched: list[dict[str, str]] = []
 
     for company in companies:
         props = company.get("properties") or {}
@@ -337,10 +375,18 @@ def plan(companies: list[dict[str, Any]], existing: list[dict[str, Any]],
             skipped_no_name += 1
             continue
         raw_tier = str(props.get(tier_property) or "").strip()
-        tier = tier_map.get(raw_tier)
-        if tier not in TIERS:
-            skipped_unmapped[raw_tier or "(blank)"] += 1
-            continue
+        if not raw_tier and mapping.get("targetAccountsOnly"):
+            # A target account nobody has tiered yet: off the list unless an
+            # administrator chose a tier for these.
+            targets_without_tier += 1
+            tier = mapping.get("untieredTier")
+            if tier not in TIERS:
+                continue
+        else:
+            tier = tier_map.get(raw_tier)
+            if tier not in TIERS:
+                skipped_unmapped[raw_tier or "(blank)"] += 1
+                continue
 
         external_id = str(company.get("id") or props.get("hs_object_id") or "")
         canonical = by_external.get(external_id)
@@ -348,6 +394,8 @@ def plan(companies: list[dict[str, Any]], existing: list[dict[str, Any]],
             canonical, _ = fuzzy_match_watchlist(name, matchable)
         base = rows_by_name.get(canonical) if canonical else None
         canonical = canonical or name
+        if canonical != name:
+            matched.append({"hubspotName": name, "company_name": canonical})
 
         industry_value = str(props.get(industry_property) or "") if industry_property else ""
         sector = (sector_for(industry_value, industry_labels.get(industry_value))
@@ -399,6 +447,8 @@ def plan(companies: list[dict[str, Any]], existing: list[dict[str, Any]],
         "tiers": dict(Counter(r["tier"] for r in chosen.values())),
         "skippedUnmapped": dict(skipped_unmapped),
         "skippedNoName": skipped_no_name,
+        "targetsWithoutTier": targets_without_tier,
+        "matched": matched,
     }
 
 
@@ -424,12 +474,22 @@ def _preview(rows: list[dict[str, Any]], limit: int = 50) -> list[dict[str, Any]
     return [{k: r.get(k) for k in keep if k in r} for r in rows[:limit]]
 
 
+def search_filters(mapping: dict[str, Any]) -> list[dict[str, Any]]:
+    """Which companies to read: target accounts, or anything with a tier."""
+    if mapping.get("targetAccountsOnly"):
+        return [{"propertyName": mapping.get("targetProperty") or DEFAULT_MAPPING["targetProperty"],
+                 "operator": "EQ", "value": "true"}]
+    return [{"propertyName": mapping["tierProperty"], "operator": "HAS_PROPERTY"}]
+
+
 def sync(target: str | Path | None = None, *, changed_by: str, dry_run: bool = False,
-         client: HubSpotClient | None = None) -> dict[str, Any]:
+         client: HubSpotClient | None = None, unattended: bool = False) -> dict[str, Any]:
     """Read HubSpot and bring the watchlist into line with it.
 
-    With `dry_run` nothing is written. Otherwise the watchlist is replaced in one
-    transaction and existing signals are re-tagged against it.
+    With `dry_run` nothing is written. Otherwise the watchlist is updated in one
+    transaction and existing signals are re-tagged against it. An `unattended`
+    sync — the one before a pipeline run — adds and updates but removes nothing;
+    what it would have removed is recorded for an administrator to apply.
     """
     mapping = get_mapping(target)
     client = client or HubSpotClient(api_key(target))
@@ -444,9 +504,11 @@ def sync(target: str | Path | None = None, *, changed_by: str, dry_run: bool = F
         except HubSpotError as exc:
             log.warning("hubspot: could not read industry labels (%s) — using raw values", exc)
 
-    wanted = [p for p in dict.fromkeys(
-        ["name", "domain", mapping["tierProperty"], mapping.get("industryProperty")]) if p]
-    companies, truncated = client.search_companies(wanted, mapping["tierProperty"])
+    wanted = [p for p in dict.fromkeys([
+        "name", "domain", mapping["tierProperty"], mapping.get("industryProperty"),
+        mapping.get("targetProperty") if mapping.get("targetAccountsOnly") else None,
+    ]) if p]
+    companies, truncated = client.search_companies(wanted, search_filters(mapping))
     result = plan(companies, _existing_rows(target), mapping, industry_labels)
 
     summary: dict[str, Any] = {
@@ -463,11 +525,17 @@ def sync(target: str | Path | None = None, *, changed_by: str, dry_run: bool = F
         "removed": len(result["removed"]),
         "skippedUnmapped": result["skippedUnmapped"],
         "skippedNoName": result["skippedNoName"],
+        "targetsWithoutTier": result["targetsWithoutTier"],
+        "targetAccountsOnly": bool(mapping.get("targetAccountsOnly")),
         "tierProperty": mapping["tierProperty"],
+        "unattended": unattended,
+        "removalsHeld": 0,
+        "pendingRemovals": [],
         "preview": {
             "added": _preview(result["added"]),
             "updated": _preview(result["updated"]),
             "removed": _preview(result["removed"]),
+            "matched": result["matched"][:100],
         },
     }
 
@@ -485,6 +553,15 @@ def sync(target: str | Path | None = None, *, changed_by: str, dry_run: bool = F
 
     from loader.ingest import _apply_column_additions
 
+    removals = result["removed"]
+    if unattended and removals:
+        summary["removalsHeld"] = len(removals)
+        summary["pendingRemovals"] = [r["company_name"] for r in removals]
+        summary["removed"] = 0
+        log.warning("hubspot: pre-run sync held back %d removal(s) for an administrator: %s",
+                    len(removals), ", ".join(summary["pendingRemovals"][:10]))
+        removals = []
+
     stamp = _now()
     with connect(target) as conn:
         _apply_column_additions(conn)
@@ -498,7 +575,7 @@ def sync(target: str | Path | None = None, *, changed_by: str, dry_run: bool = F
             [(r["company_name"], r["tier"], r["sector"], r["notes"], json.dumps(r["aliases"]),
               r["external_id"], stamp) for r in result["rows"]],
         )
-        for gone in result["removed"]:
+        for gone in removals:
             conn.execute("DELETE FROM watchlist WHERE company_name = ?", (gone["company_name"],))
 
     # Signals already collected carry tiers from the old list. Re-derived from
@@ -528,7 +605,7 @@ def auto_sync(target: str | Path | None = None) -> dict[str, Any] | None:
     if not mapping.get("autoSync") or not last_sync(target) or not api_key(target):
         return None
     try:
-        return sync(target, changed_by="scheduled run")
+        return sync(target, changed_by="scheduled run", unattended=True)
     except HubSpotError as exc:
         log.warning("hubspot: pre-run sync skipped — %s", exc)
         return {"error": str(exc)}

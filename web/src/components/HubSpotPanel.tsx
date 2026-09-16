@@ -41,6 +41,12 @@ function SyncSummary({ s, preview }: { s: HubSpotSyncSummary; preview: boolean }
           {s.truncated && <> HubSpot stops at 10,000 results, so the list may be incomplete.</>}
         </>
       )}
+      {s.targetsWithoutTier > 0 && (
+        <div className="hs-note">
+          {s.targetsWithoutTier} target account{s.targetsWithoutTier === 1 ? ' has' : 's have'} no
+          tier and {s.targetsWithoutTier === 1 ? 'is' : 'are'} left off unless you choose a tier for them below.
+        </div>
+      )}
       {unmapped.length > 0 && (
         <div className="hs-note">
           Left off because their tier maps to nothing:{' '}
@@ -58,6 +64,18 @@ function SyncSummary({ s, preview }: { s: HubSpotSyncSummary; preview: boolean }
           )}
           {s.preview.removed.length > 0 && (
             <div><b>Removed</b> {s.preview.removed.map((r) => r.company_name).join(', ')}</div>
+          )}
+          {s.preview.matched.length > 0 && (
+            <div className="hs-matched">
+              <b>Matched to an existing company</b> — check these are the same business:
+              <ul>
+                {s.preview.matched.map((m) => (
+                  <li key={m.hubspotName}>
+                    {m.hubspotName} <span className="muted">→</span> {m.company_name}
+                  </li>
+                ))}
+              </ul>
+            </div>
           )}
         </div>
       )}
@@ -265,6 +283,36 @@ export function HubSpotPanel() {
           )}
           <label className="sched-toggle hs-auto">
             <input
+              type="checkbox" checked={draft.targetAccountsOnly}
+              onChange={(e) => setDraft({
+                ...draft,
+                targetAccountsOnly: e.target.checked,
+                untieredTier: e.target.checked ? draft.untieredTier : null,
+              })}
+            />
+            <span>Only companies marked as Target accounts in HubSpot</span>
+          </label>
+          {draft.targetAccountsOnly && (
+            <div className="hs-map">
+              <label>
+                <span className="fld">Target accounts with no tier</span>
+                <select
+                  value={draft.untieredTier ?? ''}
+                  onChange={(e) => setDraft({
+                    ...draft,
+                    untieredTier: (e.target.value || null) as HubSpotMapping['untieredTier'],
+                  })}
+                >
+                  <option value="">Leave off</option>
+                  <option value="A">Tier A</option>
+                  <option value="B">Tier B</option>
+                  <option value="C">Tier C</option>
+                </select>
+              </label>
+            </div>
+          )}
+          <label className="sched-toggle hs-auto">
+            <input
               type="checkbox" checked={draft.autoSync}
               onChange={(e) => setDraft({ ...draft, autoSync: e.target.checked })}
             />
@@ -286,6 +334,15 @@ export function HubSpotPanel() {
             Watchlist now: {data.watchlist.fromHubspot} from HubSpot, {data.watchlist.fromSeed} from
             the built-in list. Preview first — nothing changes until you apply it.
           </div>
+          {data.lastSync && data.lastSync.pendingRemovals.length > 0 && !applied && (
+            <div className="notice warn hs-summary" role="status">
+              <strong>{data.lastSync.pendingRemovals.length} removal{data.lastSync.pendingRemovals.length === 1 ? '' : 's'} waiting.</strong>{' '}
+              The sync before the last pipeline run found companies HubSpot no longer lists and
+              kept them: {data.lastSync.pendingRemovals.slice(0, 12).join(', ')}
+              {data.lastSync.pendingRemovals.length > 12 ? '…' : ''}. Preview and apply a sync here to
+              remove them.
+            </div>
+          )}
           {preview && <SyncSummary s={preview} preview />}
           {applied && <SyncSummary s={applied} preview={false} />}
         </div>
@@ -316,8 +373,14 @@ export function HubSpotPanel() {
           against the new tiers without any AI calls.
         </p>
         <p>
+          By default only companies ticked as <strong>Target accounts</strong> are read — that is
+          how HubSpot marks the accounts a team is pursuing. A target account without a tier is
+          left off unless you choose a tier for them.
+        </p>
+        <p>
           A sync that would leave the watchlist empty is refused, because that almost always means
-          the wrong field was chosen.
+          the wrong field was chosen. The sync before each pipeline run never removes anyone: it
+          adds and updates, and lists what it would have removed here for you to apply.
         </p>
       </Explainer>
     </Section>

@@ -17,8 +17,9 @@ from loader.ingest import init_db
 MAPPING = dict(hs.DEFAULT_MAPPING)
 
 
-def company(cid, name, tier="tier_1", industry=None, domain=None):
-    props = {"name": name, "hs_ideal_customer_profile": tier, "hs_object_id": cid}
+def company(cid, name, tier="tier_1", industry=None, domain=None, target=True):
+    props = {"name": name, "hs_ideal_customer_profile": tier, "hs_object_id": cid,
+             "hs_is_target_account": "true" if target else "false"}
     if industry is not None:
         props["industry"] = industry
     if domain is not None:
@@ -160,14 +161,37 @@ def test_search_pages_until_hubspot_stops_and_sends_the_key_as_bearer():
     ])
     client = hs.HubSpotClient("pat-secret", session=session, pause=0)
 
-    found, truncated = client.search_companies(["name"], "hs_ideal_customer_profile")
+    found, truncated = client.search_companies(["name"], hs.search_filters(MAPPING))
 
     assert [c["id"] for c in found] == ["1", "2"] and truncated is False
     method, url, kwargs = session.calls[1]
-    assert (method, url.endswith("/crm/v3/objects/companies/search")) == ("POST", True)
+    assert (method, url) == ("POST", "https://api.hubapi.com/crm/objects/2026-09/companies/search")
     assert kwargs["headers"]["Authorization"] == "Bearer pat-secret"
     assert kwargs["json"]["after"] == "1"
-    assert kwargs["json"]["filterGroups"][0]["filters"][0]["operator"] == "HAS_PROPERTY"
+    assert kwargs["json"]["limit"] == 200
+
+
+def test_properties_are_read_from_the_current_api_version():
+    session = FakeSession([FakeResponse(200, {"results": [
+        {"name": "hs_ideal_customer_profile", "label": "ICP tier", "type": "enumeration",
+         "options": [{"value": "tier_1", "label": "Tier 1"}]},
+        {"name": "old_field", "label": "Old", "archived": True},
+    ]})])
+    props = hs.HubSpotClient("k", session=session, pause=0).company_properties()
+
+    assert session.calls[0][1] == "https://api.hubapi.com/crm/properties/2026-09/companies"
+    assert [p["name"] for p in props] == ["hs_ideal_customer_profile"], "archived fields are hidden"
+
+
+def test_by_default_only_target_accounts_are_read():
+    assert hs.search_filters(MAPPING) == [
+        {"propertyName": "hs_is_target_account", "operator": "EQ", "value": "true"}]
+
+
+def test_without_the_target_filter_anything_with_a_tier_is_read():
+    mapping = {**MAPPING, "targetAccountsOnly": False}
+    assert hs.search_filters(mapping) == [
+        {"propertyName": "hs_ideal_customer_profile", "operator": "HAS_PROPERTY"}]
 
 
 @pytest.mark.parametrize("status,words", [(401, "refused the service key"), (403, "permission")])
@@ -188,12 +212,14 @@ def test_no_key_is_reported_as_not_configured():
 class FakeClient:
     def __init__(self, companies):
         self.companies = companies
+        self.filters = None
 
     def company_properties(self):
         return [{"name": "industry", "label": "Industry", "type": "enumeration",
                  "options": [{"value": "MINING_METALS", "label": "Mining & Metals"}]}]
 
-    def search_companies(self, properties, tier_property):
+    def search_companies(self, properties, filters):
+        self.filters = filters
         return self.companies, False
 
 
@@ -273,3 +299,66 @@ def test_status_never_contains_the_key(db, monkeypatch):
     body = json.dumps(hs.status())
     assert "very-secret" not in body
     assert '"source": "environment"' in body
+
+
+# ---------- target accounts without a tier ----------
+
+
+def test_a_target_account_with_no_tier_is_counted_and_left_off():
+    result = hs.plan([company("1", "Tiered", "tier_1"), company("2", "Untiered", "")], [], MAPPING)
+    assert [r["company_name"] for r in result["rows"]] == ["Tiered"]
+    assert result["targetsWithoutTier"] == 1
+    assert result["skippedUnmapped"] == {}, "an untiered target is not an unmapped value"
+
+
+def test_untiered_target_accounts_can_be_given_a_tier():
+    mapping = {**MAPPING, "untieredTier": "C"}
+    result = hs.plan([company("2", "Untiered", "")], [], mapping)
+    assert [(r["company_name"], r["tier"]) for r in result["rows"]] == [("Untiered", "C")]
+
+
+def test_an_untiered_tier_outside_a_to_c_is_refused(db):
+    with pytest.raises(ValueError, match="untiered"):
+        hs.set_mapping({**MAPPING, "untieredTier": "Z"}, changed_by="x")
+
+
+# ---------- the preview shows the matcher's judgement ----------
+
+
+def test_the_preview_lists_every_name_matched_to_a_different_row(db):
+    result = hs.sync(changed_by="boss", dry_run=True,
+                     client=FakeClient([company("1", "BHP Mitsubishi Alliance"),
+                                        company("2", "Brand New Co")]))
+    assert result["preview"]["matched"] == [
+        {"hubspotName": "BHP Mitsubishi Alliance", "company_name": "BHP"}]
+
+
+# ---------- nothing is removed unattended ----------
+
+
+def test_the_pre_run_sync_adds_and_updates_but_holds_removals(db):
+    path, _ = db
+    result = hs.sync(changed_by="scheduled run", unattended=True, client=FakeClient([
+        company("1", "BHP", "tier_2"), company("2", "New Client")]))
+
+    rows = _watchlist(path)
+    assert "Dropped Co" in rows, "removals wait for an administrator"
+    assert rows["BHP"]["tier"] == "B" and "New Client" in rows
+    assert result["removalsHeld"] == 1 and result["pendingRemovals"] == ["Dropped Co"]
+    assert hs.last_sync()["pendingRemovals"] == ["Dropped Co"]
+
+
+def test_an_administrators_sync_applies_the_held_removals(db):
+    path, _ = db
+    clients = [company("1", "BHP", "tier_2")]
+    hs.sync(changed_by="scheduled run", unattended=True, client=FakeClient(clients))
+    result = hs.sync(changed_by="boss", client=FakeClient(clients))
+
+    assert "Dropped Co" not in _watchlist(path)
+    assert result["removed"] == 1 and hs.last_sync()["pendingRemovals"] == []
+
+
+def test_a_sync_asks_hubspot_for_target_accounts(db):
+    fake = FakeClient([company("1", "BHP")])
+    hs.sync(changed_by="boss", client=fake)
+    assert fake.filters[0]["propertyName"] == "hs_is_target_account"

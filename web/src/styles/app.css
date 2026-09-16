@@ -1474,7 +1474,8 @@ overflow-x: auto;
   gap: 4px;
 }
 
-.sched-fields .fld {
+.sched-fields .fld,
+.hs-map .fld {
   font-family: var(--mono);
   font-size: 11.5px;
   letter-spacing: 0.08em;
@@ -2107,6 +2108,8 @@ overflow-x: auto;
 .hs-note { margin-top: 6px; color: var(--ink-3); }
 .hs-lists { margin-top: 8px; display: grid; gap: 4px; font-size: 12.5px; }
 .hs-lists b { font-weight: 600; margin-right: 4px; }
+.hs-matched ul { margin: 4px 0 0; padding-left: 18px; }
+.hs-matched li { margin: 1px 0; }
 .usage-hist-row {
   display: grid; grid-template-columns: 110px 1fr auto; gap: 12px;
   padding: 5px 0; font-size: 12.5px; border-top: 1px solid var(--line);
