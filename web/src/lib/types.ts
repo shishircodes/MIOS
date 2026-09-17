@@ -14,6 +14,8 @@ export interface Collection {
   /** Anything no named kind covers, so the parts always sum to `collected`. */
   other: number
   shown: number
+  /** Classified outside the five sectors and left out of these figures. */
+  notRelevant?: number
   newNames: number
   sources: number
   regions: { AU: number; PNG: number }
@@ -703,6 +705,8 @@ export interface CollectionPoint {
 }
 
 export interface DashboardPayload {
+  /** Signals in the selected collection outside the five sectors, left out. */
+  notRelevant?: number
   collections: CollectionPoint[]
   latest: CollectionPoint | null
   /** Movement against the previous collection. Null where there was none, so

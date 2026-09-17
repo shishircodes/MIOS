@@ -524,6 +524,12 @@ function CollectionBand({
           </b>
           <span>companies not yet on the watchlist</span>
         </li>
+        {!!c.notRelevant && (
+          <li className="left-out">
+            <b className="tnum">{c.notRelevant}</b>
+            <span>outside your sectors, left out</span>
+          </li>
+        )}
       </ul>
     </div>
   )

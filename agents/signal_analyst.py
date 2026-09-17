@@ -18,6 +18,7 @@ from agents.prompts import (
     MIN_CONTENT_LENGTH,
     SYSTEM_PROMPT,
 )
+from agents.prospects import is_prospect
 from config.settings import settings
 from loader.db import connect
 
@@ -132,16 +133,36 @@ def _increment_daily_api_calls(conn) -> None:
 # --------------------------------------------------------------------------
 
 
+_BLOCKLIST_PATTERN = re.compile(
+    r"\b(" + "|".join(re.escape(k) for k in BLOCKLIST_KEYWORDS) + r")\b", re.IGNORECASE)
+
+#: Kinds of item the blocklist applies to. It names job titles; a news article or
+#: a tender has no job title, and a word like "hotel" in one says nothing about
+#: whether it matters.
+_BLOCKLIST_KINDS = {None, "", "job_board"}
+
+
+def _title(raw_content: str) -> str:
+    """A job ad's title: the text before the first " | " separator."""
+    return raw_content.split("|", 1)[0]
+
+
 def _is_blocklisted(text: str) -> bool:
-    lowered = text.lower()
-    return any(kw in lowered for kw in BLOCKLIST_KEYWORDS)
+    return _BLOCKLIST_PATTERN.search(_title(text)) is not None
 
 
-def prefilter(raw_content: str) -> tuple[bool, str | None]:
-    """Return (passes, drop_reason). passes=True means keep for LLM call."""
+def prefilter(raw_content: str, source_type: str | None = None) -> tuple[bool, str | None]:
+    """Return (passes, drop_reason). passes=True means keep for LLM call.
+
+    The blocklist is checked against a job ad's title only, as whole words. It
+    used to search the whole advert as substrings, which dropped relevant work
+    on a word in the employer's description: 10 of 27 blocked items in
+    production were wrongly removed, among them a rail Track Protection Officer,
+    a glazier and a mining news story.
+    """
     if not raw_content or len(raw_content.strip()) < MIN_CONTENT_LENGTH:
         return False, "too_short"
-    if _is_blocklisted(raw_content):
+    if source_type in _BLOCKLIST_KINDS and _is_blocklisted(raw_content):
         return False, "blocklist"
     return True, None
 
@@ -344,6 +365,7 @@ def _call_with_retry(
 # --------------------------------------------------------------------------
 
 BATCH_USER_PROMPT_TEMPLATE = """You are a signal analyst. Classify each of the following {count} raw signals.
+Each one is labelled with its kind (job ad, news or tender); follow the rules for that kind.
 
 Allowed sectors: mining, oil_gas, construction, defence, energy_transition, other
 Allowed categories: hiring_velocity, project, leadership, financial, competitive, market_intel
@@ -365,14 +387,21 @@ Signals:
 """
 
 
+#: How each collector's items are named to the model.
+KIND_LABELS = {"job_board": "job ad", "news": "news", "tender": "tender"}
+
+
 def _build_batch_prompt(
     chunk: list[tuple[Any, str]],
     watchlist_canonicals: str,
+    kinds: dict[Any, str | None] | None = None,
 ) -> str:
+    kinds = kinds or {}
     parts: list[str] = []
-    for idx, (_, raw) in enumerate(chunk, start=1):
+    for idx, (signal_id, raw) in enumerate(chunk, start=1):
         truncated = raw[:MAX_SIGNAL_CHARS] if len(raw) > MAX_SIGNAL_CHARS else raw
-        parts.append(f"--- SIGNAL {idx} ---\n{truncated}")
+        kind = KIND_LABELS.get(kinds.get(signal_id) or "", "job ad")
+        parts.append(f"--- SIGNAL {idx} ({kind}) ---\n{truncated}")
     return BATCH_USER_PROMPT_TEMPLATE.format(
         count=len(chunk),
         watchlist_companies=watchlist_canonicals,
@@ -471,12 +500,16 @@ def classify_pending(
         watchlist_canonicals = ", ".join(w["company_name"] for w in watchlist)
 
         # Fetch a buffer so we can prioritise watchlist mentions
-        rows = conn.execute(
-            "SELECT signal_id, raw_content FROM signals "
+        fetched = conn.execute(
+            "SELECT signal_id, raw_content, source_type FROM signals "
             "WHERE classified_at IS NULL "
             "ORDER BY captured_at LIMIT ?",
             (effective_limit * 2 + 50,),  # fetch extra for prioritisation
         ).fetchall()
+        # Kept beside the (id, text) pairs rather than inside them, so every
+        # step below that unpacks a pair is unchanged.
+        kinds = {r[0]: r[2] for r in fetched}
+        rows = [(r[0], r[1]) for r in fetched]
 
         # Prioritise: signals mentioning watchlist companies get LLM time first
         def _priority_key(row: tuple[Any, str]) -> tuple[int, str]:
@@ -511,7 +544,7 @@ def classify_pending(
             # Pre-filter each signal in the chunk individually
             pending_chunk: list[tuple[Any, str]] = []
             for signal_id, raw in chunk:
-                ok, reason = prefilter(raw)
+                ok, reason = prefilter(raw, kinds.get(signal_id))
                 if not ok:
                     counts[f"filtered_{reason}"] += 1
                     conn.execute(
@@ -529,7 +562,7 @@ def classify_pending(
             if not pending_chunk:
                 continue
 
-            user_prompt = _build_batch_prompt(pending_chunk, watchlist_canonicals)
+            user_prompt = _build_batch_prompt(pending_chunk, watchlist_canonicals, kinds)
 
             _throttle()
             try:
@@ -569,11 +602,14 @@ def classify_pending(
                 matched_name, matched_tier = fuzzy_match_watchlist(
                     cls["watchlist_match"] or cls["company_name"], watchlist
                 )
-                if matched_name:
-                    cls["watchlist_match"] = matched_name
-                    cls["is_new_prospect"] = False
-                else:
-                    cls["watchlist_match"] = None
+                cls["watchlist_match"] = matched_name or None
+                # Decided by rule, not by the model: it set this for airlines,
+                # banks, recruitment agencies and tender buyers despite being
+                # told not to. See agents/prospects.py.
+                cls["is_new_prospect"] = is_prospect(
+                    cls["company_name"], cls["sector"], kinds.get(signal_id),
+                    watchlisted=bool(matched_name),
+                )
 
                 conn.execute(
                     "UPDATE signals SET "

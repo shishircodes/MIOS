@@ -464,6 +464,14 @@ def build_digest_payload(
 
     collected_from, collected_to = _collection_span(rows)
 
+    # Signals outside Easy Skill's five sectors are left out of every figure
+    # below: an airline's vacancy or a bank's results are not a reason to call
+    # anyone, and counting them put 27% noise into "collected", the key signals
+    # and the velocity table. The span above is measured first, from every row,
+    # because the archive and the Market Pulse are keyed on it.
+    not_relevant = sum(1 for r in rows if (r.get("sector") or "") == "other")
+    rows = [r for r in rows if (r.get("sector") or "") != "other"]
+
     # The velocity table compares a window against the windows before it, so it
     # needs a fixed window rather than "whatever rows we are showing". When the
     # requested window was empty we fell back to older signals, and anchoring on
@@ -630,6 +638,9 @@ def build_digest_payload(
             #: before anyone remembers this breakdown exists.
             "other": classified - sum(kinds.get(k, 0) for k in ("job_board", "news", "tender")),
             "shown": len(shown),
+            #: Classified as outside the five sectors and left out of every
+            #: figure here. Shown so the total does not look like a lost row.
+            "notRelevant": not_relevant,
             "newNames": len(new_names),
             "sources": len({s["source"] for s in signals}),
             "regions": {"AU": geos.get("AU", 0), "PNG": geos.get("PNG", 0)},

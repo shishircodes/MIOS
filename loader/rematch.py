@@ -22,6 +22,7 @@ import sys
 from collections import Counter
 from pathlib import Path
 
+from agents.prospects import is_prospect
 from agents.signal_analyst import _load_watchlist, fuzzy_match_watchlist
 from config.settings import configure_logging
 from loader.db import connect, describe
@@ -41,7 +42,7 @@ def rematch(target: str | Path | None = None, *, dry_run: bool = False) -> dict:
                 "The watchlist table is empty — run `python -m loader.check --init` first."
             )
         rows = conn.execute(
-            "SELECT signal_id, company_name, watchlist_tier, is_new_prospect "
+            "SELECT signal_id, company_name, watchlist_tier, is_new_prospect, sector, source_type "
             "FROM signals WHERE classified_at IS NOT NULL"
         ).fetchall()
 
@@ -51,13 +52,14 @@ def rematch(target: str | Path | None = None, *, dry_run: bool = False) -> dict:
 
     for row in rows:
         signal_id, company, old_tier, old_new = row[0], row[1], row[2], row[3]
+        sector, source_type = row[4], row[5]
         matched, new_tier = fuzzy_match_watchlist(company, watchlist)
 
-        named = bool(company and company.strip() and company.strip().lower() != "unknown")
-        # A watchlist client is an existing relationship, not a prospect. A row
-        # whose employer the classifier could not identify is neither: there is
-        # nobody to approach, so it must not be flagged as a new prospect.
-        new_is_new = 1 if (named and not matched) else 0
+        # The same rule new signals are classified with (agents/prospects.py):
+        # not a watchlist client, a named company, in a relevant sector, not a
+        # tender buyer and not a recruitment agency.
+        new_is_new = 1 if is_prospect(company, sector, source_type,
+                                      watchlisted=bool(matched)) else 0
 
         if new_tier == old_tier and int(bool(old_new)) == new_is_new:
             continue

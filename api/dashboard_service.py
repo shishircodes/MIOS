@@ -174,6 +174,8 @@ def build_dashboard_payload(
     # Applied to every per-collection aggregate below. Kept as one pair so a
     # panel cannot quietly disagree with the others about what is being counted.
     where_region = " AND upper(coalesce(region, geography, '')) = ? " if region else " "
+    # Outside the five sectors: left out of every figure, and counted on its own.
+    RELEVANT = " AND COALESCE(sector, '') <> 'other' "
     args_region: tuple = (region,) if region else ()
 
     empty = {
@@ -195,7 +197,7 @@ def build_dashboard_payload(
                 "SELECT substr(captured_at, 1, 10) AS day, count(*) AS total, "
                 "sum(CASE WHEN region = 'AU' THEN 1 ELSE 0 END) AS au, "
                 "sum(CASE WHEN region = 'PNG' THEN 1 ELSE 0 END) AS png "
-                "FROM signals WHERE classified_at IS NOT NULL "
+                "FROM signals WHERE classified_at IS NOT NULL" + RELEVANT +
                 "GROUP BY substr(captured_at, 1, 10) ORDER BY day"
             ).fetchall()
 
@@ -209,6 +211,7 @@ def build_dashboard_payload(
             company_rows: list = []
             new_names = 0
             seen_watchlist = 0
+            not_relevant = 0
             if latest_day:
                 # Everything below describes the most recent collection. Kept as
                 # separate aggregates rather than one wide query: they group by
@@ -217,13 +220,13 @@ def build_dashboard_payload(
                 sector_rows = conn.execute(
                     "SELECT sector, count(*) AS n FROM signals "
                     "WHERE classified_at IS NOT NULL AND substr(captured_at, 1, 10) = ?"
-                    + where_region + "GROUP BY sector ORDER BY n DESC",
+                    + RELEVANT + where_region + "GROUP BY sector ORDER BY n DESC",
                     (latest_day, *args_region),
                 ).fetchall()
                 category_rows = conn.execute(
                     "SELECT signal_category, count(*) AS n FROM signals "
                     "WHERE classified_at IS NOT NULL AND substr(captured_at, 1, 10) = ?"
-                    + where_region + "GROUP BY signal_category ORDER BY n DESC",
+                    + RELEVANT + where_region + "GROUP BY signal_category ORDER BY n DESC",
                     (latest_day, *args_region),
                 ).fetchall()
                 # Not filtered on classified_at: a source's contribution is what
@@ -250,14 +253,14 @@ def build_dashboard_payload(
                     # listing them among the most active companies would be
                     # offering a name nobody can act on.
                     "AND company_name IS NOT NULL AND lower(company_name) <> 'unknown'"
-                    + where_region
+                    + RELEVANT + where_region
                     + "GROUP BY company_name ORDER BY n DESC, company_name LIMIT ?",
                     (latest_day, *args_region, TOP_COMPANIES),
                 ).fetchall()
                 new_names = int((conn.execute(
                     "SELECT count(DISTINCT company_name) AS n FROM signals "
                     "WHERE is_new_prospect = 1 AND classified_at IS NOT NULL "
-                    "AND substr(captured_at, 1, 10) = ?" + where_region,
+                    "AND substr(captured_at, 1, 10) = ?" + RELEVANT + where_region,
                     (latest_day, *args_region)
                 ).fetchone() or {"n": 0})["n"] or 0)
                 # How much of the watchlist actually appeared. "We watch twenty
@@ -266,6 +269,14 @@ def build_dashboard_payload(
                 seen_watchlist = int((conn.execute(
                     "SELECT count(DISTINCT company_name) AS n FROM signals "
                     "WHERE watchlist_tier IS NOT NULL AND classified_at IS NOT NULL "
+                    "AND substr(captured_at, 1, 10) = ?" + where_region,
+                    (latest_day, *args_region)
+                ).fetchone() or {"n": 0})["n"] or 0)
+
+            if latest_day:
+                not_relevant = int((conn.execute(
+                    "SELECT count(*) AS n FROM signals WHERE classified_at IS NOT NULL "
+                    "AND COALESCE(sector, '') = 'other' "
                     "AND substr(captured_at, 1, 10) = ?" + where_region,
                     (latest_day, *args_region)
                 ).fetchone() or {"n": 0})["n"] or 0)
@@ -384,6 +395,9 @@ def build_dashboard_payload(
         #: Companies seen this collection that are not on the watchlist. The
         #: pipeline's other job besides watching known names is finding new ones.
         "newNames": new_names,
+        #: Signals in the selected collection classified outside the five
+        #: sectors, and so left out of every figure above.
+        "notRelevant": not_relevant,
         "run": ({
             "id": str(run_row["id"]),
             "trigger": str(run_row["trigger"] or ""),
