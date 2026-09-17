@@ -2346,3 +2346,7 @@ overflow-x: auto;
   letter-spacing: 0.04em;
   color: var(--ink-3);
 }
+
+/* Signals outside the five sectors, left out of the figures. */
+.hero-left-out { margin-top: 10px; opacity: 0.85; }
+.collection-facts .left-out b { color: var(--ink-3); }

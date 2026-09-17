@@ -459,7 +459,7 @@ export function DashboardScreen() {
 
   const {
     collections, latest, change, sectors, categories, groups, sources,
-    companies, newNames, run, watchlist, coverage, trendWindow,
+    companies, newNames, run, watchlist, coverage, trendWindow, notRelevant,
     available, selected, region, isLatest, trendChoices,
   } = data
 
@@ -653,6 +653,14 @@ export function DashboardScreen() {
             <span><i className="swatch" style={{ background: 'var(--moss)' }} />
               {REGION_LABEL.PNG} <b className="tnum">{latest.png}</b></span>
           </div>
+          {/* Said out loud so the headline does not look short against the run
+              log beside it. */}
+          {!!notRelevant && (
+            <div className="hero-meta hero-left-out">
+              {notRelevant} outside mining, oil &amp; gas, construction, defence and energy
+              transition left out
+            </div>
+          )}
         </div>
         <div className="hero-side">
           {/* The run behind the figures. A dashboard that shows a number without

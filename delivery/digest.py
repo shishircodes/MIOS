@@ -250,7 +250,10 @@ def build_digest(
 
     COLUMNS = ("SELECT signal_id, company_name, sector, signal_category, review_cycle, "
                "watchlist_tier, is_new_prospect, raw_content, analysis_notes, captured_at "
-               "FROM signals WHERE classified_at IS NOT NULL ")
+               "FROM signals WHERE classified_at IS NOT NULL "
+               # Outside the five sectors: never a key signal, a velocity row or
+               # a new name, the same as the digest page.
+               "AND COALESCE(sector, '') <> 'other' ")
     with connect(db_path) as conn:
         if run_id is not None:
             signals = conn.execute(
