@@ -19,7 +19,7 @@ import { useReveal } from '~/lib/motion'
 import type { Report, ReportSection } from '~/lib/types'
 
 export const Route = createFileRoute('/publish')({
-  head: () => ({ meta: [{ title: 'Publish · MIOS' }] }),
+  head: () => ({ meta: [{ title: 'Quarterly reports · MIOS' }] }),
   component: PublishScreen,
 })
 
@@ -114,7 +114,7 @@ function PublishScreen() {
     <div className="page page-wide" ref={scope}>
       <div className="page-header">
         <div>
-          <div className="kicker">Mode Publish · Quarterly Market Report</div>
+          <div className="kicker">Mode Publish · Quarterly reports</div>
           <h1>{doc ? doc.title : 'Quarterly reports'}</h1>
         </div>
         <div className="meta">

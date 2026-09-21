@@ -29,7 +29,7 @@ export const Route = createFileRoute('/monitor/digest')({
   // then fails to compile for want of a `search` prop.
   validateSearch: (search: Record<string, unknown>): { q?: string } =>
     typeof search.q === 'string' && search.q ? { q: search.q } : {},
-  head: () => ({ meta: [{ title: 'Weekly Digest · MIOS' }] }),
+  head: () => ({ meta: [{ title: 'Weekly digest · MIOS' }] }),
   component: WeeklyDigest,
 })
 
@@ -153,7 +153,7 @@ function WeeklyDigest() {
     <div className="page">
       <div className="page-header">
         <div>
-          <div className="kicker">Mode Monitor · Weekly Intelligence Digest</div>
+          <div className="kicker">Mode Monitor · Weekly digest</div>
           <h1>{data.weekLabel}</h1>
         </div>
         <div className="meta">
@@ -230,7 +230,7 @@ function WeeklyDigest() {
       <div className="digest-grid">
         <div className="digest-main" ref={mainRef}>
           <Section
-            title="Key Signals This Week"
+            title="Key signals this week"
             tools={
               <div className="section-search">
                 <input
@@ -300,7 +300,7 @@ function WeeklyDigest() {
 
         <aside className="digest-rail" aria-label="Measurements for this week" ref={railRef}>
           <Section
-            title="Hiring Velocity"
+            title="Hiring velocity"
             tools={<span>TOP {data.velocity.length}</span>}
           >
             {data.velocity.length === 0 ? (
@@ -317,7 +317,7 @@ function WeeklyDigest() {
             )}
           </Section>
 
-          <Section title="New Names" tools={<span>{data.newNames.length} FOUND</span>}>
+          <Section title="New names" tools={<span>{data.newNames.length} FOUND</span>}>
             {data.newNames.length === 0 ? (
               <div className="center-empty" style={{ padding: 28 }}>No new prospects.</div>
             ) : (

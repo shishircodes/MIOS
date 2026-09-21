@@ -13,7 +13,7 @@ import type {
 import { MatchDetail } from '~/components/MatchDetail'
 
 export const Route = createFileRoute('/push')({
-  head: () => ({ meta: [{ title: 'Push · MIOS' }] }),
+  head: () => ({ meta: [{ title: 'Candidate matching · MIOS' }] }),
   component: PushScreen,
 })
 
@@ -372,7 +372,7 @@ function PushScreen() {
 
         <div className="page-header">
           <div>
-            <div className="kicker">Mode Push · Ranked matches</div>
+            <div className="kicker">Mode Push · Candidate matching</div>
             <h1>Who to approach about {subject || 'this candidate'}</h1>
           </div>
           <div className="meta">
@@ -514,7 +514,7 @@ function PushScreen() {
     <div className="page" ref={scope}>
       <div className="page-header">
         <div>
-          <div className="kicker">Mode Push · Profile-to-client matching</div>
+          <div className="kicker">Mode Push · Candidate matching</div>
           <h1>Who in the market needs this person?</h1>
         </div>
         <div className="meta">

@@ -43,15 +43,20 @@ const NAV = [
   // It used to sit under REFERENCE, three groups down, which put the overview
   // below the detail it summarises.
   { group: 'OVERVIEW', items: [{ to: '/', label: 'Dashboard', icon: 'dash' }] },
+  // The three modes are the groups, and each item is named for what its page
+  // does. The groups used to be INTELLIGENCE, OUTBOUND and PUBLISH, while every
+  // page heading and breadcrumb said Mode Monitor, Mode Push and Mode Publish —
+  // and the PUBLISH group held an item called "Mode Publish", naming the mode
+  // twice and the page not at all.
   {
-    group: 'INTELLIGENCE',
+    group: 'MODE MONITOR',
     items: [
-      { to: '/monitor/digest', label: 'Weekly Digest', icon: 'monitor' },
-      { to: '/monitor/feed', label: 'Signal Feed', icon: 'spark' },
+      { to: '/monitor/digest', label: 'Weekly digest', icon: 'monitor' },
+      { to: '/monitor/feed', label: 'Signal feed', icon: 'spark' },
     ],
   },
-  { group: 'OUTBOUND', items: [{ to: '/push', label: 'Mode Push', icon: 'push' }] },
-  { group: 'PUBLISH', items: [{ to: '/publish', label: 'Mode Publish', icon: 'publish' }] },
+  { group: 'MODE PUSH', items: [{ to: '/push', label: 'Candidate matching', icon: 'push' }] },
+  { group: 'MODE PUBLISH', items: [{ to: '/publish', label: 'Quarterly reports', icon: 'publish' }] },
   {
     group: 'REFERENCE',
     items: [
@@ -83,10 +88,10 @@ const NAV = [
 ] as const
 
 const CRUMBS: Record<string, string[]> = {
-  '/monitor/digest': ['Mode Monitor', 'Weekly Digest'],
-  '/monitor/feed': ['Mode Monitor', 'Signal Feed'],
-  '/push': ['Mode Push', 'Submit profile'],
-  '/publish': ['Mode Publish', 'Quarterly report'],
+  '/monitor/digest': ['Mode Monitor', 'Weekly digest'],
+  '/monitor/feed': ['Mode Monitor', 'Signal feed'],
+  '/push': ['Mode Push', 'Candidate matching'],
+  '/publish': ['Mode Publish', 'Quarterly reports'],
   '/watchlist': ['Reference', 'Watchlist'],
   '/': ['Overview', 'Dashboard'],
   '/schedule': ['Admin', 'Schedule & runs'],
@@ -244,7 +249,7 @@ const NAV_KEY = 'mios.nav.collapsed'
 
 function Shell({ children }: { children: ReactNode }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname })
-  const crumbs = CRUMBS[pathname] ?? ['Mode Monitor', 'Weekly Digest']
+  const crumbs = CRUMBS[pathname] ?? ['Mode Monitor', 'Weekly digest']
   const { session } = useAuth()
   const isAdmin = Boolean(session?.isAdmin)
   // Doubles as the connection check in the footer: this is the one request the

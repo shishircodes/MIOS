@@ -32,7 +32,7 @@ function WatchlistScreen() {
     <div className="page">
       <div className="page-header">
         <div>
-          <div className="kicker">Reference · Client Watchlist</div>
+          <div className="kicker">Reference · Watchlist</div>
           <h1>
             Watchlist — {isLoading ? '…' : `${data?.total ?? watchlist.length} companies`}
           </h1>
