@@ -207,24 +207,67 @@ def export_report(
     )
 
 
-def _to_html(report: dict[str, Any], markdown: str) -> str:
-    """A printable page. Deliberately self-contained: no stylesheet to fetch and
-    nothing to break when the file is emailed on or opened offline."""
+#: Sections that continue on the same printed page as the one before, rather
+#: than opening a new one. Everything else is a chapter and starts a page.
+_SAME_PAGE = {"Executive Summary", "Papua New Guinea", "New Prospects",
+              "Projects, Investment and Tenders", "Competitor Activity", "Methodology",
+              "Appendix B — Employers", "Appendix C — Sources"}
+
+
+def _blocks_to_html(text: str) -> str:
+    """Render a section body: paragraphs, "- " lists, "|" tables and "###" subheads.
+
+    The same three structures the report builder writes and the app renders, so
+    the printed report and the screen show the same document.
+    """
     from html import escape
 
-    draft_banner = ""
-    if report["status"] != "approved":
-        draft_banner = (
-            '<p class="draft">DRAFT — NOT APPROVED FOR DISTRIBUTION</p>'
-        )
+    out = []
+    for block in text.split("\n\n"):
+        block = block.strip()
+        if not block:
+            continue
+        lines = block.split("\n")
+        if all(l.lstrip().startswith("|") for l in lines):
+            rows = [[c.strip() for c in l.strip().strip("|").split("|")] for l in lines]
+            rows = [r for r in rows if not all(set(c) <= set("-: ") and c for c in r)]
+            if rows:
+                head = "".join(f"<th>{escape(c)}</th>" for c in rows[0])
+                body = "".join(
+                    "<tr>" + "".join(f"<td>{escape(c)}</td>" for c in r) + "</tr>" for r in rows[1:])
+                out.append(f"<table><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table>")
+        elif all(l.lstrip().startswith("- ") for l in lines):
+            items = "".join(f"<li>{escape(l.lstrip()[2:])}</li>" for l in lines)
+            out.append(f"<ul>{items}</ul>")
+        elif block.startswith("### "):
+            out.append(f"<h3>{escape(block[4:])}</h3>")
+        else:
+            out.append(f"<p>{escape(block).replace(chr(10), '<br>')}</p>")
+    return "".join(out)
 
-    body = []
-    for s in report["sections"]:
+
+def _to_html(report: dict[str, Any], markdown: str) -> str:
+    """A printable report: cover, contents, then one chapter to a page.
+
+    Deliberately self-contained — no stylesheet to fetch and nothing to break when
+    the file is emailed on or opened offline. Printed from a browser (Save as PDF),
+    it lays out on A4 with each chapter starting a new page.
+    """
+    from html import escape
+
+    draft = report["status"] != "approved"
+    draft_banner = ('<p class="draft">DRAFT — NOT APPROVED FOR DISTRIBUTION</p>'
+                    if draft else "")
+
+    toc, body = [], []
+    for i, s in enumerate(report["sections"], start=1):
+        anchor = f"s{i}"
+        toc.append(f'<li><a href="#{anchor}">{escape(s["heading"])}</a></li>')
         text = s["body"].strip() or "This section has not been written."
-        paragraphs = "".join(
-            f"<p>{escape(p).replace(chr(10), '<br>')}</p>" for p in text.split("\n\n") if p.strip()
-        )
-        body.append(f"<h2>{escape(s['heading'])}</h2>{paragraphs}")
+        cls = "same-page" if s["heading"] in _SAME_PAGE else "chapter"
+        body.append(f'<section class="{cls}" id="{anchor}">'
+                    f'<h2><span class="num">{i:02d}</span>{escape(s["heading"])}</h2>'
+                    f'{_blocks_to_html(text)}</section>')
 
     approved = ""
     if report["status"] == "approved" and report["approvedBy"]:
@@ -235,22 +278,47 @@ def _to_html(report: dict[str, Any], markdown: str) -> str:
 <html lang="en"><head><meta charset="utf-8">
 <title>{escape(report['title'])}</title>
 <style>
-  body {{ font-family: Georgia, serif; max-width: 46em; margin: 3em auto; padding: 0 1.5em;
-         line-height: 1.6; color: #1A2837; }}
-  h1 {{ font-size: 1.9em; margin-bottom: .2em; }}
-  h2 {{ font-size: 1.25em; margin-top: 2em; border-top: 1px solid #ddd; padding-top: .8em; }}
+  @page {{ size: A4; margin: 18mm 16mm 20mm; }}
+  body {{ font-family: Georgia, serif; max-width: 48em; margin: 3em auto; padding: 0 1.5em;
+         line-height: 1.55; color: #1A2837; font-size: 11pt; }}
+  .cover {{ min-height: 80vh; display: flex; flex-direction: column; justify-content: center;
+            border-left: 6px solid #0B7B7A; padding-left: 1.4em; }}
+  .cover .kicker {{ font-family: Consolas, monospace; letter-spacing: .12em; color: #0B7B7A;
+                    font-size: .8em; text-transform: uppercase; }}
+  .cover h1 {{ font-size: 2.4em; line-height: 1.15; margin: .3em 0; }}
   .meta {{ color: #656E7C; font-size: .9em; }}
   .draft {{ background: #FDF3D3; border: 1px solid #6B4F00; color: #6B4F00;
             padding: .6em 1em; font-weight: bold; letter-spacing: .05em; }}
+  nav.contents {{ break-before: page; }}
+  nav.contents ol {{ padding-left: 1.4em; line-height: 1.9; }}
+  nav.contents a {{ color: #1A2837; text-decoration: none; }}
+  section.chapter {{ break-before: page; }}
+  section.same-page {{ margin-top: 2.2em; }}
+  h2 {{ font-size: 1.45em; border-bottom: 2px solid #0B7B7A; padding-bottom: .25em; }}
+  h2 .num {{ font-family: Consolas, monospace; color: #0B7B7A; font-size: .7em;
+             margin-right: .8em; vertical-align: middle; }}
+  h3 {{ font-size: 1.05em; margin: 1.4em 0 .4em; color: #2C3B4E; }}
+  table {{ width: 100%; border-collapse: collapse; margin: .6em 0 1em; font-family: Arial, sans-serif;
+           font-size: .85em; break-inside: auto; }}
+  th {{ text-align: left; background: #EEF3F2; border-bottom: 1.5px solid #0B7B7A; padding: .35em .5em; }}
+  td {{ border-bottom: 1px solid #DDE3E2; padding: .3em .5em; vertical-align: top; }}
+  tr {{ break-inside: avoid; }}
+  td:not(:first-child), th:not(:first-child) {{ text-align: right; }}
+  ul {{ padding-left: 1.3em; }}
+  li {{ margin: .2em 0; }}
   footer {{ margin-top: 3em; border-top: 1px solid #ddd; padding-top: 1em;
             color: #656E7C; font-size: .85em; }}
-  @media print {{ body {{ margin: 0; }} }}
+  @media print {{ body {{ margin: 0; max-width: none; }} a {{ color: inherit; }} }}
 </style></head><body>
-{draft_banner}
-<h1>{escape(report['title'])}</h1>
-<p class="meta">Easy Skill Australia · {escape(report['quarter'])} ·
-{report['signalsAnalysed']} signals analysed</p>
-{approved}
+<div class="cover">
+  {draft_banner}
+  <div class="kicker">Easy Skill Australia · Market Intelligence</div>
+  <h1>{escape(report['title']).replace('-', '&#8209;')}</h1>
+  <p class="meta">Australia · Papua New Guinea · {escape(report['quarter'])} ·
+  {report['signalsAnalysed']} signals analysed</p>
+  {approved}
+</div>
+<nav class="contents"><h2>Contents</h2><ol>{''.join(toc)}</ol></nav>
 {''.join(body)}
 <footer>Generated by MIOS. Figures are counts of activity detected in the sources
 monitored; none are estimated.</footer>

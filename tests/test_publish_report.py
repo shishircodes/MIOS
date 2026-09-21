@@ -147,13 +147,27 @@ def test_every_section_is_present(db):
     _add(db, "s1")
     _data, sections = generate(QUARTER, db)
     assert [s.heading for s in sections] == [
+        "Key Figures",
         "Executive Summary",
-        "Australia — Mining",
-        "Australia — Construction",
+        "Market Overview",
+        "Mining",
+        "Oil & Gas",
+        "Construction",
+        "Defence",
+        "Energy Transition",
+        "Australia by State",
         "Papua New Guinea",
+        "Employer Activity",
+        "New Prospects",
         "Skills Demand",
+        "Leadership Changes",
+        "Projects, Investment and Tenders",
+        "Competitor Activity",
         "Looking Ahead",
         "Methodology",
+        "Appendix A — Signals by Sector and Month",
+        "Appendix B — Employers",
+        "Appendix C — Sources",
     ]
 
 
@@ -171,7 +185,7 @@ def test_every_other_section_is_generated(db):
     _add(db, "s1")
     _data, sections = generate(QUARTER, db)
     generated = [s.heading for s in sections if s.source == "generated"]
-    assert len(generated) == 6
+    assert len(generated) == len(sections) - 1, "only the outlook is left for a person"
 
 
 def test_percentages_are_withheld_when_the_sample_is_thin(db):
@@ -204,7 +218,7 @@ def test_company_names_carry_their_counts(db):
         _add(db, f"bhp{i}", company="BHP")
     _add(db, "tiny", company="Tiny Contractor")
 
-    body = _text(db, "Australia — Mining")
+    body = _text(db, "Mining")
     assert "BHP (5)" in body
     assert "Tiny Contractor (1)" in body
 
@@ -212,14 +226,14 @@ def test_company_names_carry_their_counts(db):
 def test_unknown_employers_are_never_named(db):
     _add(db, "u1", company="Unknown")
     _add(db, "u2", company="unknown")
-    body = _text(db, "Australia — Mining")
+    body = _text(db, "Mining")
     assert "Unknown" not in body
     assert "2 hiring signals" in body, "but they still count towards the total"
 
 
 def test_an_empty_sector_says_so_without_implying_a_downturn(db):
     _add(db, "s1", sector="mining")
-    body = _text(db, "Australia — Construction")
+    body = _text(db, "Construction")
     assert "No construction activity" in body
     assert "not evidence" in body, "absence of signal is not absence of hiring"
 
