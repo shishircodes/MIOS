@@ -381,8 +381,8 @@ def write_schedule(
 ) -> dict[str, Any]:
     """Change the day, time or timezone of the automatic run.
 
-    Takes effect within a minute — the ticker re-reads this on every pass rather
-    than caching it at startup, so a change does not wait for a redeploy.
+    Takes effect at once: saving wakes the scheduler, which re-reads the schedule
+    rather than waiting for its next check, so a change needs no redeploy.
     """
     try:
         sched = set_schedule(
@@ -397,6 +397,7 @@ def write_schedule(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=400, detail="Day, hour and minute must be numbers.") from exc
+    scheduler.notify_changed()
     return _schedule_payload(sched)
 
 

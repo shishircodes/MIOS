@@ -218,7 +218,7 @@ export function SchedulePanel() {
               Every time on this panel is shown in {data.timezone}, the schedule's own
               timezone — not your browser's and not the server's, so it reads the same
               wherever it is opened from and wherever MIOS is deployed. Changes take
-              effect within a minute; no redeploy is needed.
+              effect as soon as they are saved; no redeploy is needed.
             </>
           ) : (
             <>
