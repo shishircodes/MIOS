@@ -43,15 +43,20 @@ const NAV = [
   // It used to sit under REFERENCE, three groups down, which put the overview
   // below the detail it summarises.
   { group: 'OVERVIEW', items: [{ to: '/', label: 'Dashboard', icon: 'dash' }] },
+  // The three modes are the groups, and each item is named for what its page
+  // does. The groups used to be INTELLIGENCE, OUTBOUND and PUBLISH, while every
+  // page heading and breadcrumb said Mode Monitor, Mode Push and Mode Publish —
+  // and the PUBLISH group held an item called "Mode Publish", naming the mode
+  // twice and the page not at all.
   {
-    group: 'INTELLIGENCE',
+    group: 'MODE MONITOR',
     items: [
-      { to: '/monitor/digest', label: 'Weekly Digest', icon: 'monitor' },
-      { to: '/monitor/feed', label: 'Signal Feed', icon: 'spark' },
+      { to: '/monitor/digest', label: 'Weekly digest', icon: 'monitor' },
+      { to: '/monitor/feed', label: 'Signal feed', icon: 'spark' },
     ],
   },
-  { group: 'OUTBOUND', items: [{ to: '/push', label: 'Mode Push', icon: 'push' }] },
-  { group: 'PUBLISH', items: [{ to: '/publish', label: 'Mode Publish', icon: 'publish' }] },
+  { group: 'MODE PUSH', items: [{ to: '/push', label: 'Candidate matching', icon: 'push' }] },
+  { group: 'MODE PUBLISH', items: [{ to: '/publish', label: 'Quarterly reports', icon: 'publish' }] },
   {
     group: 'REFERENCE',
     items: [
@@ -64,29 +69,37 @@ const NAV = [
     // endpoint re-checks the role, so a member who types the URL still gets
     // nothing back.
     adminOnly: true,
-    // Named for what each page manages, and matching the heading it opens on.
-    // "Tokens & cost" was wrong twice over: the page counts *requests* against a
-    // provider's daily allowance, never tokens, and it has since become where
-    // API keys are entered and a model is chosen per job. Somebody looking for
-    // "why is Market Pulse using that model" would not have looked here.
+    // One job per page, each named for exactly what it holds. Data sources used
+    // to carry the run schedule and the HubSpot sync too, and Models & keys
+    // carried the cost reports: settings were found by remembering where they
+    // had been put rather than by reading the menu. In the order an
+    // administrator meets them: when the pipeline runs, what it collects, what
+    // it is matched against, which models read it, what that costs, and who
+    // can see the result.
     items: [
+      { to: '/schedule', label: 'Schedule & runs', icon: 'clock' },
       { to: '/sources', label: 'Data sources', icon: 'src' },
+      { to: '/integrations', label: 'Integrations', icon: 'link' },
+      { to: '/models', label: 'AI models', icon: 'chip' },
+      { to: '/usage', label: 'Usage & cost', icon: 'coins' },
       { to: '/access', label: 'People & access', icon: 'people' },
-      { to: '/tokens', label: 'Models & keys', icon: 'tokens' },
     ],
   },
 ] as const
 
 const CRUMBS: Record<string, string[]> = {
-  '/monitor/digest': ['Mode Monitor', 'Weekly Digest'],
-  '/monitor/feed': ['Mode Monitor', 'Signal Feed'],
-  '/push': ['Mode Push', 'Submit profile'],
-  '/publish': ['Mode Publish', 'Quarterly report'],
+  '/monitor/digest': ['Mode Monitor', 'Weekly digest'],
+  '/monitor/feed': ['Mode Monitor', 'Signal feed'],
+  '/push': ['Mode Push', 'Candidate matching'],
+  '/publish': ['Mode Publish', 'Quarterly reports'],
   '/watchlist': ['Reference', 'Watchlist'],
   '/': ['Overview', 'Dashboard'],
+  '/schedule': ['Admin', 'Schedule & runs'],
   '/sources': ['Admin', 'Data sources'],
+  '/integrations': ['Admin', 'Integrations'],
+  '/models': ['Admin', 'AI models'],
+  '/usage': ['Admin', 'Usage & cost'],
   '/access': ['Admin', 'People & access'],
-  '/tokens': ['Admin', 'Models & keys'],
 }
 
 /** The footer dot said "Connected" unconditionally, including when nothing was
@@ -236,7 +249,7 @@ const NAV_KEY = 'mios.nav.collapsed'
 
 function Shell({ children }: { children: ReactNode }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname })
-  const crumbs = CRUMBS[pathname] ?? ['Mode Monitor', 'Weekly Digest']
+  const crumbs = CRUMBS[pathname] ?? ['Mode Monitor', 'Weekly digest']
   const { session } = useAuth()
   const isAdmin = Boolean(session?.isAdmin)
   // Doubles as the connection check in the footer: this is the one request the

@@ -41,6 +41,10 @@ export const Icons: Record<string, ReactNode> = {
   archive: <Icon d="M3 4h18v4H3zM5 8v12h14V8M10 12h4" />,
   people: <Icon d="M9 11a4 4 0 100-8 4 4 0 000 8zM2 21v-2a5 5 0 015-5h4a5 5 0 015 5v2M17 3.5a4 4 0 010 7.75M22 21v-2a5 5 0 00-3.5-4.75" />,
   lock: <Icon d="M5 11h14v10H5zM8 11V7a4 4 0 018 0v4M12 15v2" />,
+  clock: <Icon d="M12 3a9 9 0 100 18 9 9 0 000-18zM12 7v5l3 2" />,
+  link: <Icon d="M10 14a4 4 0 005.66 0l3-3a4 4 0 00-5.66-5.66l-1 1M14 10a4 4 0 00-5.66 0l-3 3a4 4 0 005.66 5.66l1-1" />,
+  chip: <Icon d="M7 7h10v10H7zM10 3v4M14 3v4M10 17v4M14 17v4M3 10h4M3 14h4M17 10h4M17 14h4" />,
+  coins: <Icon d="M12 5c-4 0-7 1.3-7 3s3 3 7 3 7-1.3 7-3-3-3-7-3zM5 8v4c0 1.7 3 3 7 3s7-1.3 7-3V8M5 12v4c0 1.7 3 3 7 3s7-1.3 7-3v-4" />,
 }
 
 /**

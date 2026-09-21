@@ -73,7 +73,7 @@ export function ScoringExplainer({ open, onClose }: { open: boolean; onClose: ()
             <p className="muted" style={{ fontSize: 12.5 }}>
               Currently {data.llm.provider} · {data.llm.model}, in a single call covering the
               top {data.llm.annotatesTop} companies. An administrator can change which model
-              that is, or switch the notes off, under Admin → Models &amp; keys.
+              that is, or switch the notes off, under Admin → AI models.
             </p>
           ) : (
             <p className="muted" style={{ fontSize: 12.5 }}>

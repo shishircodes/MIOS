@@ -6,7 +6,7 @@ import { signalsQueryOptions } from '~/lib/api'
 import { useFigure, useReveal } from '~/lib/motion'
 
 export const Route = createFileRoute('/monitor/feed')({
-  head: () => ({ meta: [{ title: 'Signal Feed · MIOS' }] }),
+  head: () => ({ meta: [{ title: 'Signal feed · MIOS' }] }),
   component: SignalFeed,
 })
 
@@ -83,7 +83,7 @@ function SignalFeed() {
     <div className="page" ref={scope}>
       <div className="page-header">
         <div>
-          <div className="kicker">Mode Monitor · Signal Feed</div>
+          <div className="kicker">Mode Monitor · Signal feed</div>
           <h1>All signals</h1>
         </div>
         <div className="meta">
