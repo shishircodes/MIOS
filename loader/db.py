@@ -291,7 +291,13 @@ _pool_lock = threading.Lock()
 #: Small on purpose. This is one API process talking to a serverless database
 #: with its own connection ceiling, and the workload is a handful of short
 #: queries per request rather than sustained concurrency.
-POOL_MIN_SIZE = 1
+#:
+#: No connection is held open while idle. A pool keeps its minimum alive and
+#: replaces those connections as they age, and every reconnect wakes a
+#: suspended Neon compute — so a minimum of one quietly kept the database awake
+#: with nobody using the app. Connections are opened on demand and closed after
+#: `POOL_MAX_IDLE_SECONDS`, which costs one connection set-up after a quiet spell.
+POOL_MIN_SIZE = 0
 POOL_MAX_SIZE = 8
 
 #: Neon suspends an idle compute, which kills pooled connections with it. This

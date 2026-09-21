@@ -225,7 +225,7 @@ def set_schedule(
     changed_by: str,
     target: str | Path | None = None,
 ) -> Schedule:
-    """Store the schedule. Takes effect on the next tick, within a minute."""
+    """Store the schedule. Callers in the API wake the scheduler so it applies at once."""
     validate(day_of_week, hour, minute, tz_name)
     stamp = _now()
 

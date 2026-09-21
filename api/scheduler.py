@@ -32,6 +32,15 @@ Gemini calls; run inline it would stall every HTTP request in the process.
 **It never lets a failure stop the loop.** A raised exception inside a bare
 `while True` kills the task silently, and the next anyone hears of it is a
 month of missing digests.
+
+**It lets the database sleep.** Neon suspends a compute after five minutes
+without activity and bills only while it is awake. The loop used to read the
+schedule every 60 seconds, so the database never went five minutes without a
+query: it ran all month and used up the free plan's monthly compute on its own.
+The loop now reads the schedule, works out the next run, and sleeps until then
+— waking earlier only every `REFRESH_SECONDS` as a safety net, or at once when
+an administrator saves a new schedule (`notify_changed`). Between those moments
+it sends the database nothing.
 """
 from __future__ import annotations
 
@@ -46,10 +55,18 @@ from loader.schedule import due_occurrence, get_schedule, next_due
 
 log = logging.getLogger("api.scheduler")
 
-#: How often to ask. A minute is far finer than a weekly schedule needs, but it
-#: is what makes a change in the Admin panel feel immediate, and the check is a
-#: single indexed read.
-TICK_SECONDS = 60
+#: The longest the loop sleeps without re-reading the schedule. A change made in
+#: the Admin panel wakes it at once, so this only covers a change it was not told
+#: about (another process, or a direct database edit) and clock drift. Each
+#: re-read wakes the database for about five minutes, so four a day costs a
+#: fraction of an hour of compute a day; the old minute-by-minute read cost all
+#: of it.
+REFRESH_SECONDS = 6 * 60 * 60
+
+#: Woken a few seconds after the due instant rather than on it, so a timer that
+#: fires a hair early does not read the schedule, find nothing due yet, and go
+#: back to sleep for a week.
+DUE_MARGIN_SECONDS = 5
 
 #: How often a run in flight says it is still alive. Comfortably inside
 #: `run_log.STALE_LEASE_MINUTES`, so a healthy run is never mistaken for a dead
@@ -121,10 +138,45 @@ async def run_pipeline(
     return await execute_run(run_id)
 
 
-async def _tick() -> None:
-    """One check. Never raises: the loop must outlive a bad week."""
+#: Set when an administrator saves the schedule, so the sleeping loop re-reads
+#: it at once. Created by the loop itself, on the loop it belongs to.
+_wake: asyncio.Event | None = None
+_wake_loop: asyncio.AbstractEventLoop | None = None
+
+
+def notify_changed() -> None:
+    """Tell the loop the schedule changed. Safe from any thread.
+
+    The Admin endpoint that saves the schedule runs in a worker thread, and an
+    `asyncio.Event` must be set from the loop that owns it — hence
+    `call_soon_threadsafe`. Does nothing when the scheduler is not running here.
+    """
+    if _wake is None or _wake_loop is None:
+        return
     try:
-        sched = await asyncio.to_thread(get_schedule)
+        _wake_loop.call_soon_threadsafe(_wake.set)
+    except RuntimeError:  # the loop has closed: nothing is waiting
+        pass
+
+
+def _seconds_until_next_check(sched: Any, now: datetime) -> float:
+    """How long the loop may sleep: until the next run, or the refresh, if sooner."""
+    upcoming = next_due(sched, now)
+    if upcoming is None:  # paused: nothing to wake for but the refresh
+        return float(REFRESH_SECONDS)
+    until_due = (upcoming - now).total_seconds() + DUE_MARGIN_SECONDS
+    return max(1.0, min(float(REFRESH_SECONDS), until_due))
+
+
+async def _tick(sched: Any = None) -> None:
+    """One check. Never raises: the loop must outlive a bad week.
+
+    `sched` is the schedule the loop has just read; without one, it is read
+    here. The database is only asked whether a run happened when one is due.
+    """
+    try:
+        if sched is None:
+            sched = await asyncio.to_thread(get_schedule)
         now = datetime.now(timezone.utc)
         due = due_occurrence(sched, now)
         if due is None:
@@ -144,13 +196,37 @@ async def _tick() -> None:
 
 
 async def _loop() -> None:
-    sched = await asyncio.to_thread(get_schedule)
-    upcoming = next_due(sched, datetime.now(timezone.utc))
-    log.info("scheduler: watching %s; next run %s",
-             sched.describe(), upcoming.isoformat() if upcoming else "never (paused)")
+    global _wake, _wake_loop
+    _wake = asyncio.Event()
+    _wake_loop = asyncio.get_running_loop()
+    described = None
     while True:
-        await _tick()
-        await asyncio.sleep(TICK_SECONDS)
+        try:
+            sched = await asyncio.to_thread(get_schedule)
+        except Exception:  # noqa: BLE001 - get_schedule fails soft; this is belt and braces
+            log.exception("scheduler: could not read the schedule; trying again later")
+            sched = None
+
+        if sched is not None:
+            await _tick(sched)
+            now = datetime.now(timezone.utc)
+            wait = _seconds_until_next_check(sched, now)
+            upcoming = next_due(sched, now)
+            summary = (sched.describe(), upcoming.isoformat() if upcoming else "never (paused)")
+            if summary != described:
+                log.info("scheduler: watching %s; next run %s", *summary)
+                described = summary
+        else:
+            wait = float(REFRESH_SECONDS)
+
+        # Asleep until the next run, the refresh, or an administrator's change —
+        # whichever comes first. Nothing reaches the database in between.
+        try:
+            await asyncio.wait_for(_wake.wait(), timeout=wait)
+            log.info("scheduler: the schedule changed; re-reading it")
+        except asyncio.TimeoutError:
+            pass
+        _wake.clear()
 
 
 def start(app_state: Any) -> asyncio.Task | None:

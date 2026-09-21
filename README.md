@@ -515,8 +515,10 @@ Appending it again produces Google's opaque `invalid_client` error.
 ### The weekly run
 
 The pipeline runs itself. `SCHEDULER_ENABLED=true` makes a process the one that
-runs it; **Admin → Sources health → Automatic run** decides when — day, time and
-timezone, taking effect within a minute and without a redeploy. The default is
+runs it; **Admin → Schedule & runs** decides when — day, time and timezone,
+taking effect as soon as it is saved and without a redeploy. Between runs the
+scheduler sleeps and sends the database nothing, so a Neon compute can suspend
+(it re-reads the schedule every six hours as a safety net). The default is
 Monday 05:00 Australia/Sydney.
 
 The scheduler is a loop inside the API container rather than cron, because the
