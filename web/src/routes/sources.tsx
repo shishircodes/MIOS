@@ -1,16 +1,14 @@
-import { createFileRoute } from '@tanstack/react-router'
+import { Link, createFileRoute } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useRef, useState } from 'react'
 import { AdminOnly } from '~/components/AdminOnly'
-import { HubSpotPanel } from '~/components/HubSpotPanel'
-import { SchedulePanel } from '~/components/SchedulePanel'
 import { Explainer, Loading, Section } from '~/components/ui'
-import { scheduleQueryOptions, setSourceEnabled, sourceHealthQueryOptions } from '~/lib/api'
+import { setSourceEnabled, sourceHealthQueryOptions } from '~/lib/api'
 import { useFigure, useReveal } from '~/lib/motion'
 import type { SourceHealth, SourceStatus } from '~/lib/types'
 
 export const Route = createFileRoute('/sources')({
-  head: () => ({ meta: [{ title: 'Sources · MIOS' }] }),
+  head: () => ({ meta: [{ title: 'Data sources · MIOS' }] }),
   component: () => (
     <AdminOnly>
       <SourcesScreen />
@@ -126,12 +124,6 @@ function SourceRow({
 function SourcesScreen() {
   const qc = useQueryClient()
   const { data, isPending, error } = useQuery(sourceHealthQueryOptions)
-  // Started here as well as in the panel, and waited for below. The page used
-  // to render as soon as source health arrived, and the Automatic run panel
-  // then appeared above Collectors when its own request finished, pushing the
-  // table down after it was already on screen. Both requests start together,
-  // and the panel reads the same cached result, so it renders in the first pass.
-  const schedule = useQuery(scheduleQueryOptions)
   const [problem, setProblem] = useState<string | null>(null)
   const [caution, setCaution] = useState<string | null>(null)
 
@@ -156,7 +148,7 @@ function SourcesScreen() {
   const totalRef = useFigure(data?.totalRecords ?? 0, { delay: 0.1 })
   useReveal(scope, '.src-row', { key: data?.sources.length ?? 0, delay: 0.12, max: 10 })
 
-  if (isPending || schedule.isPending) return <div className="page"><Loading lines={['Checking each source', 'Counting what came back']} /></div>
+  if (isPending) return <div className="page"><Loading lines={['Checking each source', 'Counting what came back']} /></div>
   if (error) return <div className="page"><div className="notice err">Could not load source health. {error.message}</div></div>
 
   const healthy = data.sources.filter((s) => s.status === 'ok').length
@@ -179,6 +171,9 @@ function SourcesScreen() {
           </div>
           <div style={{ marginTop: 4 }}>
             <span ref={totalRef}>{data.totalRecords.toLocaleString()}</span> records all time
+          </div>
+          <div style={{ marginTop: 4 }}>
+            When they run: <Link to="/schedule">Schedule &amp; runs</Link>
           </div>
         </div>
       </div>
@@ -203,9 +198,6 @@ function SourcesScreen() {
         </div>
       )}
 
-      {/* "When we collect" sits above "what we collect from": the schedule is
-          the thing that makes the toggles below take effect. */}
-      <SchedulePanel />
 
       <Section
         title="Collectors"
@@ -259,9 +251,6 @@ function SourcesScreen() {
         </Explainer>
       </Section>
 
-      {/* Not a collector: it decides which companies the collected signals are
-          matched against, so it sits after what is collected. */}
-      <HubSpotPanel />
     </div>
   )
 }

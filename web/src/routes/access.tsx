@@ -253,7 +253,7 @@ function AccessScreen() {
     <div className="page">
       <div className="page-header">
         <div>
-          <div className="kicker">Admin · People</div>
+          <div className="kicker">Admin · People &amp; access</div>
           <h1>People &amp; access</h1>
         </div>
         <div className="meta">

@@ -64,15 +64,20 @@ const NAV = [
     // endpoint re-checks the role, so a member who types the URL still gets
     // nothing back.
     adminOnly: true,
-    // Named for what each page manages, and matching the heading it opens on.
-    // "Tokens & cost" was wrong twice over: the page counts *requests* against a
-    // provider's daily allowance, never tokens, and it has since become where
-    // API keys are entered and a model is chosen per job. Somebody looking for
-    // "why is Market Pulse using that model" would not have looked here.
+    // One job per page, each named for exactly what it holds. Data sources used
+    // to carry the run schedule and the HubSpot sync too, and Models & keys
+    // carried the cost reports: settings were found by remembering where they
+    // had been put rather than by reading the menu. In the order an
+    // administrator meets them: when the pipeline runs, what it collects, what
+    // it is matched against, which models read it, what that costs, and who
+    // can see the result.
     items: [
+      { to: '/schedule', label: 'Schedule & runs', icon: 'clock' },
       { to: '/sources', label: 'Data sources', icon: 'src' },
+      { to: '/integrations', label: 'Integrations', icon: 'link' },
+      { to: '/models', label: 'AI models', icon: 'chip' },
+      { to: '/usage', label: 'Usage & cost', icon: 'coins' },
       { to: '/access', label: 'People & access', icon: 'people' },
-      { to: '/tokens', label: 'Models & keys', icon: 'tokens' },
     ],
   },
 ] as const
@@ -84,9 +89,12 @@ const CRUMBS: Record<string, string[]> = {
   '/publish': ['Mode Publish', 'Quarterly report'],
   '/watchlist': ['Reference', 'Watchlist'],
   '/': ['Overview', 'Dashboard'],
+  '/schedule': ['Admin', 'Schedule & runs'],
   '/sources': ['Admin', 'Data sources'],
+  '/integrations': ['Admin', 'Integrations'],
+  '/models': ['Admin', 'AI models'],
+  '/usage': ['Admin', 'Usage & cost'],
   '/access': ['Admin', 'People & access'],
-  '/tokens': ['Admin', 'Models & keys'],
 }
 
 /** The footer dot said "Connected" unconditionally, including when nothing was

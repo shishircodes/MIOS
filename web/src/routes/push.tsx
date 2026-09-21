@@ -33,7 +33,7 @@ function explainNote(note: string): string {
     return 'the daily model allowance is spent. The ranking below is unaffected.'
   }
   if (n.includes('api_key') || n.includes('not set') || n.includes('not configured')) {
-    return 'no model is configured. An administrator can set one under Models & cost.'
+    return 'no model is configured. An administrator can set one under Admin → AI models.'
   }
   return 'the model could not be reached. The ranking below is unaffected.'
 }
