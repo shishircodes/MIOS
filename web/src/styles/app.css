@@ -796,6 +796,18 @@ input, textarea, select { font-family: inherit; }
 .doc-section-tools { display: flex; gap: 6px; flex: none; }
 .doc-section p { margin: 10px 0; }
 .doc-empty { color: var(--muted); font-style: italic; }
+.doc-sub { font-size: 14px; font-weight: 600; margin: 18px 0 6px; color: var(--ink-2); }
+.doc-table-wrap { overflow-x: auto; margin: 8px 0 14px; }
+.doc-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.doc-table th {
+  text-align: left; font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.05em;
+  text-transform: uppercase; color: var(--ink-3); font-weight: 500;
+  padding: 6px 8px; border-bottom: 1px solid var(--line-2); white-space: nowrap;
+}
+.doc-table td { padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.doc-table td:not(:first-child), .doc-table th:not(:first-child) { text-align: right; font-variant-numeric: tabular-nums; }
+.doc-toc li a { display: flex; gap: 8px; align-items: baseline; width: 100%; color: inherit; text-decoration: none; }
+.doc-toc li a:hover .toc-heading { text-decoration: underline; }
 .doc-section-actions { display: flex; gap: 8px; margin-top: 10px; }
 .doc-section .textarea { margin-top: 10px; min-height: 190px; font-size: 14px; line-height: 1.6; }
 

@@ -212,11 +212,15 @@ function PublishScreen() {
               <ol>
                 {doc.sections.map((s, i) => (
                   <li key={s.id} className={s.approved ? 'done' : undefined}>
-                    <span className="mono num">{String(i + 1).padStart(2, '0')}</span>
-                    <span className="toc-heading">{s.heading}</span>
-                    <span className="toc-state" aria-hidden="true">
-                      {s.approved ? '✓' : s.empty ? '—' : '·'}
-                    </span>
+                    {/* A link, because a quarterly report runs to twenty sections
+                        and scrolling to the ninth is not navigation. */}
+                    <a href={`#sec-${s.id}`}>
+                      <span className="mono num">{String(i + 1).padStart(2, '0')}</span>
+                      <span className="toc-heading">{s.heading}</span>
+                      <span className="toc-state" aria-hidden="true">
+                        {s.approved ? '✓' : s.empty ? '—' : '·'}
+                      </span>
+                    </a>
                   </li>
                 ))}
               </ol>
@@ -318,6 +322,48 @@ function PublishScreen() {
   )
 }
 
+/** A section body: paragraphs, "- " lists, "|" tables and "###" subheadings —
+ *  the structures the report builder writes, rendered the same way as the
+ *  printable export so the screen and the page show one document. */
+function ReportBody({ text }: { text: string }) {
+  const blocks = text.split('\n\n').map((b) => b.trim()).filter(Boolean)
+  return (
+    <>
+      {blocks.map((block, i) => {
+        const lines = block.split('\n')
+        if (lines.every((l) => l.trimStart().startsWith('|'))) {
+          const rows = lines
+            .map((l) => l.trim().replace(/^\||\|$/g, '').split('|').map((c) => c.trim()))
+            .filter((r) => !r.every((c) => /^[-: ]+$/.test(c)))
+          const [head, ...body] = rows
+          if (!head) return null
+          return (
+            <div key={i} className="doc-table-wrap">
+              <table className="doc-table">
+                <thead><tr>{head.map((c, j) => <th key={j}>{c}</th>)}</tr></thead>
+                <tbody>
+                  {body.map((r, k) => (
+                    <tr key={k}>{r.map((c, j) => <td key={j}>{c}</td>)}</tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )
+        }
+        if (lines.every((l) => l.trimStart().startsWith('- '))) {
+          return (
+            <ul key={i}>
+              {lines.map((l, j) => <li key={j}>{l.trimStart().slice(2)}</li>)}
+            </ul>
+          )
+        }
+        if (block.startsWith('### ')) return <h3 key={i} className="doc-sub">{block.slice(4)}</h3>
+        return <p key={i}>{block}</p>
+      })}
+    </>
+  )
+}
+
 function SectionBlock({
   section, locked, editing, draftBody, busy,
   onStartEdit, onChange, onCancel, onSave, onToggleApprove,
@@ -334,7 +380,7 @@ function SectionBlock({
   onToggleApprove: () => void
 }) {
   return (
-    <section className="doc-section">
+    <section className="doc-section" id={`sec-${section.id}`}>
       <div className="doc-section-h">
         <h2>{section.heading}</h2>
         <div className="doc-section-tools">
@@ -378,7 +424,7 @@ function SectionBlock({
       ) : (
         <>
           {section.body.trim()
-            ? section.body.split('\n\n').map((p, i) => <p key={i}>{p}</p>)
+            ? <ReportBody text={section.body} />
             : (
               <p className="doc-empty">
                 This section has not been written yet. The outlook is a judgement,

@@ -52,10 +52,41 @@ from publish.report import Section
 log = logging.getLogger(__name__)
 
 #: Headings whose wording is left exactly as computed. See the module docstring.
-NEVER_REWRITE = ("Looking Ahead", "Methodology")
+#: Key Figures and the appendices are tables with a line of framing, so there is
+#: no prose to improve and every word is a figure.
+NEVER_REWRITE = (
+    "Looking Ahead", "Methodology", "Key Figures",
+    "Appendix A — Signals by Sector and Month", "Appendix B — Employers",
+    "Appendix C — Sources",
+)
 
-#: One report is one call. Room for seven rewritten sections with headroom.
-MAX_OUTPUT_TOKENS = 8000
+#: One report is one call. Only each section's opening narrative is sent — the
+#: tables and lists are re-attached untouched — so a report of twenty sections
+#: still fits comfortably.
+MAX_OUTPUT_TOKENS = 16000
+
+#: A block that is data rather than prose: a table, a list, or a subheading.
+_STRUCTURED = ("|", "- ", "### ")
+
+
+def split_narrative(body: str) -> tuple[str, str]:
+    """The prose a section opens with, and everything after it.
+
+    The model is only ever given the prose. Tables and lists are figures laid out
+    for reading; sending them for "rewriting" risks a changed number for nothing
+    a reader would notice. A framing line ending in a colon ("The twenty most
+    active were:") belongs to the table it introduces, so it stays with it.
+    """
+    blocks = body.split("\n\n")
+    narrative: list[str] = []
+    for i, block in enumerate(blocks):
+        if block.lstrip().startswith(_STRUCTURED):
+            rest = blocks[i:]
+            if narrative and narrative[-1].rstrip().endswith(":"):
+                rest = [narrative.pop()] + rest
+            return "\n\n".join(narrative).strip(), "\n\n".join(rest).strip()
+        narrative.append(block)
+    return "\n\n".join(narrative).strip(), ""
 
 SYSTEM_PROMPT = """You are an editor at an industrial recruitment firm, preparing \
 a quarterly market report for clients in Australia and Papua New Guinea.
@@ -146,7 +177,8 @@ def rewrite(
     """Rewrite the generated sections. Falls back to computed prose on any doubt."""
     candidates = [
         s for s in sections
-        if s.source == "generated" and s.heading not in NEVER_REWRITE and s.body.strip()
+        if s.source == "generated" and s.heading not in NEVER_REWRITE
+        and split_narrative(s.body)[0]
     ]
     if not candidates:
         return RewriteOutcome(sections, used_llm=False, reason="Nothing to rewrite.")
@@ -179,7 +211,7 @@ def rewrite(
         _throttle()
 
     prompt = "\n\n".join(
-        f"### {s.heading}\n{s.body}" for s in candidates
+        f"### {s.heading}\n{split_narrative(s.body)[0]}" for s in candidates
     )
     prompt = (
         f"Rewrite each of the following {len(candidates)} sections. Return every "
@@ -215,6 +247,8 @@ def rewrite(
         if s not in candidates or not new_body:
             out.append(s)
             continue
+        # Checked against the whole computed section, tables included: a figure
+        # moved from a table into a sentence is still a figure from the data.
         invented = invented_numbers(s.body, new_body)
         if invented:
             log.warning("publish.rewrite: %r introduced %s — keeping computed prose",
@@ -222,7 +256,9 @@ def rewrite(
             rejected.append(s.heading)
             out.append(s)
             continue
-        out.append(Section(s.heading, new_body, s.source))
+        # The model only saw the prose; the tables and lists go back exactly as computed.
+        rest = split_narrative(s.body)[1]
+        out.append(Section(s.heading, new_body + ("\n\n" + rest if rest else ""), s.source))
         accepted += 1
 
     log.info("publish.rewrite: %d/%d sections rewritten, %d rejected",
