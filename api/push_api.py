@@ -222,6 +222,54 @@ def match_unsaved(
     return _matches_for(payload, days=days, limit=limit)
 
 
+@router.get("/company-candidates")
+def company_candidates(
+    company: str = Query(..., min_length=1, max_length=200),
+    days: int = Query(DEFAULT_MATCH_WINDOW_DAYS, ge=1, le=365),
+    limit: int = Query(5, ge=1, le=MAX_RESULTS),
+    user: dict[str, Any] = Depends(require_user),
+) -> dict[str, Any]:
+    """Saved candidates ranked for one company — Mode Push read the other way.
+
+    Opened from a signal: "who on our books fits BHP right now?". Each score is
+    the one Mode Push gives that candidate for this company, because it is the
+    same `match_profile` over the same window with rarity built from the whole
+    window — so the number here and the number on the candidate's own match
+    list cannot disagree.
+    """
+    name = company.strip()
+    signals = signals_for_matching(days=days)
+    rows = [s for s in signals if (s.get("company_name") or "").strip().lower() == name.lower()]
+    profiles = list_profiles(limit=500)
+    ranked: list[dict[str, Any]] = []
+    if rows:
+        rarity = build_rarity(signals)
+        for p in profiles:
+            result = match_profile(p, rows, limit=1, rarity_model=rarity)
+            if result:
+                ranked.append({
+                    "id": p["id"],
+                    "fullName": p.get("fullName"),
+                    "currentTitle": p.get("currentTitle"),
+                    "region": p.get("region"),
+                    "score": result[0].score,
+                    "confidence": result[0].confidence,
+                })
+    ranked.sort(key=lambda r: (-r["score"], (r["fullName"] or "").lower()))
+    log.info("push: candidates for %s requested by %s (%d profiles, %d signals)",
+             name, user["email"], len(profiles), len(rows))
+    return {
+        "company": name,
+        "candidates": ranked[:limit],
+        "profilesConsidered": len(profiles),
+        #: Zero means the company has nothing inside the window to match on —
+        #: an older signal, typically — which is a different answer from "no
+        #: candidate fits", and the drawer says which.
+        "companySignals": len(rows),
+        "windowDays": days,
+    }
+
+
 #: Re-exported so the web app can enforce the same limit before uploading and
 #: give an instant error instead of a round trip.
 UPLOAD_LIMIT_BYTES = MAX_BYTES

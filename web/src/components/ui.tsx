@@ -34,6 +34,7 @@ export const Icons: Record<string, ReactNode> = {
   check: <Icon d="M5 12l5 5 9-11" sw={1.8} />,
   alert: <Icon d="M12 3L1 21h22L12 3zM12 10v5M12 18h.01" sw={1.6} />,
   panel: <Icon d="M3 4h18v16H3zM9 4v16" sw={1.6} />,
+  menu: <Icon d="M4 7h16M4 12h16M4 17h16" sw={1.8} />,
   info: <Icon d="M12 3a9 9 0 100 18 9 9 0 000-18zM12 11v6M12 7h.01" sw={1.6} />,
   x: <Icon d="M6 6l12 12M18 6l-12 12" />,
   filter: <Icon d="M3 5h18l-7 9v6l-4-2v-4z" />,

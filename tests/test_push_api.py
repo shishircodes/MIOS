@@ -222,6 +222,7 @@ def anon(db, monkeypatch):
     ("get", "/api/push/profiles/prof-x/matches"),
     ("post", "/api/push/match"),
     ("delete", "/api/push/profiles/prof-x"),
+    ("get", "/api/push/company-candidates?company=BHP"),
 ])
 def test_every_push_endpoint_requires_sign_in(anon, method, path):
     """These are real people's CVs — there is no public read path."""
@@ -364,3 +365,57 @@ def test_the_full_cv_to_matches_journey(client, db):
     matches = client.get(f"/api/push/profiles/{saved['id']}/matches").json()["matches"]
     assert matches[0]["co"] == "BHP"
     assert matches[0]["score"] > 0
+
+
+# ---------- candidates for a company (opened from a signal) ----------
+
+
+def test_candidates_for_a_company_are_ranked_with_mode_push_scores(client, db):
+    from push.matcher import match_profile
+    from push.rarity import build
+
+    for i in range(3):
+        _signal(db, f"bhp{i}", title="Maintenance Planner")
+    _signal(db, "other", company="Downer", tier=None, title="Electrician")
+    planner = create_profile(PROFILE, target=db)
+    sparky = create_profile({**PROFILE, "fullName": "Sam Sparks", "currentTitle": "Electrician",
+                             "skills": ["hv"]}, target=db)
+
+    res = client.get("/api/push/company-candidates", params={"company": "bhp"})
+    assert res.status_code == 200
+    body = res.json()
+    assert body["companySignals"] == 3, "matched on the name, case-insensitively"
+    assert body["profilesConsidered"] == 2
+    ranked = [c["id"] for c in body["candidates"]]
+    assert ranked[0] == planner["id"], "the planner fits a company hiring planners best"
+    assert set(ranked) == {planner["id"], sparky["id"]}
+
+    # The same number Mode Push shows on the candidate's own list.
+    signals = signals_for_matching(days=30, target=db)
+    own = match_profile(get_profile(planner["id"], target=db), signals, limit=50,
+                        rarity_model=build(signals))
+    assert body["candidates"][0]["score"] == next(m.score for m in own if m.company == "BHP")
+
+
+def test_a_company_with_nothing_in_the_window_says_so(client, db):
+    _signal(db, "old", days_ago=60)
+    create_profile(PROFILE, target=db)
+    body = client.get("/api/push/company-candidates", params={"company": "BHP"}).json()
+    assert body["companySignals"] == 0
+    assert body["candidates"] == []
+    assert body["profilesConsidered"] == 1
+
+
+def test_no_saved_candidates_is_an_empty_list_not_an_error(client, db):
+    _signal(db, "s1")
+    body = client.get("/api/push/company-candidates", params={"company": "BHP"}).json()
+    assert body["profilesConsidered"] == 0 and body["candidates"] == []
+
+
+def test_the_candidate_list_is_capped(client, db):
+    _signal(db, "s1")
+    for i in range(7):
+        create_profile({**PROFILE, "fullName": f"Person {i}"}, target=db)
+    body = client.get("/api/push/company-candidates", params={"company": "BHP", "limit": 5}).json()
+    assert len(body["candidates"]) == 5
+    assert body["profilesConsidered"] == 7

@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { ScoringExplainer } from '~/components/ScoringExplainer'
 import { Icons, RegionChip, Section } from '~/components/ui'
 import { useCountUpAll, useReveal } from '~/lib/motion'
@@ -14,6 +14,12 @@ import { MatchDetail } from '~/components/MatchDetail'
 
 export const Route = createFileRoute('/push')({
   head: () => ({ meta: [{ title: 'Candidate matching · MIOS' }] }),
+  // Arriving from a signal's "Find candidates": open this saved profile's
+  // matches, with the named company's working already open.
+  validateSearch: (search: Record<string, unknown>): { profile?: string; company?: string } => ({
+    profile: typeof search.profile === 'string' ? search.profile : undefined,
+    company: typeof search.company === 'string' ? search.company : undefined,
+  }),
   component: PushScreen,
 })
 
@@ -283,6 +289,28 @@ function PushScreen() {
     },
     onError: (e: Error) => setError(e.message),
   })
+
+  // Once per arrival: the link names a profile, and the list has loaded.
+  const { profile: wantedProfile, company: wantedCompany } = Route.useSearch()
+  const navigate = Route.useNavigate()
+  const arrived = useRef(false)
+  useEffect(() => {
+    if (arrived.current || !wantedProfile || !profiles.data) return
+    arrived.current = true
+    const p = profiles.data.find((x) => x.id === wantedProfile)
+    if (!p) {
+      setError('That candidate is no longer saved.')
+    } else {
+      openSaved.mutate(p, {
+        onSuccess: ({ res }) => {
+          const m = res.matches.find((x) => x.co.toLowerCase() === (wantedCompany ?? '').toLowerCase())
+          if (m) setOpenMatch(m)
+        },
+      })
+    }
+    // Drop the parameters so a reload or Back does not replay the jump.
+    void navigate({ search: {}, replace: true })
+  }, [wantedProfile, wantedCompany, profiles.data, openSaved, navigate])
 
   const remove = useMutation({
     mutationFn: deleteProfile,
@@ -559,7 +587,7 @@ function PushScreen() {
         }
       >
         <div style={{ padding: '16px 18px' }}>
-          <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 18 }}>
+          <div className="push-actions" style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 18 }}>
             <input
               ref={fileInput}
               type="file"
@@ -706,7 +734,7 @@ function PushScreen() {
             />
           </div>
 
-          <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 4 }}>
+          <div className="push-actions" style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 4 }}>
             <button
               className="btn rust"
               disabled={busy || !named}

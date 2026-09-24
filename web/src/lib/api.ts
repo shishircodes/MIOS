@@ -18,6 +18,7 @@ import type {
   HubSpotMapping,
   HubSpotProperty,
   HubSpotStatus,
+  CompanyCandidates,
   GoogleDocsStatus,
   ReportGoogleDoc,
   ReportSummary,
@@ -558,3 +559,13 @@ export function dashboardQueryOptions(filters: DashboardFilters = {}) {
   })
 }
 
+
+/** Saved candidates ranked for one company — "who on our books fits them?". */
+export const companyCandidatesQueryOptions = (company: string | null) =>
+  queryOptions({
+    queryKey: ['push', 'company-candidates', company],
+    queryFn: () =>
+      fetchJson<CompanyCandidates>(`/api/push/company-candidates?company=${encodeURIComponent(company ?? '')}`),
+    enabled: !!company,
+    retry: false,
+  })

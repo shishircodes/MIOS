@@ -59,6 +59,22 @@ export interface Signal {
   capturedAt: string | null
 }
 
+/** Saved candidates ranked for one company (GET /api/push/company-candidates). */
+export interface CompanyCandidates {
+  company: string
+  candidates: {
+    id: string
+    fullName: string | null
+    currentTitle: string | null
+    region: string | null
+    score: number
+    confidence: string | null
+  }[]
+  profilesConsidered: number
+  companySignals: number
+  windowDays: number
+}
+
 export interface VelocityRow {
   co: string
   wk: number
