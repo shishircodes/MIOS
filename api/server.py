@@ -49,6 +49,7 @@ from api import scheduler
 from api.dashboard_service import build_dashboard_payload
 from api.admin_api import router as admin_router
 from api.hubspot_api import router as hubspot_router
+from api.google_docs_api import router as google_docs_router
 from api.publish_api import router as publish_router
 from api.push_api import router as push_router
 from api.watchlist_api import router as watchlist_router
@@ -120,6 +121,7 @@ app.include_router(push_router)
 app.include_router(publish_router)
 app.include_router(admin_router)
 app.include_router(hubspot_router)
+app.include_router(google_docs_router)
 app.include_router(watchlist_router)
 
 

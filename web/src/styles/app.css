@@ -2263,6 +2263,11 @@ overflow-x: auto;
 
 .key-result { margin: 12px 0 0; }
 
+/* Two fields (client ID and secret): label beside input, one pair per row. */
+.gd-form { display: grid; grid-template-columns: max-content 1fr; align-items: center; }
+.gd-form .btn { grid-column: 2; justify-self: start; }
+@media (max-width: 640px) { .gd-form { grid-template-columns: 1fr; } .gd-form .btn { grid-column: 1; } }
+
 /* ---------- Mode Push · the written half ---------- */
 
 .match-note {

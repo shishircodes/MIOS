@@ -1,6 +1,8 @@
 import { useQuery } from '@tanstack/react-query'
 import { Link, createFileRoute } from '@tanstack/react-router'
+import { useEffect, useState } from 'react'
 import { AdminOnly } from '~/components/AdminOnly'
+import { GoogleDocsPanel } from '~/components/GoogleDocsPanel'
 import { HubSpotPanel } from '~/components/HubSpotPanel'
 import { Loading } from '~/components/ui'
 import { hubspotStatusQueryOptions } from '~/lib/api'
@@ -14,10 +16,27 @@ export const Route = createFileRoute('/integrations')({
   ),
 })
 
-/** Systems MIOS reads from besides the collectors. The HubSpot sync used to sit
- *  under Data sources, but it supplies the watchlist, not signals. */
+/** Google's redirect back from the consent screen lands here with the outcome
+ *  in the query string. Read once, then removed so a reload does not replay it. */
+function useGoogleDocsFlash() {
+  const [flash, setFlash] = useState<{ ok: boolean; text: string } | null>(null)
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search)
+    const outcome = q.get('googleDocs')
+    if (!outcome) return
+    setFlash(outcome === 'connected'
+      ? { ok: true, text: `Google Docs connected${q.get('account') ? ` as ${q.get('account')}` : ''}.` }
+      : { ok: false, text: q.get('reason') || 'Connecting Google Docs failed.' })
+    window.history.replaceState(null, '', window.location.pathname)
+  }, [])
+  return flash
+}
+
+/** Systems MIOS connects to besides the collectors: HubSpot supplies the
+ *  watchlist, Google Docs receives the quarterly reports. */
 function IntegrationsScreen() {
   const { isPending } = useQuery(hubspotStatusQueryOptions)
+  const flash = useGoogleDocsFlash()
 
   return (
     <div className="page">
@@ -28,8 +47,10 @@ function IntegrationsScreen() {
         </div>
         <div className="meta">
           <div>The synced companies appear under <Link to="/watchlist">Watchlist</Link></div>
+          <div>Reports are sent from <Link to="/publish">Quarterly reports</Link></div>
         </div>
       </div>
+      <GoogleDocsPanel flash={flash} />
       {isPending ? <Loading lines={['Checking the HubSpot connection']} /> : <HubSpotPanel />}
     </div>
   )

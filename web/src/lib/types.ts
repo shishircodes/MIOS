@@ -171,6 +171,37 @@ export interface HubSpotProperty {
   options: { value: string; label: string }[]
 }
 
+// ---------- Google Docs (api/google_docs_api.py) ----------
+
+export interface GoogleDocsStatus {
+  /** Where the OAuth client comes from: typed in here, server env, or the sign-in client. */
+  client: { source: 'panel' | 'environment' | 'sign-in' | 'none'; id: string | null }
+  canStoreKey: boolean
+  clientEnv: string[]
+  /** Must be listed as an authorised redirect URI on the Google OAuth client. */
+  redirectUri: string
+  scopes: string[]
+  account: { email: string | null; connectedAt: string; connectedBy: string } | null
+  connected: boolean
+  folder: { id: string; url: string | null } | null
+  note?: string
+}
+
+export interface GoogleDocExport {
+  fileId: string
+  url: string
+  exportedAt: string
+  exportedBy: string | null
+  created?: boolean
+  replacedLink?: boolean
+}
+
+export interface ReportGoogleDoc {
+  connected: boolean
+  account?: string | null
+  export: GoogleDocExport | null
+}
+
 // ---------- Mode Publish (api/publish_api.py) ----------
 
 export interface ReportSection {
