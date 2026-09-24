@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { createFileRoute } from '@tanstack/react-router'
+import { Link, createFileRoute } from '@tanstack/react-router'
 import { useEffect, useRef, useState } from 'react'
 import { Icons, Loading, Section } from '~/components/ui'
 import {
@@ -7,8 +7,10 @@ import {
   deleteReport,
   editSection,
   exportReportUrl,
+  exportToGoogleDocs,
   generateReport,
   quartersQueryOptions,
+  reportGoogleDocQueryOptions,
   reportQueryOptions,
   reportsQueryOptions,
   setSectionApproval,
@@ -286,6 +288,7 @@ function PublishScreen() {
                 A draft exports with a “not approved” banner. Use the printable
                 view and your browser’s Print → Save as PDF.
               </p>
+              <GoogleDocExport reportId={doc.id} approved={locked} />
 
               <div className="hr" />
               <div className="doc-label">Reports</div>
@@ -447,5 +450,75 @@ function SectionBlock({
         </>
       )}
     </section>
+  )
+}
+
+function sentOn(iso: string): string {
+  return new Date(iso).toLocaleString('en-AU', {
+    day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
+  })
+}
+
+/** Send the report to its Google Doc. The first send creates the Doc; later
+ *  sends replace its contents, so a link shared once keeps working. */
+function GoogleDocExport({ reportId, approved }: { reportId: string; approved: boolean }) {
+  const qc = useQueryClient()
+  const { session } = useAuth()
+  const status = useQuery(reportGoogleDocQueryOptions(reportId))
+  const [problem, setProblem] = useState<string | null>(null)
+
+  const send = useMutation({
+    mutationFn: () => exportToGoogleDocs(reportId),
+    onSuccess: (r) => {
+      qc.setQueryData(reportGoogleDocQueryOptions(reportId).queryKey, (old) => ({ ...old, ...r }))
+      setProblem(null)
+    },
+    onError: (e: Error) => setProblem(e.message),
+  })
+
+  if (status.isPending || status.error || !status.data) return null
+  const { connected, export: sent } = status.data
+
+  if (!connected) {
+    return (
+      <p className="muted" style={{ fontSize: 12, marginTop: 10 }}>
+        Google Docs is not connected.{' '}
+        {session?.isAdmin
+          ? <>Connect it under <Link to="/integrations">Integrations</Link>.</>
+          : 'An administrator can connect it under Integrations.'}
+      </p>
+    )
+  }
+
+  const onSend = () => {
+    if (sent && !window.confirm(
+      'This replaces the contents of the Google Doc with the report as it is in MIOS now. '
+      + 'Edits made inside Google Docs will be lost; comments may lose their place. Continue?')) return
+    send.mutate()
+  }
+
+  return (
+    <div style={{ marginTop: 10 }}>
+      <div style={{ display: 'grid', gap: 6 }}>
+        <button className="btn sm" disabled={send.isPending} onClick={onSend}>
+          {Icons.publish} {send.isPending ? 'Sending to Google Docs…' : sent ? 'Update Google Doc' : 'Send to Google Docs'}
+        </button>
+        {sent && (
+          <a className="btn sm ghost" href={sent.url} target="_blank" rel="noopener">
+            {Icons.ext} Open Google Doc
+          </a>
+        )}
+      </div>
+      {problem && <p className="notice err" role="alert" style={{ fontSize: 12, marginTop: 8 }}>{problem}</p>}
+      {sent && !problem && (
+        <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>
+          {send.data?.export?.replacedLink
+            ? 'The earlier Doc could not be reached, so a new one was made — share this new link. '
+            : ''}
+          Sent {sentOn(sent.exportedAt)}{sent.exportedBy ? ` by ${sent.exportedBy}` : ''}
+          {!approved && ' · marked DRAFT until approved'}.
+        </p>
+      )}
+    </div>
   )
 }

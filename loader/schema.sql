@@ -142,6 +142,20 @@ CREATE TABLE IF NOT EXISTS report_sections (
 CREATE INDEX IF NOT EXISTS idx_reports_quarter   ON reports(quarter);
 CREATE INDEX IF NOT EXISTS idx_sections_report   ON report_sections(report_id, position);
 
+-- Where a report has been sent outside MIOS: today, its Google Doc. Kept apart
+-- from `reports` so exporting never alters that table, and keyed by provider so
+-- a second destination is a row, not a column. Also created on demand by
+-- publish/google_docs.py, with the same columns.
+CREATE TABLE IF NOT EXISTS report_exports (
+    report_id   TEXT NOT NULL,
+    provider    TEXT NOT NULL,
+    file_id     TEXT NOT NULL,
+    url         TEXT NOT NULL,
+    exported_at TEXT NOT NULL,
+    exported_by TEXT,
+    PRIMARY KEY (report_id, provider)
+);
+
 -- Role-based access.
 --
 -- Two roles. `admin` reaches the Admin section — source health, usage and cost,

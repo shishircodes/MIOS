@@ -18,6 +18,8 @@ import type {
   HubSpotMapping,
   HubSpotProperty,
   HubSpotStatus,
+  GoogleDocsStatus,
+  ReportGoogleDoc,
   ReportSummary,
   SchedulePayload,
   ScoringModel,
@@ -140,6 +142,49 @@ export async function syncHubSpot(dryRun: boolean): Promise<HubSpotStatus> {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ dryRun }),
   })
+}
+
+// ---------- Google Docs (Mode Publish export) ----------
+
+export const googleDocsStatusQueryOptions = queryOptions({
+  queryKey: ['admin', 'google-docs'],
+  queryFn: () => fetchJson<GoogleDocsStatus>('/api/admin/google-docs'),
+  retry: false,
+})
+
+/** Store an OAuth client. The secret is encrypted and never comes back. */
+export async function setGoogleDocsClient(clientId: string, clientSecret: string): Promise<GoogleDocsStatus> {
+  return postOrExplain<GoogleDocsStatus>('/api/admin/google-docs/client', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ clientId, clientSecret }),
+  })
+}
+
+export async function clearGoogleDocsClient(): Promise<GoogleDocsStatus> {
+  return postOrExplain<GoogleDocsStatus>('/api/admin/google-docs/client', { method: 'DELETE' })
+}
+
+/** The Google consent URL to send the browser to. */
+export async function startGoogleDocsConnect(): Promise<{ url: string }> {
+  return postOrExplain('/api/admin/google-docs/connect', { method: 'POST' })
+}
+
+export async function disconnectGoogleDocs(): Promise<GoogleDocsStatus> {
+  return postOrExplain<GoogleDocsStatus>('/api/admin/google-docs/connection', { method: 'DELETE' })
+}
+
+export const reportGoogleDocQueryOptions = (reportId: string | null) =>
+  queryOptions({
+    queryKey: ['publish', 'google-doc', reportId],
+    queryFn: () => fetchJson<ReportGoogleDoc>(`/api/publish/reports/${reportId}/google-docs`),
+    enabled: !!reportId,
+    retry: false,
+  })
+
+/** Create the report's Google Doc, or replace the contents of the one it has. */
+export async function exportToGoogleDocs(reportId: string): Promise<ReportGoogleDoc> {
+  return postOrExplain<ReportGoogleDoc>(`/api/publish/reports/${reportId}/google-docs`, { method: 'POST' })
 }
 
 /**
