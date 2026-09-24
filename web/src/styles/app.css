@@ -1046,73 +1046,6 @@ input, textarea, select { font-family: inherit; }
 .feed-search input::placeholder { color: var(--muted); }
 
 
-/* Mobile dashboard layout */
-@media (max-width: 768px) {
-html,
-body {
-width: 100%;
-max-width: 100%;
-overflow-x: hidden;
-}
-
-.app {
-display: flex;
-flex-direction: column;
-width: 100%;
-height: auto;
-min-height: 100vh;
-}
-
-.topbar {
-width: 100%;
-}
-
-.sidebar {
-position: static;
-width: 100%;
-height: auto;
-min-height: 0;
-display: flex;
-flex-direction: row;
-align-items: stretch;
-gap: 8px;
-padding: 8px;
-overflow-x: auto;
-overflow-y: hidden;
-}
-
-.sidebar > div {
-flex: 0 0 auto;
-min-width: 170px;
-}
-
-.sidebar .footer {
-flex: 0 0 auto;
-}
-
-.main {
-width: 100%;
-min-width: 0;
-margin: 0;
-}
-
-.page {
-width: 100%;
-min-width: 0;
-padding: 12px;
-}
-
-.kpi-row {
-grid-template-columns: 1fr;
-}
-
-table {
-display: block;
-width: 100%;
-max-width: 100%;
-overflow-x: auto;
-}
-}
 /* ---------- Admin: source health & access ----------
    Status is never carried by colour alone (WCAG 1.4.1): every chip and dot is
    accompanied by a word. The chip borders sit at 3:1 against their fill so the
@@ -1146,7 +1079,7 @@ overflow-x: auto;
   font-family: var(--mono); font-size: 10.5px; text-transform: uppercase;
   letter-spacing: 0.08em; color: var(--muted); background: var(--paper-2);
 }
-.person-row .name { font-weight: 500; word-break: break-all; }
+.person-row .name { font-weight: 500; overflow-wrap: anywhere; }
 .row-sub { font-size: 11.5px; font-weight: 400; color: var(--muted); margin-top: 2px; }
 .row-how { font-size: 12.5px; line-height: 1.4; }
 .row-action { display: flex; justify-content: flex-end; align-items: center; }
@@ -2367,3 +2300,137 @@ overflow-x: auto;
 /* Signals outside the five sectors, left out of the figures. */
 .hero-left-out { margin-top: 10px; opacity: 0.85; }
 .collection-facts .left-out b { color: var(--ink-3); }
+
+/* ---------- Signal drawer (digest and feed) ---------- */
+.drawer-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.drawer-company { font-size: 20px; margin: 0 0 6px; font-weight: 500; }
+.drawer-title { font-size: 14px; color: var(--ink-2); margin-top: 0; }
+.drawer-facts { margin-bottom: 4px; font-size: 12px; }
+.drawer-fact-label {
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--muted);
+}
+.drawer-fact { font-weight: 500; margin-top: 4px; }
+.drawer-tag {
+  font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--muted); margin: 18px 0 6px;
+}
+.drawer-desc { font-size: 13px; color: var(--ink-2); }
+.drawer-classified { font-size: 12.5px; color: var(--ink-3); font-family: var(--mono); }
+.drawer-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 24px; }
+.drawer-small { font-size: 12.5px; }
+.drawer-candidates { margin-top: 6px; }
+.cand-list { list-style: none; margin: 0 0 8px; padding: 0; border-top: 1px solid var(--line); }
+.cand-list li { border-bottom: 1px solid var(--line); }
+.cand-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 9px 4px; color: var(--ink); text-decoration: none;
+}
+.cand-row:hover { background: var(--teal-bg); }
+.cand-row:focus-visible { outline: 2px solid var(--teal); outline-offset: -2px; }
+.cand-name { display: grid; gap: 2px; min-width: 0; font-size: 13px; }
+.cand-name .muted { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cand-score { font-size: 15px; font-weight: 600; flex: none; }
+.signal[role='button']:focus-visible { outline: 2px solid var(--teal); outline-offset: -2px; }
+
+/* ==========================================================================
+   Responsive layout. Kept last on purpose: a media query adds no specificity,
+   so these overrides only win against the component rules above if they come
+   after them.
+   ========================================================================== */
+/* ---------- Narrow screens: tablets and phones ----------
+   Below 900px there is no room for a sidebar beside the page, so it becomes a
+   slide-over menu opened from the topbar button (see Shell in __root.tsx, which
+   uses the same 900px). The page keeps the full width. */
+@media (max-width: 900px) {
+  .app { grid-template-columns: minmax(0, 1fr); }
+  .sidebar {
+    position: fixed; z-index: 60; top: 0; bottom: 0; left: 0;
+    width: min(280px, 86vw); padding-top: 14px;
+    box-shadow: 0 18px 48px rgba(26, 40, 55, 0.22);
+    transform: translateX(-105%); visibility: hidden;
+    transition: transform 200ms ease, visibility 0s linear 200ms;
+  }
+  .app.nav-open .sidebar {
+    transform: none; visibility: visible;
+    transition: transform 200ms ease, visibility 0s;
+  }
+  .nav-scrim {
+    position: fixed; inset: 0; z-index: 55;
+    background: rgba(26, 40, 55, 0.34);
+  }
+  .main { grid-column: 1; min-width: 0; }
+  .topbar { gap: 12px; padding: 0 14px; }
+  .page { padding: 18px 20px 64px; }
+}
+
+/* Phones. */
+@media (max-width: 640px) {
+  .page { padding: 14px 16px 56px; }
+  .page-header { flex-direction: column; align-items: flex-start; gap: 10px; }
+  .page-header h1 { font-size: 25px; }
+  .page-header .meta { text-align: left; }
+  .section-h { flex-wrap: wrap; gap: 6px 12px; padding: 12px 14px; }
+  .topbar .crumbs > span:not(.current) { display: none; }
+  .feed-search, .feed-search input { width: 100%; max-width: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar { transition: none !important; }
+}
+
+/* Phones: rows built as side-by-side grids stack instead, so no column is
+   squeezed to a sliver (an email one character wide, a job description three
+   words wide beside its model picker). */
+@media (max-width: 640px) {
+  /* Signal rows: the confidence / source / date column moves under the text. */
+  .signal { grid-template-columns: 26px minmax(0, 1fr); gap: 10px; padding: 12px 14px; }
+  .signal .meta-col {
+    grid-column: 2; flex-direction: row; flex-wrap: wrap; align-items: center;
+    gap: 4px 12px; text-align: left;
+  }
+  .signal .meta-col .captured { margin-top: 0; }
+  .signal .body > div:first-child { flex-wrap: wrap; }
+
+  .row-2, .row-3 { grid-template-columns: minmax(0, 1fr); }
+  .push-actions { flex-wrap: wrap; }
+
+  .llm-row, .key-head { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .key-actions { flex-wrap: wrap; }
+  .llm-pick { flex-wrap: wrap; }
+  .llm-pick select { max-width: 100%; }
+
+  .usage-row { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+
+  .person-head { display: none; }
+  .person-row { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .person-row .name { word-break: normal; overflow-wrap: anywhere; }
+  .row-action { justify-content: flex-start; }
+
+  /* The report reads edge to edge rather than inside desktop margins. */
+  .doc-body { padding: 22px 18px; }
+  .doc-body > h1 { font-size: 23px; }
+}
+
+/* Wide tables scroll inside their card instead of widening the page. The card
+   clips (overflow: hidden, for its rounded corners), so without this a table
+   wider than the screen simply lost its right-hand columns. */
+@media (max-width: 900px) {
+  .main table {
+    display: block; max-width: 100%;
+    overflow-x: auto; -webkit-overflow-scrolling: touch;
+  }
+}
+
+/* The collectors grid has eight fixed columns — about 820px. Narrower than
+   that it scrolls inside its card (see sources.tsx). */
+.src-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+@media (max-width: 1150px) {
+  .src-scroll > .src-row { min-width: 820px; }
+}
+
+/* Large monitors: the page may use more of the width. Prose inside it keeps
+   its own measure (see .doc-body), so only the grids and tables widen. */
+@media (min-width: 1600px) {
+  .page { max-width: 1440px; }
+}

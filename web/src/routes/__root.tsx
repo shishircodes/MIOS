@@ -246,6 +246,8 @@ function UserMenu() {
 }
 
 const NAV_KEY = 'mios.nav.collapsed'
+/** Kept in step with the `max-width: 900px` block in app.css. */
+const NARROW_QUERY = '(max-width: 900px)'
 
 function Shell({ children }: { children: ReactNode }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname })
@@ -270,15 +272,47 @@ function Shell({ children }: { children: ReactNode }) {
     }
   }, [])
 
-  const toggleNav = () =>
+  // Below the tablet breakpoint the sidebar is a slide-over menu rather than a
+  // column: there is no room for both it and the page. The collapsed-rail
+  // preference is a desktop setting and is left alone here.
+  const [narrow, setNarrow] = useState(false)
+  const [menuOpen, setMenuOpen] = useState(false)
+  useEffect(() => {
+    const mq = window.matchMedia(NARROW_QUERY)
+    const sync = () => {
+      setNarrow(mq.matches)
+      if (!mq.matches) setMenuOpen(false)
+    }
+    sync()
+    mq.addEventListener('change', sync)
+    return () => mq.removeEventListener('change', sync)
+  }, [])
+  // Choosing a page is the end of using the menu.
+  useEffect(() => setMenuOpen(false), [pathname])
+  useEffect(() => {
+    if (!menuOpen) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setMenuOpen(false) }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [menuOpen])
+
+  const toggleNav = () => {
+    if (narrow) {
+      setMenuOpen((o) => !o)
+      return
+    }
     setCollapsed((c) => {
       try {
         localStorage.setItem(NAV_KEY, c ? '0' : '1')
       } catch { /* not worth failing the toggle over */ }
       return !c
     })
+  }
 
-  const shellClass = ['app', collapsed && 'nav-collapsed', session?.authDisabled && 'has-auth-bar']
+  const railCollapsed = collapsed && !narrow
+  const navShown = narrow ? menuOpen : !collapsed
+  const shellClass = ['app', railCollapsed && 'nav-collapsed', menuOpen && 'nav-open',
+    session?.authDisabled && 'has-auth-bar']
     .filter(Boolean)
     .join(' ')
 
@@ -294,12 +328,12 @@ function Shell({ children }: { children: ReactNode }) {
         <button
           className="nav-toggle"
           onClick={toggleNav}
-          aria-expanded={!collapsed}
+          aria-expanded={navShown}
           aria-controls="sidebar-nav"
-          aria-label={collapsed ? 'Expand navigation' : 'Collapse navigation'}
-          title={collapsed ? 'Expand navigation' : 'Collapse navigation'}
+          aria-label={narrow ? (menuOpen ? 'Close menu' : 'Open menu') : collapsed ? 'Expand navigation' : 'Collapse navigation'}
+          title={narrow ? (menuOpen ? 'Close menu' : 'Open menu') : collapsed ? 'Expand navigation' : 'Collapse navigation'}
         >
-          {Icons.panel}
+          {narrow ? Icons.menu : Icons.panel}
         </button>
         <div className="brand">
           {/* Wordmark only until a logo is chosen — see SignIn.tsx. */}
@@ -337,8 +371,8 @@ function Shell({ children }: { children: ReactNode }) {
                 // Collapsed there is no visible text, so the icon needs an
                 // accessible name of its own; expanded, the label supplies it
                 // and a duplicate would be read twice.
-                aria-label={collapsed ? it.label : undefined}
-                title={collapsed ? it.label : undefined}
+                aria-label={railCollapsed ? it.label : undefined}
+                title={railCollapsed ? it.label : undefined}
               >
                 <span className="ico" aria-hidden="true">{Icons[it.icon]}</span>
                 <span className="label">{it.label}</span>
@@ -362,6 +396,9 @@ function Shell({ children }: { children: ReactNode }) {
           </div>
         </div>
       </nav>
+
+      {/* Tapping the page beside the open menu closes it. */}
+      {menuOpen && <div className="nav-scrim" onClick={() => setMenuOpen(false)} aria-hidden="true" />}
 
       <div className="main">{children}</div>
       </div>

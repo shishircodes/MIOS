@@ -203,6 +203,9 @@ function SourcesScreen() {
         title="Collectors"
         tools={<span>{data.enabledCount} OF {live.length} ON FOR NEXT SCRAPE</span>}
       >
+        {/* Eight columns do not fit a tablet or phone; they scroll sideways
+            inside the card rather than the card clipping the last ones. */}
+        <div className="src-scroll">
         <div className="src-row src-head">
           <div>Source</div>
           <div>Type / market</div>
@@ -222,6 +225,7 @@ function SourcesScreen() {
             onToggle={(name, enabled) => toggle.mutate({ name, enabled })}
           />
         ))}
+        </div>
         {/* Attached to the table it explains, rather than a card of its own.
             A separate "How to read this" panel holding one disclosure was two
             headings deep for a paragraph nobody needs twice. */}
