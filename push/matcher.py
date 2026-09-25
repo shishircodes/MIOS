@@ -60,6 +60,7 @@ import re
 
 from rapidfuzz import fuzz
 
+from agents.prospects import RELEVANT_SECTORS, is_agency
 from push import taxonomy
 from push.rarity import AVERAGE_HEADROOM, RARE_AT, Rarity
 from push.rarity import build as build_rarity
@@ -153,6 +154,94 @@ MOMENTUM_SATURATION = 1.0
 #: percentage. See `_momentum` — the figure is arithmetically right and would
 #: not survive a client asking where it came from.
 MOMENTUM_MIN_BASELINE_TO_QUOTE = 1.0
+
+#: The most a company can score when none of its adverts are for the
+#: candidate's discipline and none ask for their skills. Relationship, sector,
+#: region and recency can otherwise carry such a company to the mid-fifties —
+#: a good account, but not a place this candidate can be put forward.
+NO_DEMAND_CAP = 40
+
+#: How close a word in an advert title must be to the candidate's trade word
+#: ("planner", "electrician") to count as the same trade. High enough to accept
+#: plurals and small spelling variants, low enough to refuse "electrical".
+HEAD_WORD_SIMILARITY = 90
+
+#: Legal-form words that make one employer look like two ("Downer" and "Downer
+#: Group", "BHP" and "BHP Group"). Trailing only, so "Group Five" stays intact.
+LEGAL_SUFFIXES = frozenset({
+    "pty", "ltd", "limited", "inc", "incorporated", "plc", "corp", "corporation",
+    "co", "company", "group", "holdings", "llc",
+})
+
+
+def is_advert(signal: dict) -> bool:
+    """Whether a signal is a job advert rather than news or a tender.
+
+    Rows without a source type are treated as adverts: every signal predating
+    the column was one, and so is every row a test builds by hand.
+    """
+    return (signal.get("source_type") or "job_board") == "job_board"
+
+
+def company_key(name: str | None) -> str:
+    """The name one employer goes by, however it was written in an advert."""
+    words = _WORD.findall((name or "").casefold())
+    while len(words) > 1 and words[-1] in LEGAL_SUFFIXES:
+        words.pop()
+    return " ".join(words)
+
+
+def exclusion_reason(signal: dict) -> str | None:
+    """Why a signal names no company a candidate could be put forward to.
+
+    * An unnamed employer cannot be approached.
+    * A tender names the government buyer, not an employer that is hiring.
+    * A recruitment agency is a competitor, not a client.
+    * A company outside Easy Skill's sectors is not a client either — the same
+      rule the digest, dashboard and quarterly report apply.
+    """
+    name = (signal.get("company_name") or "").strip()
+    if not name or name.casefold() == "unknown":
+        return "unnamed"
+    if signal.get("source_type") == "tender":
+        return "tender"
+    if is_agency(name):
+        return "agency"
+    sector = signal.get("sector")
+    if sector and sector not in RELEVANT_SECTORS:
+        return "sector"
+    return None
+
+
+def exclusions(signals: list[dict]) -> dict[str, int]:
+    """How many signals each exclusion rule removed, for the payload."""
+    counts: dict[str, int] = defaultdict(int)
+    for s in signals:
+        reason = exclusion_reason(s)
+        if reason:
+            counts[reason] += 1
+    return dict(counts)
+
+
+def market_as_of(signals: list[dict]) -> datetime | None:
+    """The newest capture in the market: the moment the data describes.
+
+    Momentum and recency are measured from here rather than from the clock. A
+    weekly scrape read on a Thursday is the same week it was on the Monday; with
+    the clock as the reference, every company's momentum fell to nothing once a
+    week passed without a run, and every recency score drifted by the day.
+    """
+    stamps = [d for d in (_parse_stamp(s.get("captured_at")) for s in signals) if d]
+    return max(stamps) if stamps else None
+
+
+def market_rarity(signals: list[dict]) -> Rarity:
+    """Skill rarity measured over the market's job adverts only.
+
+    News articles rarely name a skill, so counting them made every skill look
+    rarer than it is in the adverts a candidate is actually compared with.
+    """
+    return build_rarity([s for s in signals if is_advert(s) and not exclusion_reason(s)])
 
 
 #: What each contributor is called, and what it actually asks. Kept here rather
@@ -260,6 +349,12 @@ class MatchResult:
     contributions: list[Contribution] = field(default_factory=list)
     #: Which of the candidate's skills were found, and how rare each is here.
     skill_detail: list[dict[str, Any]] = field(default_factory=list)
+    #: False when nothing they advertise matches the candidate's discipline or
+    #: skills. Such companies rank below every one that does, and are held at
+    #: NO_DEMAND_CAP.
+    demand: bool = True
+    #: The score before that cap, for ordering companies held at it.
+    uncapped: int = 0
 
     @property
     def relationship(self) -> str:
@@ -291,6 +386,10 @@ class MatchResult:
             "notAssessed": self.not_assessed,
             "contributions": [c.to_dict() for c in self.contributions],
             "skillDetail": self.skill_detail,
+            "demand": self.demand,
+            #: Present only when the cap applied, so the drawer can say what the
+            #: score would have been.
+            "uncapped": self.uncapped if self.uncapped != self.score else None,
         }
 
 
@@ -340,8 +439,19 @@ def _discipline(title: str | None) -> str:
     """
     if not title:
         return ""
-    words = [w for w in _WORD.findall(str(title).lower()) if w not in _LEVEL_WORDS]
+    words = [_singular(w) for w in _WORD.findall(str(title).lower()) if w not in _LEVEL_WORDS]
     return " ".join(words)
+
+
+def _singular(word: str) -> str:
+    """"planners" -> "planner", so an advert for several counts as one trade.
+
+    Deliberately crude — applied to both sides of every comparison, it only has
+    to be consistent, not correct English. "Process" and "gas" are left alone.
+    """
+    if len(word) > 4 and word.endswith("s") and not word.endswith("ss"):
+        return word[:-1]
+    return word
 
 
 def _role_head(signal: dict) -> str:
@@ -350,11 +460,33 @@ def _role_head(signal: dict) -> str:
     return content.split("|", 1)[0].strip() or content[:80]
 
 
+def _names_trade(trade: str, advert_discipline: str) -> bool:
+    """Whether an advert title names the candidate's trade word.
+
+    `token_set_ratio` alone scores any title sharing one word with the
+    candidate's highly — "Maintenance Planner" against "Maintenance
+    Coordinator" came out at 73, a match. The shared word there is the domain;
+    the trade is the last word, and a coordinator is not a planner.
+    """
+    return any(fuzz.ratio(trade, word) >= HEAD_WORD_SIMILARITY
+               for word in advert_discipline.split())
+
+
+def _title_similarity(wanted: str, advert_title: str) -> int:
+    """How closely an advert title matches the candidate's discipline, 0–100."""
+    advert = _discipline(advert_title)
+    trade = wanted.split()[-1]
+    if not _names_trade(trade, advert):
+        return 0
+    return round(fuzz.token_set_ratio(wanted, advert))
+
+
 def _role_demand(title: str | None, signals: list[dict]) -> tuple[int | None, str | None]:
     """How strongly this company is hiring for the candidate's discipline.
 
-    `None` when the profile carries no job title: that is a gap in what we know
-    about the candidate, not a company that fails to match.
+    `signals` are the company's job adverts. `None` when the profile carries no
+    job title: that is a gap in what we know about the candidate, not a company
+    that fails to match.
     """
     if not title:
         return None, None
@@ -366,13 +498,16 @@ def _role_demand(title: str | None, signals: list[dict]) -> tuple[int | None, st
         return None, None
 
     heads = [_role_head(s) for s in signals]
-    scored = [(fuzz.token_set_ratio(wanted, _discipline(h)), h) for h in heads if h]
+    scored = [(_title_similarity(wanted, h), h) for h in heads if h]
     if not scored:
-        return None, None
+        # Assessed, and the answer is no: the company is in the news, but has
+        # not advertised anything in the window.
+        return 0, "No job adverts from them in this window — news or project activity only"
 
     best, best_text = max(scored, key=lambda p: p[0])
     if best < ROLE_SIMILARITY_FLOOR:
-        return 0, f"Nothing close to “{title}” — nearest advert is “{best_text[:60]}”"
+        n = len(scored)
+        return 0, f"No “{title.strip()}” role among their {n} advert{'s' if n != 1 else ''}"
 
     # Rescale: the floor earns nothing, a perfect title match earns full marks.
     scaled = round(W_ROLE * (best - ROLE_SIMILARITY_FLOOR) / (100 - ROLE_SIMILARITY_FLOOR))
@@ -397,11 +532,13 @@ def _sector_fit(sector: str | None, signals: list[dict]) -> tuple[int | None, st
     return round(W_SECTOR * share), f"{hits} of {len(sectors)} signals in {pretty}"
 
 
-def _hiring_volume(signals: list[dict]) -> tuple[int, str]:
-    n = len(signals)
+def _hiring_volume(adverts: list[dict]) -> tuple[int, str]:
+    """How many job adverts they have out. News and tenders are not hiring."""
+    n = len(adverts)
+    if not n:
+        return 0, "No job adverts in the window"
     scaled = round(W_VOLUME * min(n, VOLUME_SATURATION) / VOLUME_SATURATION)
-    plural = "signals" if n != 1 else "signal"
-    return scaled, f"{n} hiring {plural} detected in the reporting window"
+    return scaled, f"{n} job advert{'s' if n != 1 else ''} in the window"
 
 
 def _relationship(tier: str | None) -> tuple[int, str]:
@@ -418,13 +555,19 @@ def _relationship(tier: str | None) -> tuple[int, str]:
 def _region_fit(region: str | None, signals: list[dict]) -> tuple[int | None, str | None]:
     if not region:
         return None, None
-    regions = [s.get("geography") for s in signals if s.get("geography")]
+    # The effective region, not the board's: a PNG role advertised on an
+    # Australian board is PNG work, the same rule the digest applies.
+    regions = [_region_of(s) for s in signals if _region_of(s)]
     if not regions:
         return None, None
     hits = sum(1 for r in regions if r == region)
     if not hits:
         return 0, f"No {region} activity — candidate would need to relocate"
     return round(W_REGION * hits / len(regions)), f"{hits} of {len(regions)} signals in {region}"
+
+
+def _region_of(signal: dict) -> str | None:
+    return signal.get("region") or signal.get("geography")
 
 
 def _recency(signals: list[dict], now: datetime) -> tuple[int | None, str | None]:
@@ -708,13 +851,17 @@ def match_profile(
     limit: int = 10,
     now: datetime | None = None,
     rarity_model: Rarity | None = None,
+    only_company: str | None = None,
 ) -> list[MatchResult]:
     """Rank companies for one candidate.
 
     `profile` uses the API's camelCase keys; `signals` are classified rows from
     Mode Monitor. Pure: no database, no network, so it is fully testable.
+
+    `only_company` scores just that employer — for "who fits BHP?" — against
+    the same market, so its score is the one the full ranking would give.
     """
-    now = now or datetime.now(timezone.utc)
+    now = now or market_as_of(signals) or datetime.now(timezone.utc)
 
     title = profile.get("currentTitle") or profile.get("current_title")
     sector = profile.get("sector")
@@ -724,30 +871,43 @@ def match_profile(
     if years is None:
         years = profile.get("years_experience")
 
+    # One employer however its name was written, and only employers a
+    # candidate could be put forward to — see `exclusion_reason`.
     by_company: dict[str, list[dict]] = defaultdict(list)
     for s in signals:
-        name = (s.get("company_name") or "").strip()
-        # "Unknown" is what the classifier emits when it could not identify the
-        # employer; those rows cannot be approached, so they are not candidates.
-        if name and name.lower() != "unknown":
-            by_company[name].append(s)
+        if exclusion_reason(s) is None:
+            by_company[company_key(s["company_name"])].append(s)
+    if only_company is not None:
+        wanted_key = company_key(only_company)
+        by_company = {k: v for k, v in by_company.items() if k == wanted_key}
 
-    # Rarity is built from every signal in the run, not from one company's —
+    # Rarity is built from the whole market, not from one company's adverts —
     # "how unusual is this skill" is a question about the market, and computing
     # it per company would make a term rare at a firm that mentioned it once.
-    rarity = rarity_model if rarity_model is not None else build_rarity(signals)
+    rarity = rarity_model if rarity_model is not None else market_rarity(signals)
 
     results: list[MatchResult] = []
-    for company, rows in by_company.items():
-        role_pts, role_ev = _role_demand(title, rows)
-        skills_pts, skills_ev, skill_detail = _skills_overlap(skills, rows, rarity)
+    for rows in by_company.values():
+        # Shown under the name it is most often written as.
+        names = [r["company_name"].strip() for r in rows]
+        company = min(set(names), key=lambda n: (-names.count(n), len(n), n))
+
+        # What the company is hiring for is read from its job adverts. News and
+        # project announcements still count — for what kind of moment this is,
+        # the sector, the region and how fresh it all is — but a headline such
+        # as "Newmont appoints chief executive" is not a vacancy, and read as
+        # one it made a role match, a seniority level and a hiring count.
+        adverts = [r for r in rows if is_advert(r)]
+
+        role_pts, role_ev = _role_demand(title, adverts)
+        skills_pts, skills_ev, skill_detail = _skills_overlap(skills, adverts, rarity)
         quality_pts, quality_ev = _signal_quality(rows)
         sector_pts, sector_ev = _sector_fit(sector, rows)
-        momentum_pts, momentum_ev = _momentum(rows, now)
-        volume_pts, volume_ev = _hiring_volume(rows)
+        momentum_pts, momentum_ev = _momentum(adverts, now)
+        volume_pts, volume_ev = _hiring_volume(adverts)
         tier = next((r.get("watchlist_tier") for r in rows if r.get("watchlist_tier")), None)
         rel_pts, rel_ev = _relationship(tier)
-        seniority_pts, seniority_ev = _seniority_fit(years, rows)
+        seniority_pts, seniority_ev = _seniority_fit(years, adverts)
         region_pts, region_ev = _region_fit(region, rows)
         recency_pts, recency_ev = _recency(rows, now)
 
@@ -775,17 +935,30 @@ def match_profile(
         assessable = sum(weight for pts, weight in parts.values() if pts is not None)
         total = round(earned / assessable * 100) if assessable else 0
 
+        # Not hiring for this person. The other contributors describe a good
+        # account, and without a cap they carried such companies to the
+        # mid-fifties and the top of the list — seven of the top eight for a
+        # maintenance planner had no planner role at all.
+        no_demand = role_pts == 0 and not skills_pts
+        uncapped = total
+        capped = no_demand and total > NO_DEMAND_CAP
+        if capped:
+            total = NO_DEMAND_CAP
+
         # Ordered by how much a consultant would lead with it on a call, which
         # is not the same as by weight: momentum and signal quality answer "why
         # now", and that is the harder half of an opening line.
         evidence = [e for e in (role_ev, momentum_ev, quality_ev, skills_ev, volume_ev,
                                 sector_ev, seniority_ev, rel_ev, region_ev, recency_ev) if e]
+        if capped:
+            evidence.insert(0, f"Held at {NO_DEMAND_CAP}: nothing they advertise matches "
+                               f"this candidate's discipline or skills")
 
         confidence, confidence_note = _confidence(rows, now, assessable)
 
         dominant_region = max(
-            {r.get("geography") for r in rows if r.get("geography")} or {None},
-            key=lambda g: sum(1 for r in rows if r.get("geography") == g),
+            {_region_of(r) for r in rows if _region_of(r)} or {None},
+            key=lambda g: sum(1 for r in rows if _region_of(r) == g),
         )
         dominant_sector = max(
             {r.get("sector") for r in rows if r.get("sector")} or {None},
@@ -801,7 +974,7 @@ def match_profile(
             "signalQuality": "signals carry no category",
             "sector": "no sector on the profile, or none stated in their adverts",
             "momentum": "no earlier window to measure a trend against",
-            "volume": "nothing to count",
+            "volume": "no job adverts to count",
             "relationship": "no watchlist tier recorded",
             "seniority": "the adverts do not state a level",
             "region": "no region on the profile, or none stated in their adverts",
@@ -829,6 +1002,8 @@ def match_profile(
         results.append(MatchResult(
             company=company,
             score=min(100, total),
+            demand=not no_demand,
+            uncapped=min(100, uncapped),
             contributions=contributions,
             skill_detail=skill_detail,
             region=dominant_region,
@@ -848,8 +1023,10 @@ def match_profile(
             not_assessed=sorted(k for k, (pts, _) in parts.items() if pts is None),
         ))
 
-    # Company name as the final key keeps the order stable when scores tie.
-    results.sort(key=lambda m: (-m.score, m.company))
+    # Companies hiring for this candidate first, whatever the others score;
+    # then by score, with the uncapped figure ordering those held at the cap,
+    # and the name keeping ties stable.
+    results.sort(key=lambda m: (not m.demand, -m.score, -m.uncapped, m.company))
     log.info("match_profile: scored %d companies, returning %d",
              len(results), min(limit, len(results)))
     return results[:limit]

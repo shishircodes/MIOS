@@ -27,8 +27,8 @@ from agents.signal_analyst import classify_pending
 from config.settings import configure_logging, settings
 from api.digest_service import build_digest_payload
 from delivery.digest import build_digest
+from delivery import slack_config
 from delivery.pulse import generate_pulse, load_pulse, save_pulse
-from delivery.slack import post_digest
 from loader import run_log
 from loader.db import connect, describe, resolve_target
 from loader.digest_archive import save_digest
@@ -276,11 +276,11 @@ def run_live_cycle(
 
     slack_ok = False
     if do_slack:
-        if not settings.slack_webhook_url or settings.slack_webhook_url.endswith("..."):
-            log.warning("live: SLACK_WEBHOOK_URL not configured — skipping Slack delivery")
-        else:
-            slack_ok = post_digest(settings.slack_webhook_url, digest_text)
-            log.info("live: Slack delivery: %s", "ok" if slack_ok else "failed")
+        # The webhook set under Admin › Integrations, else SLACK_WEBHOOK_URL —
+        # and only if an administrator has not switched the post off.
+        slack_ok = slack_config.deliver_digest(
+            digest_text, target=db_path, env_value=settings.slack_webhook_url)
+        log.info("live: Slack delivery: %s", "ok" if slack_ok else "not delivered")
     else:
         log.info("live: --no-slack; skipping Slack delivery")
 

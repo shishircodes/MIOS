@@ -619,6 +619,17 @@ input, textarea, select { font-family: inherit; }
 
 /* ---------- Match rows (Push) ---------- */
 .match-row { display: grid; grid-template-columns: 28px 1fr 200px; gap: 16px; padding: 14px 18px; border-bottom: 1px solid var(--line); align-items: start; }
+/* Between the companies hiring for the candidate and those that are not. */
+/* Mode Push: editing a saved profile, and finding one. */
+.editing-note { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+.profile-search { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 12px 18px; border-bottom: 1px solid var(--line); }
+.profile-search input { flex: 1; min-width: 220px; max-width: 420px; }
+.profile-search .muted { font-size: 12.5px; }
+.match-divider {
+  padding: 10px 18px; background: var(--paper-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--ink-3);
+}
 .match-row:last-child { border-bottom: none; }
 .match-row .rank { font-family: var(--display); font-size: 22px; font-weight: 700; color: var(--moss); }
 .match-row .co-name { font-weight: 600; font-size: 15.5px; margin: 0 0 3px; }

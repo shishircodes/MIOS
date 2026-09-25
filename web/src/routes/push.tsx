@@ -1,10 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
-import { useEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 import { ScoringExplainer } from '~/components/ScoringExplainer'
 import { Icons, RegionChip, Section } from '~/components/ui'
 import { useCountUpAll, useReveal } from '~/lib/motion'
-import { deleteProfile, fetchMatches, matchDraft, parseCV, profilesQueryOptions, recordOutcome, saveProfile, scoringModelQueryOptions } from '~/lib/api'
+import { deleteProfile, fetchMatches, fetchProfile, matchDraft, parseCV, profilesQueryOptions, recordOutcome, saveProfile, scoringModelQueryOptions, updateProfile } from '~/lib/api'
 import { UnauthenticatedError } from '~/lib/auth'
 import { useAuth } from '~/lib/auth-context'
 import type {
@@ -193,7 +193,20 @@ function PushScreen() {
   //: to, so the buttons are not offered rather than failing on use.
   const [matchedProfileId, setMatchedProfileId] = useState<string | null>(null)
 
-  const profiles = useQuery(profilesQueryOptions)
+  //: The saved profile the form is editing. Set when one is opened or first
+  //: saved; a new CV or Clear starts a new person. Saving while it is set
+  //: updates that record — it used to store the same person again.
+  const [editingId, setEditingId] = useState<string | null>(null)
+
+  const [profileSearch, setProfileSearch] = useState('')
+  const [searchTerm, setSearchTerm] = useState('')
+  useEffect(() => {
+    const id = setTimeout(() => setSearchTerm(profileSearch.trim()), 300)
+    return () => clearTimeout(id)
+  }, [profileSearch])
+  const profiles = useQuery(profilesQueryOptions(searchTerm))
+  const savedList = profiles.data?.profiles ?? []
+  const savedTotal = profiles.data?.total ?? 0
 
   // Matches arrive after a request, not on mount, so these key off the result
   // itself — a new ranking replays; re-rendering the form beside it does not.
@@ -201,7 +214,7 @@ function PushScreen() {
   const matchKey = matches ? `${matches.length}-${subject}` : 'none'
   useReveal(scope, '.match-row', { key: matchKey, delay: 0.05, stagger: 0.06, y: 12 })
   useCountUpAll(scope, '.match-row .score .big', matchKey, { delay: 0.15, stagger: 0.06 })
-  useReveal(scope, '.tbl tbody tr', { key: profiles.data?.length ?? 0, delay: 0.1, max: 10, y: 6 })
+  useReveal(scope, '.tbl tbody tr', { key: savedList.length, delay: 0.1, max: 10, y: 6 })
 
   function set<K extends keyof ProfileDraft>(key: K, value: ProfileDraft[K]) {
     setDraft((d) => ({ ...d, [key]: value }))
@@ -234,6 +247,8 @@ function PushScreen() {
       setParsed(res)
       setDraft({ ...EMPTY, ...res.draft })
       setOrigin({ source: 'cv_upload', filename: res.sourceFilename })
+      // A new CV is a new person, not an edit of whoever was open.
+      setEditingId(null)
       // The draft replaces whatever was on screen, so any ranking shown for the
       // previous person is now stale and misleading.
       setMatches(null)
@@ -262,14 +277,17 @@ function PushScreen() {
 
   const save = useMutation({
     mutationFn: async () => {
-      const stored = await saveProfile(draft, {
-        intakeSource: origin.source,
-        sourceFilename: origin.filename,
-      })
+      const stored = editingId
+        ? await updateProfile(editingId, draft)
+        : await saveProfile(draft, {
+          intakeSource: origin.source,
+          sourceFilename: origin.filename,
+        })
       return { stored, res: await fetchMatches(stored.id) }
     },
     onSuccess: ({ stored, res }) => {
       setError(null)
+      setEditingId(stored.id)
       void qc.invalidateQueries({ queryKey: ['push', 'profiles'] })
       applyMatches(res, stored.fullName || stored.id, stored.id)
     },
@@ -285,6 +303,7 @@ function PushScreen() {
       setParsed(null)
       setDraft({ ...EMPTY, ...p })
       setOrigin({ source: p.intakeSource, filename: p.sourceFilename })
+      setEditingId(p.id)
       applyMatches(res, p.fullName || p.id, p.id)
     },
     onError: (e: Error) => setError(e.message),
@@ -295,26 +314,28 @@ function PushScreen() {
   const navigate = Route.useNavigate()
   const arrived = useRef(false)
   useEffect(() => {
-    if (arrived.current || !wantedProfile || !profiles.data) return
+    if (arrived.current || !wantedProfile) return
     arrived.current = true
-    const p = profiles.data.find((x) => x.id === wantedProfile)
-    if (!p) {
-      setError('That candidate is no longer saved.')
-    } else {
-      openSaved.mutate(p, {
-        onSuccess: ({ res }) => {
-          const m = res.matches.find((x) => x.co.toLowerCase() === (wantedCompany ?? '').toLowerCase())
-          if (m) setOpenMatch(m)
-        },
+    fetchProfile(wantedProfile)
+      .then((p) => {
+        openSaved.mutate(p, {
+          onSuccess: ({ res }) => {
+            const m = res.matches.find((x) => x.co.toLowerCase() === (wantedCompany ?? '').toLowerCase())
+            if (m) setOpenMatch(m)
+          },
+        })
       })
-    }
+      .catch(() => setError('That candidate is no longer saved.'))
     // Drop the parameters so a reload or Back does not replay the jump.
     void navigate({ search: {}, replace: true })
-  }, [wantedProfile, wantedCompany, profiles.data, openSaved, navigate])
+  }, [wantedProfile, wantedCompany, openSaved, navigate])
 
   const remove = useMutation({
     mutationFn: deleteProfile,
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ['push', 'profiles'] }),
+    onSuccess: (_r, id) => {
+      if (id === editingId) setEditingId(null)
+      void qc.invalidateQueries({ queryKey: ['push', 'profiles'] })
+    },
     onError: (e: Error) => setError(e.message),
   })
 
@@ -440,10 +461,18 @@ function PushScreen() {
           </div>
         )}
 
-        {matches.map((m) => (
+        {matches.map((m, i) => (
+          <Fragment key={m.rank}>
+          {/* The ranking puts every company hiring for this candidate first,
+              so the scores restart below this line. Said, rather than left to
+              look like a sorting mistake. */}
+          {m.demand === false && (i === 0 || matches[i - 1]?.demand !== false) && (
+            <div className="match-divider" role="separator">
+              Not advertising for this candidate’s discipline or skills — shown for context
+            </div>
+          )}
           <div
             className="match-row clickable"
-            key={m.rank}
             role="button"
             tabIndex={0}
             aria-label={`${m.co}, scored ${m.score}. Open the full breakdown.`}
@@ -520,6 +549,7 @@ function PushScreen() {
               </div>
             </div>
           </div>
+          </Fragment>
         ))}
 
         <MatchDetail
@@ -546,7 +576,7 @@ function PushScreen() {
           <h1>Who in the market needs this person?</h1>
         </div>
         <div className="meta">
-          <div>{profiles.data?.length ?? 0} saved profile(s)</div>
+          <div>{savedTotal} saved profile{savedTotal === 1 ? '' : 's'}</div>
           <div style={{ marginTop: 4 }}>Matched against the last 30 days of signals</div>
           {/* In the header, not beside the results: "how does this decide who to
               contact?" is a question somebody asks before trusting it with a
@@ -587,6 +617,26 @@ function PushScreen() {
         }
       >
         <div style={{ padding: '16px 18px' }}>
+          {editingId && (
+            <div className="notice editing-note" role="status">
+              <span>
+                Editing the saved profile for <strong>{draft.fullName || 'this candidate'}</strong>.
+                Saving updates that record.
+              </span>
+              <button
+                className="btn sm ghost"
+                onClick={() => {
+                  setEditingId(null)
+                  setDraft(EMPTY)
+                  setParsed(null)
+                  setMatches(null)
+                  setOrigin({ source: 'manual_form', filename: null })
+                }}
+              >
+                Start a new profile
+              </button>
+            </div>
+          )}
           <div className="push-actions" style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 18 }}>
             <input
               ref={fileInput}
@@ -743,7 +793,7 @@ function PushScreen() {
               {Icons.push} {search.isPending ? 'Searching…' : 'Find matches'}
             </button>
             <button className="btn" disabled={busy || !named} onClick={() => save.mutate()}>
-              {save.isPending ? 'Saving…' : 'Save profile and match'}
+              {save.isPending ? 'Saving…' : editingId ? 'Update profile and match' : 'Save profile and match'}
             </button>
             <button
               className="btn sm"
@@ -753,6 +803,7 @@ function PushScreen() {
                 setMatches(null)
                 setParsed(null)
                 setError(null)
+                setEditingId(null)
                 setOrigin({ source: 'manual_form', filename: null })
               }}
             >
@@ -774,7 +825,23 @@ function PushScreen() {
       {/* ---------- Saved profiles ---------- */}
       <ScoringExplainer open={explainOpen} onClose={() => setExplainOpen(false)} />
 
-      <Section title="Saved profiles" tools={<span>{profiles.data?.length ?? 0} STORED</span>}>
+      <Section
+        title="Saved profiles"
+        tools={<span>{searchTerm ? `${savedTotal} MATCHING` : `${savedTotal} STORED`}</span>}
+      >
+        <div className="profile-search">
+          <input
+            type="search"
+            className="input"
+            value={profileSearch}
+            aria-label="Search saved profiles"
+            placeholder="Search by name, title, email or skill…"
+            onChange={(e) => setProfileSearch(e.target.value)}
+          />
+          {savedTotal > savedList.length && (
+            <span className="muted">Showing the {savedList.length} most recent — search to find others.</span>
+          )}
+        </div>
         <table className="tbl">
           <thead>
             <tr>
@@ -783,14 +850,17 @@ function PushScreen() {
             </tr>
           </thead>
           <tbody>
-            {profiles.data?.map((p) => (
+            {savedList.map((p) => (
               <tr key={p.id}>
                 <td><strong>{p.fullName}</strong></td>
                 <td className="muted">{p.currentTitle ?? '—'}</td>
                 <td className="muted">{p.sector ? SECTOR_LABEL[p.sector] ?? p.sector : '—'}</td>
                 <td>{p.region ? <RegionChip region={p.region} /> : '—'}</td>
                 <td className="muted">{p.intakeSource === 'cv_upload' ? 'CV' : 'Form'}</td>
-                <td className="muted">{p.createdAt.slice(0, 10)}</td>
+                <td className="muted">
+                  {p.createdAt.slice(0, 10)}
+                  {p.updatedAt && <div className="row-sub">edited {p.updatedAt.slice(0, 10)}</div>}
+                </td>
                 <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                   <button className="btn sm" disabled={busy} onClick={() => openSaved.mutate(p)}>
                     Match
@@ -798,7 +868,12 @@ function PushScreen() {
                   <button
                     className="btn sm"
                     disabled={remove.isPending}
-                    onClick={() => remove.mutate(p.id)}
+                    onClick={() => {
+                      // A real person's record, and there is no undo.
+                      if (window.confirm(`Delete ${p.fullName}'s profile? This cannot be undone.`)) {
+                        remove.mutate(p.id)
+                      }
+                    }}
                     title="Delete this profile"
                   >
                     Delete
@@ -806,7 +881,7 @@ function PushScreen() {
                 </td>
               </tr>
             ))}
-            {!profiles.isLoading && (profiles.data?.length ?? 0) === 0 && (
+            {!profiles.isLoading && savedList.length === 0 && (
               <tr>
                 <td colSpan={7} className="muted" style={{ textAlign: 'center', padding: 24 }}>
                   No profiles saved yet.

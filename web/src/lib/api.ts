@@ -20,6 +20,7 @@ import type {
   HubSpotStatus,
   CompanyCandidates,
   GoogleDocsStatus,
+  SlackStatus,
   ReportGoogleDoc,
   ReportSummary,
   SchedulePayload,
@@ -143,6 +144,39 @@ export async function syncHubSpot(dryRun: boolean): Promise<HubSpotStatus> {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ dryRun }),
   })
+}
+
+// ---------- Slack digest ----------
+
+export const slackStatusQueryOptions = queryOptions({
+  queryKey: ['admin', 'slack'],
+  queryFn: () => fetchJson<SlackStatus>('/api/admin/slack'),
+  retry: false,
+})
+
+/** Store the webhook, encrypted. The response never contains it. */
+export async function setSlackWebhook(url: string): Promise<SlackStatus> {
+  return postOrExplain<SlackStatus>('/api/admin/slack/webhook', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url }),
+  })
+}
+
+export async function clearSlackWebhook(): Promise<SlackStatus> {
+  return postOrExplain<SlackStatus>('/api/admin/slack/webhook', { method: 'DELETE' })
+}
+
+export async function setSlackEnabled(enabled: boolean): Promise<SlackStatus> {
+  return postOrExplain<SlackStatus>('/api/admin/slack/settings', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled }),
+  })
+}
+
+export async function sendSlackTest(): Promise<SlackStatus> {
+  return postOrExplain<SlackStatus>('/api/admin/slack/test', { method: 'POST' })
 }
 
 // ---------- Google Docs (Mode Publish export) ----------
@@ -292,16 +326,31 @@ export async function saveProfile(
   })
 }
 
-export async function fetchProfiles(): Promise<StoredProfile[]> {
-  const body = await fetchJson<{ profiles: StoredProfile[] }>('/api/push/profiles')
-  return body.profiles
+/** Save corrections over a stored profile rather than storing the person twice. */
+export async function updateProfile(profileId: string, draft: ProfileDraft): Promise<StoredProfile> {
+  return postOrExplain<StoredProfile>(`/api/push/profiles/${profileId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(draft),
+  })
 }
 
-export const profilesQueryOptions = queryOptions({
-  queryKey: ['push', 'profiles'],
-  queryFn: fetchProfiles,
-  retry: false,
-})
+export async function fetchProfile(profileId: string): Promise<StoredProfile> {
+  return fetchJson<StoredProfile>(`/api/push/profiles/${profileId}`)
+}
+
+/** Saved profiles matching `q` (name, title, email or skills). `total` counts
+ *  every match, not just the page returned. */
+export const profilesQueryOptions = (q = '') =>
+  queryOptions({
+    queryKey: ['push', 'profiles', q],
+    queryFn: () =>
+      fetchJson<{ profiles: StoredProfile[]; total: number }>(
+        `/api/push/profiles?limit=100${q ? `&q=${encodeURIComponent(q)}` : ''}`,
+      ),
+    placeholderData: (prev) => prev,
+    retry: false,
+  })
 
 export async function fetchMatches(profileId: string): Promise<MatchResponse> {
   return fetchJson<MatchResponse>(`/api/push/profiles/${profileId}/matches`)

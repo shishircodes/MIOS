@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { AdminOnly } from '~/components/AdminOnly'
 import { GoogleDocsPanel } from '~/components/GoogleDocsPanel'
 import { HubSpotPanel } from '~/components/HubSpotPanel'
+import { SlackPanel } from '~/components/SlackPanel'
 import { Loading } from '~/components/ui'
 import { hubspotStatusQueryOptions } from '~/lib/api'
 
@@ -32,11 +33,17 @@ function useGoogleDocsFlash() {
   return flash
 }
 
-/** Systems MIOS connects to besides the collectors: HubSpot supplies the
- *  watchlist, Google Docs receives the quarterly reports. */
+/** Systems MIOS connects to besides the collectors, in the order of the
+ *  sidebar: Slack receives the weekly digest, HubSpot supplies the watchlist,
+ *  Google Docs receives the quarterly reports. */
 function IntegrationsScreen() {
   const { isPending } = useQuery(hubspotStatusQueryOptions)
   const flash = useGoogleDocsFlash()
+  // Back from Google's consent screen: the outcome is shown in the Google Docs
+  // panel, which is last on the page, so bring it into view.
+  useEffect(() => {
+    if (flash) document.getElementById('google-docs')?.scrollIntoView({ block: 'start' })
+  }, [flash])
 
   return (
     <div className="page">
@@ -46,12 +53,16 @@ function IntegrationsScreen() {
           <h1>Connected systems</h1>
         </div>
         <div className="meta">
+          <div>The digest is posted when a run finishes — see <Link to="/schedule">Schedule &amp; runs</Link></div>
           <div>The synced companies appear under <Link to="/watchlist">Watchlist</Link></div>
           <div>Reports are sent from <Link to="/publish">Quarterly reports</Link></div>
         </div>
       </div>
-      <GoogleDocsPanel flash={flash} />
+      <SlackPanel />
       {isPending ? <Loading lines={['Checking the HubSpot connection']} /> : <HubSpotPanel />}
+      <div id="google-docs">
+        <GoogleDocsPanel flash={flash} />
+      </div>
     </div>
   )
 }

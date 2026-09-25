@@ -34,7 +34,7 @@ def sig(company, *, title="Maintenance Planner", sector="mining", geo="AU",
 def test_ranks_the_strongest_company_first():
     signals = [
         *[sig("BHP", tier="A") for _ in range(5)],
-        sig("Tiny Contractor", title="Office Administrator", sector="other"),
+        sig("Tiny Contractor", title="Office Administrator", sector="construction"),
     ]
     results = match_profile(PLANNER, signals, now=NOW)
     assert results[0].company == "BHP"

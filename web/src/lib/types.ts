@@ -73,6 +73,9 @@ export interface CompanyCandidates {
   profilesConsidered: number
   companySignals: number
   windowDays: number
+  /** Why the company is never matched: a competitor agency, a tender buyer,
+   *  or outside the sectors. Null for a company that can be matched. */
+  excludedBecause: 'agency' | 'tender' | 'sector' | 'unnamed' | null
 }
 
 export interface VelocityRow {
@@ -187,6 +190,21 @@ export interface HubSpotProperty {
   options: { value: string; label: string }[]
 }
 
+// ---------- Slack digest (api/slack_api.py) ----------
+
+export interface SlackStatus {
+  webhook: { source: 'panel' | 'environment' | 'none'; hint: string | null; shadowsEnvironment: boolean; unreadable: boolean }
+  canStoreKey: boolean
+  keyEnv: string
+  /** Whether runs post the digest. The webhook is kept either way. */
+  enabled: boolean
+  changedBy: string | null
+  changedAt: string | null
+  lastDelivery: { at: string; kind: 'digest' | 'test'; ok: boolean; detail: string; by: string | null } | null
+  note?: string
+  testOk?: boolean
+}
+
 // ---------- Google Docs (api/google_docs_api.py) ----------
 
 export interface GoogleDocsStatus {
@@ -296,6 +314,8 @@ export interface StoredProfile extends ProfileDraft {
   intakeSource: 'cv_upload' | 'manual_form'
   sourceFilename: string | null
   createdAt: string
+  /** When the profile was last corrected; null if never edited. */
+  updatedAt: string | null
 }
 
 export interface ParsedCV {
@@ -344,6 +364,11 @@ export interface Match {
   skillDetail?: SkillDetail[]
   /** What the team already decided about this company for this candidate. */
   outcome?: { outcome: string; by?: string | null; at?: string | null; note?: string | null }
+  /** False when nothing they advertise matches the candidate's discipline or
+   *  skills. Those rank after every company that does, held at a cap. */
+  demand?: boolean
+  /** The score before that cap; null when the cap did not apply. */
+  uncapped?: number | null
 }
 
 /** One contributor's share of a score, with what it asks and what it found. */
@@ -729,6 +754,8 @@ export interface ScoringModel {
   contributors: { key: string; weight: number; label: string; what: string }[]
   /** Why a score can be out of fewer than the full set of points. */
   normalisation: string
+  /** Who is never ranked, and what caps a score. */
+  rules?: string[]
   confidence: { level: string; what: string }[]
   llm: {
     provider: string
