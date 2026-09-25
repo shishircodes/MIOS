@@ -160,7 +160,21 @@ def test_search_finds_by_name_title_email_or_skill(db):
     assert count_profiles(q="planner", target=db) == 1
 
 
-def test_the_most_recently_edited_is_listed_first(db):
+def test_the_most_recently_edited_is_listed_first(db, monkeypatch):
+    # A clock that moves a minute per write. The real one is read to the
+    # second, so without this all three writes usually share a timestamp and
+    # the order came down to the random profile ids — flaky in CI.
+    ticks = iter(f"2026-09-26T10:{m:02d}:00+00:00" for m in range(60))
+    monkeypatch.setattr("push.store._now", lambda: next(ticks))
+    first = create_profile({"fullName": "First"}, target=db)
+    create_profile({"fullName": "Second"}, target=db)
+    assert list_profiles(target=db)[0]["fullName"] == "Second"
+    update_profile(first["id"], {"fullName": "First"}, target=db)
+    assert list_profiles(target=db)[0]["fullName"] == "First"
+
+
+def test_an_edit_in_the_same_second_still_counts_as_most_recent(db, monkeypatch):
+    monkeypatch.setattr("push.store._now", lambda: "2026-09-26T10:00:00+00:00")
     first = create_profile({"fullName": "First"}, target=db)
     create_profile({"fullName": "Second"}, target=db)
     update_profile(first["id"], {"fullName": "First"}, target=db)

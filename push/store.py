@@ -330,7 +330,11 @@ def list_profiles(limit: int = 50, target: str | Path | None = None, *,
     with connect(target) as conn:
         rows = conn.execute(
             _SELECT + where
-            + "ORDER BY coalesce(updated_at, created_at) DESC, profile_id DESC LIMIT ? OFFSET ?",
+            # Timestamps are to the second, so an edit made in the same second
+            # as another profile's creation ties with it; the edited one is
+            # the more recently touched, and the random id should not decide.
+            + "ORDER BY coalesce(updated_at, created_at) DESC, (updated_at IS NOT NULL) DESC, "
+              "created_at DESC, profile_id DESC LIMIT ? OFFSET ?",
             (*args, limit, offset),
         ).fetchall()
     return [to_api(r) for r in rows]
