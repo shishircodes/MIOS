@@ -99,6 +99,13 @@ function SignalDetail({ s }: { s: Signal }) {
   )
 }
 
+const EXCLUDED: Record<string, string> = {
+  agency: 'A recruitment agency — a competitor, not a client — so candidates are not matched to it.',
+  tender: 'This is a tender’s buyer, not an employer that is hiring, so candidates are not matched to it.',
+  sector: 'Outside mining, oil and gas, construction, defence and energy transition, so candidates are not matched to it.',
+  unnamed: 'The employer could not be identified, so there is nobody to match candidates to.',
+}
+
 /** Saved candidates ranked for this company, each opening their full match. */
 function Candidates({ company }: { company: string }) {
   const { data, isPending, error } = useQuery(companyCandidatesQueryOptions(company))
@@ -113,7 +120,10 @@ function Candidates({ company }: { company: string }) {
           No candidates saved yet. Add one under <Link to="/push">Candidate matching</Link>.
         </p>
       )}
-      {data && data.profilesConsidered > 0 && data.companySignals === 0 && (
+      {data && data.excludedBecause && (
+        <p className="muted drawer-small">{EXCLUDED[data.excludedBecause] ?? 'This company is not matched.'}</p>
+      )}
+      {data && !data.excludedBecause && data.profilesConsidered > 0 && data.companySignals === 0 && (
         <p className="muted drawer-small">
           {company} has no signals in the last {data.windowDays} days, which is the window
           candidate matching scores on — so there is nothing current to match against.

@@ -24,21 +24,30 @@ from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, Upload
 
 from api.auth import require_user
 from push.cv_extract import MAX_BYTES, CVExtractionError, extract_text
-from push.matcher import match_profile
+from push.matcher import (
+    company_key,
+    exclusion_reason,
+    exclusions,
+    market_as_of,
+    market_rarity,
+    match_profile,
+)
 from push.outcomes import OUTCOMES, UnknownOutcome, for_profile, record, summary
 from push.rarity import MIN_CORPUS as RARITY_MIN_CORPUS
-from push.rarity import build as build_rarity
 from loader.feature_settings import PUSH_RATIONALE, is_enabled
 from push.rationale import ANNOTATE_TOP_N, annotate
 from push.profile_parser import parse_profile
 from push.store import (
     DEFAULT_MATCH_WINDOW_DAYS,
+    ProfileConflict,
     ProfileError,
+    count_profiles,
     create_profile,
     delete_profile,
     get_profile,
     list_profiles,
     signals_for_matching,
+    update_profile,
 )
 
 log = logging.getLogger(__name__)
@@ -53,7 +62,7 @@ def _matches_for(profile: dict[str, Any], *, days: int, limit: int,
     signals = signals_for_matching(days=days)
     # Built once here rather than inside the matcher, so the payload can report
     # whether it applied — the same object that scored is the one described.
-    rarity = build_rarity(signals)
+    rarity = market_rarity(signals)
     results = match_profile(profile, signals, limit=limit, rarity_model=rarity)
     matches = [m.to_dict(rank=i + 1) for i, m in enumerate(results)]
 
@@ -94,6 +103,9 @@ def _matches_for(profile: dict[str, Any], *, days: int, limit: int,
         #: means something different when it came from 12 signals than from 900,
         #: and the UI says which.
         "signalsConsidered": len(signals),
+        #: Signals naming no company a candidate can be put forward to —
+        #: recruitment agencies, tender buyers, companies outside the sectors.
+        "excluded": exclusions(signals),
         #: Whether rarity weighting was in play. A score computed with it and
         #: one computed without are different numbers, and a reader comparing
         #: across weeks should be told which they are looking at.
@@ -140,9 +152,17 @@ async def parse_cv(
 @router.get("/profiles")
 def profiles(
     limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    q: str = Query("", max_length=100),
     user: dict[str, Any] = Depends(require_user),
 ) -> dict[str, Any]:
-    return {"profiles": list_profiles(limit=limit)}
+    """Saved profiles, most recently touched first, optionally searched.
+
+    `total` is the count matching the search, not the page — the list used to
+    stop at fifty with nothing to say there were more.
+    """
+    return {"profiles": list_profiles(limit=limit, offset=offset, q=q),
+            "total": count_profiles(q=q)}
 
 
 @router.post("/profiles", status_code=201)
@@ -162,9 +182,32 @@ def save_profile(
             intake_source=intake,
             source_filename=payload.get("sourceFilename"),
         )
+    except ProfileConflict as exc:
+        # 409 with the person already on file named, so the screen can offer
+        # to open that record rather than just refusing.
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ProfileError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     log.info("push: %s saved profile %s", user["email"], profile["id"])
+    return profile
+
+
+@router.put("/profiles/{profile_id}")
+def edit_profile(
+    profile_id: str,
+    payload: dict[str, Any] = Body(...),
+    user: dict[str, Any] = Depends(require_user),
+) -> dict[str, Any]:
+    """Save corrections to a stored profile, instead of storing the person twice."""
+    try:
+        profile = update_profile(profile_id, payload)
+    except ProfileConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ProfileError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if profile is None:
+        raise HTTPException(status_code=404, detail="No such profile.")
+    log.info("push: %s updated profile %s", user["email"], profile_id)
     return profile
 
 
@@ -239,13 +282,25 @@ def company_candidates(
     """
     name = company.strip()
     signals = signals_for_matching(days=days)
-    rows = [s for s in signals if (s.get("company_name") or "").strip().lower() == name.lower()]
-    profiles = list_profiles(limit=500)
+    key = company_key(name)
+    named = [s for s in signals if company_key(s.get("company_name")) == key]
+    rows = [s for s in named if exclusion_reason(s) is None]
+    # A company the matcher never ranks — an agency, a tender buyer, one outside
+    # the sectors — gets that reason rather than an empty list that reads as
+    # "nobody fits".
+    reasons = [exclusion_reason(s) for s in named if exclusion_reason(s)]
+    excluded_because = max(set(reasons), key=reasons.count) if named and not rows else None
+    profiles = list_profiles(limit=1000)
     ranked: list[dict[str, Any]] = []
     if rows:
-        rarity = build_rarity(signals)
+        # The whole market, narrowed to one employer inside the matcher: rarity
+        # and the "as of" moment then come from the same signals the full
+        # ranking uses, so the two scores agree.
+        rarity = market_rarity(signals)
+        as_of = market_as_of(signals)
         for p in profiles:
-            result = match_profile(p, rows, limit=1, rarity_model=rarity)
+            result = match_profile(p, signals, limit=1, rarity_model=rarity, now=as_of,
+                                   only_company=name)
             if result:
                 ranked.append({
                     "id": p["id"],
@@ -266,6 +321,8 @@ def company_candidates(
         #: an older signal, typically — which is a different answer from "no
         #: candidate fits", and the drawer says which.
         "companySignals": len(rows),
+        #: "agency", "tender" or "sector" when the company is never matched.
+        "excludedBecause": excluded_because,
         "windowDays": days,
     }
 
@@ -300,7 +357,9 @@ def scoring_model(user: dict[str, Any] = Depends(require_user)) -> dict[str, Any
             {"key": "role", "weight": matcher.W_ROLE, "label": "Role demand",
              "what": "How closely the roles they are advertising match the candidate's job "
                      "title. Compared loosely, so “Snr Maint. Planner” and “Senior "
-                     "Maintenance Planner” count as the same discipline."},
+                     "Maintenance Planner” count as the same discipline — but the advert "
+                     "must name the candidate's trade, so a maintenance coordinator is not "
+                     "a maintenance planner."},
             {"key": "skills", "weight": matcher.W_SKILLS, "label": "Skills overlap",
              "what": "How many of the candidate's skills actually appear in the adverts. "
                      "Matched as whole words: a skill is something an employer either asked "
@@ -316,8 +375,8 @@ def scoring_model(user: dict[str, Any] = Depends(require_user)) -> dict[str, Any
              "what": "Whether their hiring is accelerating against their own recent average — "
                      "the difference between a good account and a good week to call one."},
             {"key": "volume", "weight": matcher.W_VOLUME, "label": "Hiring volume",
-             "what": "How much they are hiring right now, levelling off past a handful of "
-                     "roles."},
+             "what": "How many job adverts they have out, levelling off past a handful. "
+                     "News stories and tenders are not counted as hiring."},
             {"key": "relationship", "weight": matcher.W_RELATIONSHIP, "label": "Relationship",
              "what": "Whether they are already a watchlist client. A new name still scores — "
                      "it is a genuine opportunity, just a colder one."},
@@ -331,6 +390,23 @@ def scoring_model(user: dict[str, Any] = Depends(require_user)) -> dict[str, Any
              "what": "Whether they are hiring in the candidate's market."},
             {"key": "recency", "weight": matcher.W_RECENCY, "label": "Recency",
              "what": "How fresh the signals are, fading to nothing over a month."},
+        ],
+        "rules": [
+            "Recruitment agencies are never ranked: they are competitors, not clients.",
+            "Government tenders are left out: the name on a tender is the buyer, not an "
+            "employer that is hiring.",
+            "Companies outside mining, oil and gas, construction, defence and energy "
+            "transition are left out — the same rule as the digest and the dashboard.",
+            "One employer is one row however it was written — “Downer” and “Downer "
+            "Group” are the same company.",
+            "What a company is hiring for is read from its job adverts only. News and "
+            "project stories still count towards signal quality, sector, region and "
+            "recency, but a headline is not a vacancy.",
+            f"A company advertising nothing that matches the candidate's discipline or "
+            f"skills is held at {matcher.NO_DEMAND_CAP} and listed after every company "
+            f"that does.",
+            "Momentum and recency are measured from the latest collection, not from "
+            "today, so a score does not drift with the day of the week it is read.",
         ],
         "normalisation": (
             "A contributor that has nothing to judge — no skills recorded on the "

@@ -1,7 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 import { Section } from '~/components/ui'
-import { runPipelineNow, saveSchedule, scheduleQueryOptions } from '~/lib/api'
+import { Link } from '@tanstack/react-router'
+import { runPipelineNow, saveSchedule, scheduleQueryOptions, slackStatusQueryOptions } from '~/lib/api'
 import type { PipelineRun, SchedulePayload } from '~/lib/types'
 
 /** Zones the operators actually work in, plus UTC as an escape hatch. A full
@@ -240,7 +241,8 @@ export function SchedulePanel() {
           {data.activeRun ? 'A run is in progress' : 'Run now'}
         </button>
         <span className="muted">
-          Collects, classifies and posts the digest immediately. Takes a few minutes.
+          Collects, classifies and builds the digest immediately. Takes a few minutes.{' '}
+          <SlackLine />
         </span>
       </div>
 
@@ -257,5 +259,18 @@ export function SchedulePanel() {
         </>
       )}
     </Section>
+  )
+}
+
+/** Whether a finished run posts to Slack, and where that is set. */
+function SlackLine() {
+  const { data } = useQuery(slackStatusQueryOptions)
+  if (!data) return null
+  const posting = data.enabled && data.webhook.source !== 'none'
+  return (
+    <>
+      {posting ? 'The digest is then posted to Slack' : 'Slack posting is off'} —{' '}
+      <Link to="/integrations">change under Integrations</Link>.
+    </>
   )
 }

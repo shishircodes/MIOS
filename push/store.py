@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -42,9 +43,32 @@ _API_TO_DB = {
 
 INTAKE_SOURCES = ("cv_upload", "manual_form")
 
+#: The values the matcher compares against. A free-text "Australia" in the
+#: region field used to be stored as typed and then matched nothing, silently
+#: zeroing region fit for that candidate on every company.
+SECTORS = ("mining", "oil_gas", "construction", "defence", "energy_transition", "other")
+REGIONS = ("AU", "PNG")
+_REGION_ALIASES = {"australia": "AU", "au": "AU", "aus": "AU",
+                   "papua new guinea": "PNG", "png": "PNG"}
+
+#: Longest value kept per text field. Generous for real input; a cap so a
+#: pasted CV in the notes box does not become a row nobody can load.
+MAX_LEN = {"full_name": 120, "email": 200, "phone": 40, "current_title": 120,
+           "availability": 120, "notes": 4000}
+
+_EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
 
 class ProfileError(ValueError):
     """Bad profile input. The message is shown to the user."""
+
+
+class ProfileConflict(ProfileError):
+    """The person is already saved. Carries the existing profile."""
+
+    def __init__(self, message: str, existing: dict[str, Any]):
+        super().__init__(message)
+        self.existing = existing
 
 
 def _now() -> str:
@@ -71,6 +95,54 @@ def _clean_years(value: Any) -> int | None:
     if not 0 <= years <= 60:
         raise ProfileError("Years of experience must be between 0 and 60.")
     return years
+
+
+def _clean_text(value: Any, column: str) -> str | None:
+    text = str(value).strip() if value is not None else ""
+    return text[:MAX_LEN.get(column, 200)] or None
+
+
+def _clean_email(value: Any) -> str | None:
+    email = _clean_text(value, "email")
+    if email is None:
+        return None
+    if not _EMAIL.match(email):
+        raise ProfileError(f"“{email}” is not an email address.")
+    # Lower-cased so the same person typed twice is recognised as one.
+    return email.lower()
+
+
+def _phone_digits(value: Any) -> str:
+    return re.sub(r"\D", "", str(value or ""))
+
+
+def _clean_phone(value: Any) -> str | None:
+    phone = _clean_text(value, "phone")
+    if phone is None:
+        return None
+    if not 6 <= len(_phone_digits(phone)) <= 15:
+        raise ProfileError(f"“{phone}” does not look like a phone number.")
+    return phone
+
+
+def _clean_sector(value: Any) -> str | None:
+    text = _clean_text(value, "sector")
+    if text is None:
+        return None
+    key = "_".join(text.lower().replace("&", " ").split())
+    if key not in SECTORS:
+        raise ProfileError(f"Sector must be one of: {', '.join(SECTORS)}.")
+    return key
+
+
+def _clean_region(value: Any) -> str | None:
+    text = _clean_text(value, "region")
+    if text is None:
+        return None
+    region = _REGION_ALIASES.get(text.lower())
+    if region is None:
+        raise ProfileError("Region must be Australia (AU) or Papua New Guinea (PNG).")
+    return region
 
 
 def _clean_skills(value: Any) -> list[str]:
@@ -108,14 +180,78 @@ def to_api(row: Any) -> dict[str, Any]:
         "sourceFilename": row["source_filename"],
         "notes": row["notes"],
         "createdAt": row["created_at"],
+        "updatedAt": row["updated_at"],
     }
 
 
 _SELECT = (
     "SELECT profile_id, full_name, email, phone, current_title, sector, "
     "years_experience, region, skills, availability, intake_source, "
-    "source_filename, notes, created_at FROM candidate_profiles "
+    "source_filename, notes, created_at, updated_at FROM candidate_profiles "
 )
+
+#: Every column a caller can write, in the order `_clean` returns them.
+_COLUMNS = ("full_name", "email", "phone", "current_title", "sector",
+            "years_experience", "region", "skills", "availability", "notes")
+
+
+def _clean(fields: dict[str, Any]) -> dict[str, Any]:
+    """Validate and normalise writable fields. Raises ProfileError on bad input."""
+    name = _clean_text(fields.get("full_name"), "full_name")
+    # The only hard requirement. Everything else can be filled in later, and a
+    # half-known consultant is still worth matching — but a nameless row is not
+    # something the BD team can act on or find again.
+    if not name:
+        raise ProfileError("A candidate name is required.")
+    return {
+        "full_name": name,
+        "email": _clean_email(fields.get("email")),
+        "phone": _clean_phone(fields.get("phone")),
+        "current_title": _clean_text(fields.get("current_title"), "current_title"),
+        "sector": _clean_sector(fields.get("sector")),
+        "years_experience": _clean_years(fields.get("years_experience")),
+        "region": _clean_region(fields.get("region")),
+        "skills": json.dumps(_clean_skills(fields.get("skills"))),
+        "availability": _clean_text(fields.get("availability"), "availability"),
+        "notes": _clean_text(fields.get("notes"), "notes"),
+    }
+
+
+def find_duplicate(clean: dict[str, Any], *, excluding: str | None = None,
+                   target: str | Path | None = None) -> dict[str, Any] | None:
+    """A saved profile that is evidently the same person, or None.
+
+    The same email is the same person. The same phone number is only when the
+    name matches too — an office switchboard is shared by many people.
+    """
+    email = clean.get("email")
+    digits = _phone_digits(clean.get("phone"))
+    if not email and len(digits) < 8:
+        return None
+    with connect(target) as conn:
+        rows = conn.execute(
+            _SELECT + "WHERE lower(email) = ? OR phone IS NOT NULL",
+            (email or "",),
+        ).fetchall()
+    for row in rows:
+        if row["profile_id"] == excluding:
+            continue
+        if email and (row["email"] or "").lower() == email:
+            return to_api(row)
+        if (len(digits) >= 8 and _phone_digits(row["phone"]) == digits
+                and (row["full_name"] or "").casefold() == clean["full_name"].casefold()):
+            return to_api(row)
+    return None
+
+
+def _conflict(existing: dict[str, Any]) -> ProfileConflict:
+    added = (existing.get("createdAt") or "")[:10]
+    return ProfileConflict(
+        f"{existing['fullName']} is already saved (added {added}), with the same "
+        f"{'email' if existing.get('email') else 'phone number'}. Open them from Saved "
+        f"profiles to update that record instead of creating a second one.",
+        existing,
+    )
 
 
 def create_profile(
@@ -129,32 +265,15 @@ def create_profile(
     if intake_source not in INTAKE_SOURCES:
         raise ProfileError(f"intake_source must be one of {', '.join(INTAKE_SOURCES)}.")
 
-    fields = _normalise(payload)
-
-    # The only hard requirement. Everything else can be filled in later, and a
-    # half-known consultant is still worth matching — but a nameless row is not
-    # something the BD team can act on or find again.
-    name = str(fields.get("full_name") or "").strip()
-    if not name:
-        raise ProfileError("A candidate name is required.")
+    clean = _clean(_normalise(payload))
+    existing = find_duplicate(clean, target=target)
+    if existing:
+        raise _conflict(existing)
 
     profile_id = f"prof-{uuid.uuid4().hex[:12]}"
-    row = (
-        profile_id,
-        name[:120],
-        (fields.get("email") or None),
-        (fields.get("phone") or None),
-        (fields.get("current_title") or None),
-        (fields.get("sector") or None),
-        _clean_years(fields.get("years_experience")),
-        (fields.get("region") or None),
-        json.dumps(_clean_skills(fields.get("skills"))),
-        (fields.get("availability") or None),
-        intake_source,
-        source_filename,
-        (fields.get("notes") or None),
-        _now(),
-    )
+    name = clean["full_name"]
+    row = (profile_id, *(clean[c] for c in _COLUMNS[:8]),
+           clean["availability"], intake_source, source_filename, clean["notes"], _now())
 
     with connect(target) as conn:
         conn.execute(
@@ -168,12 +287,60 @@ def create_profile(
     return get_profile(profile_id, target=target)  # type: ignore[return-value]
 
 
-def list_profiles(limit: int = 50, target: str | Path | None = None) -> list[dict[str, Any]]:
+def update_profile(profile_id: str, payload: dict[str, Any], *,
+                   target: str | Path | None = None) -> dict[str, Any] | None:
+    """Replace a saved profile's fields with a reviewed version. None if missing.
+
+    Every writable field is replaced, as the form sends the whole profile back:
+    a field cleared on screen is cleared here. How the record first arrived
+    (`intake_source`, `source_filename`) is history and is kept.
+    """
+    if get_profile(profile_id, target=target) is None:
+        return None
+    clean = _clean(_normalise(payload))
+    existing = find_duplicate(clean, excluding=profile_id, target=target)
+    if existing:
+        raise _conflict(existing)
+    with connect(target) as conn:
+        conn.execute(
+            "UPDATE candidate_profiles SET full_name = ?, email = ?, phone = ?, "
+            "current_title = ?, sector = ?, years_experience = ?, region = ?, skills = ?, "
+            "availability = ?, notes = ?, updated_at = ? WHERE profile_id = ?",
+            (*(clean[c] for c in _COLUMNS), _now(), profile_id),
+        )
+    log.info("push: updated profile %s", profile_id)
+    return get_profile(profile_id, target=target)
+
+
+def _search(q: str | None) -> tuple[str, tuple[Any, ...]]:
+    """A WHERE clause matching name, title, email or skills, case-insensitively."""
+    q = (q or "").strip().lower()
+    if not q:
+        return "", ()
+    like = f"%{q}%"
+    return ("WHERE lower(full_name) LIKE ? OR lower(coalesce(current_title, '')) LIKE ? "
+            "OR lower(coalesce(email, '')) LIKE ? OR lower(coalesce(skills, '')) LIKE ? ",
+            (like, like, like, like))
+
+
+def list_profiles(limit: int = 50, target: str | Path | None = None, *,
+                  offset: int = 0, q: str | None = None) -> list[dict[str, Any]]:
+    """Newest first. Most recently edited counts as newest."""
+    where, args = _search(q)
     with connect(target) as conn:
         rows = conn.execute(
-            _SELECT + "ORDER BY created_at DESC, profile_id DESC LIMIT ?", (limit,)
+            _SELECT + where
+            + "ORDER BY coalesce(updated_at, created_at) DESC, profile_id DESC LIMIT ? OFFSET ?",
+            (*args, limit, offset),
         ).fetchall()
     return [to_api(r) for r in rows]
+
+
+def count_profiles(q: str | None = None, target: str | Path | None = None) -> int:
+    where, args = _search(q)
+    with connect(target) as conn:
+        return int(conn.execute(
+            "SELECT count(*) FROM candidate_profiles " + where, args).fetchone()[0] or 0)
 
 
 def get_profile(profile_id: str, target: str | Path | None = None) -> dict[str, Any] | None:
@@ -191,6 +358,16 @@ def delete_profile(profile_id: str, target: str | Path | None = None) -> bool:
         )
         removed = (cur.rowcount or 0) > 0
     if removed:
+        # What the team decided about companies for this person is kept — the
+        # outcomes are how the weights will one day be calibrated, and with the
+        # profile gone they no longer identify anyone. The free-text note is
+        # removed: it is the one field that may name them.
+        try:
+            with connect(target) as conn:
+                conn.execute("UPDATE match_outcomes SET note = NULL WHERE profile_id = ?",
+                             (profile_id,))
+        except Exception as exc:  # noqa: BLE001 - no outcomes table yet
+            log.debug("push: no outcome notes to clear (%s)", exc)
         log.info("push: deleted profile %s", profile_id)
     return removed
 
@@ -210,14 +387,20 @@ def signals_for_matching(
     days: int = DEFAULT_MATCH_WINDOW_DAYS,
     target: str | Path | None = None,
 ) -> list[dict[str, Any]]:
-    """Classified signals from the last `days`, as plain dicts for the matcher."""
+    """Classified signals from the last `days`, as plain dicts for the matcher.
+
+    `signal_category` and `source_type` were missing from this query, so the
+    signal-quality contributor never had anything to judge and every news story
+    was read as a job advert. `region` is the effective market, which is what
+    region fit should compare against.
+    """
     from datetime import timedelta
 
     since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat(timespec="seconds")
     with connect(target) as conn:
         rows = conn.execute(
-            "SELECT company_name, sector, geography, watchlist_tier, raw_content, "
-            "captured_at FROM signals "
+            "SELECT company_name, sector, geography, region, watchlist_tier, raw_content, "
+            "captured_at, signal_category, source_type FROM signals "
             "WHERE classified_at IS NOT NULL AND captured_at >= ? "
             "ORDER BY captured_at DESC",
             (since,),

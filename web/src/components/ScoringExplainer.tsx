@@ -50,6 +50,15 @@ export function ScoringExplainer({ open, onClose }: { open: boolean; onClose: ()
             ))}
           </div>
 
+          {data.rules && data.rules.length > 0 && (
+            <>
+              <h4>Who is ranked, and what holds a score down</h4>
+              <ul className="score-list">
+                {data.rules.map((r) => <li key={r}>{r}</li>)}
+              </ul>
+            </>
+          )}
+
           <h4>When less than the whole model applies</h4>
           <p>{data.normalisation}</p>
 
