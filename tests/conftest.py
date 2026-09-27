@@ -111,6 +111,14 @@ def _no_classifier_throttle(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_retry_waits(monkeypatch):
+    """Retries of a provider failure wait seconds to a minute; no test should."""
+    import llm.retry
+
+    monkeypatch.setattr(llm.retry, "_sleep", lambda _s: None)
+
+
+@pytest.fixture(autouse=True)
 def _never_the_real_database(request, tmp_path_factory, monkeypatch):
     """Redirect the default target to a scratch SQLite file for each test.
 

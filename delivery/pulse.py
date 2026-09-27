@@ -34,6 +34,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from config.settings import settings
+from llm.retry import with_retry
 from loader.db import connect
 
 log = logging.getLogger(__name__)
@@ -269,7 +270,10 @@ def generate_pulse(
         return PulseOutcome([], STATUS_FAILED, "No signals in the window.", signals_analysed)
 
     try:
-        raw = gemini_caller(SYSTEM_PROMPT, evidence, RESPONSE_SCHEMA)
+        # Once a run, and nothing else writes the week's read: a provider hiccup
+        # here used to cost the Market Pulse for the whole week.
+        raw = with_retry(gemini_caller, SYSTEM_PROMPT, evidence, RESPONSE_SCHEMA,
+                         what="Market Pulse call")
     except Exception as exc:  # noqa: BLE001 - a model outage is not a pipeline failure
         log.warning("pulse: generation failed (%s)", exc)
         return PulseOutcome([], STATUS_FAILED, f"Gemini call failed: {exc}", signals_analysed)
