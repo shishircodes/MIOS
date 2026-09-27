@@ -611,6 +611,8 @@ export interface PipelineRun {
   startedBy: string | null
   collected: number | null
   note: string | null
+  /** Its records still unclassified. Counted for incomplete runs only; null otherwise. */
+  waiting?: number | null
 }
 
 export interface SchedulePayload {
@@ -631,6 +633,8 @@ export interface SchedulePayload {
    *  server with SCHEDULER_ENABLED unset looks right and never fires. */
   schedulerRunning: boolean
   activeRun: PipelineRun | null
+  /** An administrator's retry of a run's leftovers, while it runs. */
+  retrying: { runId: string; startedBy: string; startedAt: string } | null
   history: PipelineRun[]
 }
 

@@ -229,3 +229,25 @@ def recent(limit: int = 10, target: str | Path | None = None) -> list[dict[str, 
         log.warning("run_log: could not read history (%s)", exc)
         return []
     return [_row(r) for r in rows]
+
+
+def get(run_id: str, target: str | Path | None = None) -> dict[str, Any] | None:
+    """One run, or None."""
+    try:
+        with connect(target, readonly=True) as conn:
+            r = conn.execute("SELECT * FROM pipeline_runs WHERE id = ?", (run_id,)).fetchone()
+    except Exception as exc:  # noqa: BLE001
+        log.warning("run_log: could not read run %s (%s)", run_id, exc)
+        return None
+    return _row(r) if r else None
+
+
+def set_note(run_id: str, note: str | None, target: str | Path | None = None) -> None:
+    """Replace a finished run's note — after its leftovers were dealt with later.
+
+    Status, times and counts are history and stay as they were; only the note,
+    which says what is still outstanding, is current.
+    """
+    with connect(target) as conn:
+        conn.execute("UPDATE pipeline_runs SET note = ? WHERE id = ?",
+                     ((note or "")[:500] or None, run_id))

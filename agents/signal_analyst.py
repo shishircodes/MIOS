@@ -20,6 +20,7 @@ from agents.prompts import (
 )
 from agents.prospects import is_prospect
 from config.settings import settings
+from llm.retry import with_retry
 from loader import pipeline_settings
 from loader.db import connect
 from loader.pipeline_settings import (
@@ -338,25 +339,15 @@ def _call_with_retry(
     schema: dict[str, Any] | None = None,
     max_retries: int = 2,
 ) -> dict[str, Any]:
-    """Call Gemini with minimal retry logic.
+    """Call the model, retrying what is worth retrying — see `llm.retry`.
 
-    On rate-limit (429/quota), waits 60s once for the per-minute quota to reset,
-    then gives up to avoid hammering the free tier.
+    A server error is retried after a short wait: one on 21 Sep and another on
+    27 Sep 2026 each cost a batch of 25 records, left unclassified until the
+    next week. A rate limit waits a minute for the window, up to `max_retries`
+    times.
     """
-    for attempt in range(max_retries + 1):
-        try:
-            return fn(system_prompt, user_prompt, schema=schema)
-        except Exception as exc:  # noqa: BLE001
-            msg = str(exc).lower()
-            is_rate = "rate" in msg or "429" in msg or "quota" in msg or "resourceexhausted" in msg
-            if is_rate and attempt < max_retries:
-                log.warning(
-                    "Gemini rate-limited (attempt %d/%d). Waiting 60s for quota reset...",
-                    attempt + 1, max_retries,
-                )
-                time.sleep(60)
-                continue
-            raise
+    return with_retry(fn, system_prompt, user_prompt, schema=schema,
+                      what="Classification call", rate_limit_retries=max_retries)
 
 
 # --------------------------------------------------------------------------
