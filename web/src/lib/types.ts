@@ -190,6 +190,28 @@ export interface HubSpotProperty {
   options: { value: string; label: string }[]
 }
 
+// ---------- Run limits (loader/pipeline_settings.py) ----------
+
+export interface PipelineSetting {
+  key: string
+  label: string
+  value: number
+  default: number
+  min: number
+  max: number
+  unit: string
+  help: string
+  changedBy: string | null
+  changedAt: string | null
+}
+
+export interface PipelineSettings {
+  sources: (PipelineSetting & { source: string })[]
+  classifier: PipelineSetting[]
+  derived: { recordsPerDay: number; secondsPerFullDay: number }
+  changed?: string[]
+}
+
 // ---------- Slack digest (api/slack_api.py) ----------
 
 export interface SlackStatus {
@@ -542,6 +564,8 @@ export interface SourceHealth {
   /** Why it ships off, when it does. Shown beside the toggle and repeated as a
    *  warning if somebody switches it on. */
   offReason: string | null
+  /** Records it takes per run, as set under Collection limits. Null when retired. */
+  limit: number | null
   name: string
   label: string
   market: string

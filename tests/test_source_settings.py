@@ -202,7 +202,7 @@ def test_a_command_line_source_overrides_the_stored_selection(db, monkeypatch):
 
     seen: list[list[str] | None] = []
     monkeypatch.setattr(live, "scrape_all",
-                        lambda limit=None, sources=None, base_url=None: seen.append(sources) or [])
+                        lambda limit=None, sources=None, base_url=None, limits=None: seen.append(sources) or [])
     monkeypatch.setattr(live, "classify_pending", lambda *a, **k: {})
     monkeypatch.setattr(live, "build_digest", lambda *a, **k: "")
     monkeypatch.setattr(live, "build_digest_payload", lambda *a, **k: {"collection": {"collected": 0}})
@@ -222,7 +222,7 @@ def test_only_the_enabled_sources_are_scraped(db, monkeypatch):
 
     seen: list[list[str] | None] = []
     monkeypatch.setattr(live, "scrape_all",
-                        lambda limit=None, sources=None, base_url=None: seen.append(sources) or [])
+                        lambda limit=None, sources=None, base_url=None, limits=None: seen.append(sources) or [])
     monkeypatch.setattr(live, "classify_pending", lambda *a, **k: {})
     monkeypatch.setattr(live, "build_digest", lambda *a, **k: "")
     monkeypatch.setattr(live, "build_digest_payload", lambda *a, **k: {"collection": {"collected": 0}})

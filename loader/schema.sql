@@ -223,6 +223,18 @@ CREATE TABLE IF NOT EXISTS source_settings (
 );
 
 
+-- How a run handles what it collects: records per source, records per AI
+-- call, AI calls per day. One row per setting, pre-filled with the values the
+-- code used as constants (see loader/pipeline_settings.py), changed from
+-- Admin > Data sources. `changed_by` is 'default' until somebody changes it.
+CREATE TABLE IF NOT EXISTS pipeline_settings (
+    key        TEXT PRIMARY KEY,
+    value      INTEGER NOT NULL,
+    changed_by TEXT,
+    changed_at TEXT NOT NULL
+);
+
+
 -- ---------------------------------------------------------------------------
 -- When the pipeline runs by itself
 -- ---------------------------------------------------------------------------

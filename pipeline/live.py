@@ -33,15 +33,13 @@ from loader import run_log
 from loader.db import connect, describe, resolve_target
 from loader.digest_archive import save_digest
 from loader.ingest import ingest, init_db
+# Each source's own limit is set under Admin › Data sources; the default is
+# kept importable here for callers that used it.
+from loader.pipeline_settings import DEFAULT_SCRAPE_LIMIT, scrape_limits
 from loader.source_settings import enabled_sources
 from scraper import SOURCE_NAMES, scrape_all
 
 log = logging.getLogger(__name__)
-
-#: Records to take from each source per run. Per-source rather than a total
-#: budget, so one prolific board cannot crowd out a quiet one. The admin screen
-#: quotes this figure, so it lives here rather than being repeated.
-DEFAULT_SCRAPE_LIMIT = 50
 
 
 def _classified_for_run(db_path: str | Path, run_id: str | None) -> int:
@@ -90,7 +88,7 @@ def _unclassified_note(unclassified: int, errors: int, quota_exhausted: bool) ->
 
 def run_live_cycle(
     *,
-    scrape_limit: int = DEFAULT_SCRAPE_LIMIT,
+    scrape_limit: int | None = None,
     digest_window_days: int = 7,
     base_url: str | None = None,
     sources: list[str] | None = None,
@@ -155,7 +153,11 @@ def run_live_cycle(
             if sources is None and set(chosen) != set(SOURCE_NAMES):
                 log.info("live: collecting from %s (others switched off in Admin)",
                          ", ".join(chosen))
-            records = scrape_all(limit=scrape_limit, sources=chosen, base_url=base_url)
+            # Each source's own limit from Admin › Data sources, unless one was
+            # given for this run (--limit), which applies to every source.
+            limits = None if scrape_limit is not None else scrape_limits(db_path)
+            records = scrape_all(limit=scrape_limit or DEFAULT_SCRAPE_LIMIT, sources=chosen,
+                                 base_url=base_url, limits=limits)
         scraped = len(records)
         scraped_by_source = dict(Counter(r.get("source_name", "unknown") for r in records))
         log.info("live: scraped %d postings %s", scraped, scraped_by_source)
@@ -327,8 +329,9 @@ def run_live_cycle(
 
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description="MIOS live production cycle")
-    p.add_argument("--limit", type=int, default=DEFAULT_SCRAPE_LIMIT,
-                   help=f"per-source scrape limit (default {DEFAULT_SCRAPE_LIMIT})")
+    p.add_argument("--limit", type=int, default=None,
+                   help="records per source for this run, overriding the limits set in "
+                        "Admin > Data sources")
     p.add_argument(
         "--source", action="append", choices=list(SOURCE_NAMES), default=None,
         help="scrape only this source (repeatable; default: all)",

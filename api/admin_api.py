@@ -32,6 +32,7 @@ from loader.feature_settings import PUSH_RATIONALE
 from loader.feature_settings import describe as describe_feature
 from loader.feature_settings import set_enabled as set_feature_enabled
 from loader.llm_settings import UnknownPurpose, clear_route, set_route
+from loader import pipeline_settings
 from loader.db import connect
 from loader.schedule import (
     DAY_NAMES,
@@ -172,6 +173,7 @@ def source_health(user: dict[str, Any] = Depends(require_admin)) -> dict[str, An
     """
     now = datetime.now(timezone.utc)
     since = (now - timedelta(days=7)).isoformat(timespec="seconds")
+    limits = pipeline_settings.scrape_limits()
 
     stats: dict[str, dict[str, Any]] = {}
     try:
@@ -221,6 +223,7 @@ def source_health(user: dict[str, Any] = Depends(require_admin)) -> dict[str, An
         s = stats.get(name, {})
         configured, missing = _configured(name)
         last_seen = s.get("lastSeen")
+        limit = limits.get(name, pipeline_settings.DEFAULT_SCRAPE_LIMIT)
         chosen = settings_by_source.get(name, {"enabled": True})
 
         # A switched-off source is not collecting, whatever its last run looked
@@ -271,6 +274,8 @@ def source_health(user: dict[str, Any] = Depends(require_admin)) -> dict[str, An
             #: the difference is the whole point.
             "defaultEnabled": chosen.get("defaultEnabled", True),
             "offReason": chosen.get("offReason"),
+            #: Records it takes per run, as set under Collection limits.
+            "limit": limit,
         })
 
     # Sources that have rows but are no longer registered — a renamed or removed
@@ -286,19 +291,42 @@ def source_health(user: dict[str, Any] = Depends(require_admin)) -> dict[str, An
             "pending": s.get("pending", 0), "runDays": s.get("runDays", 0),
             # A retired source is not selectable; it has no scraper to run.
             "enabled": False, "changedBy": None, "changedAt": None,
-            "defaultEnabled": False, "offReason": None,
+            "defaultEnabled": False, "offReason": None, "limit": None,
         })
 
     return {
         "sources": out,
         "staleAfterDays": STALE_AFTER_DAYS,
-        "perSourceLimit": 50,
+        #: The default. Each source's own limit is on its row.
+        "perSourceLimit": pipeline_settings.DEFAULT_SCRAPE_LIMIT,
         "totalRecords": sum(s.get("total", 0) for s in stats.values()),
         #: How many sources the next scrape will actually use. Zero is allowed
         #: — pausing collection is a legitimate thing to do — but the UI has to
         #: say so loudly, or an empty week looks like a broken pipeline.
         "enabledCount": sum(1 for v in settings_by_source.values() if v["enabled"]),
     }
+
+
+@router.get("/pipeline-settings")
+def get_pipeline_settings(user: dict[str, Any] = Depends(require_admin)) -> dict[str, Any]:
+    """Records per source, and how collected records are batched to the AI."""
+    return pipeline_settings.describe()
+
+
+@router.put("/pipeline-settings")
+def put_pipeline_settings(
+    payload: dict[str, Any] = Body(...),
+    user: dict[str, Any] = Depends(require_admin),
+) -> dict[str, Any]:
+    """Change any of them. All or nothing; applies from the next run."""
+    values = payload.get("values")
+    if not isinstance(values, dict) or not values:
+        raise HTTPException(status_code=400, detail="Send the settings to change as `values`.")
+    try:
+        changed = pipeline_settings.update(values, changed_by=user["email"])
+    except pipeline_settings.SettingError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {**pipeline_settings.describe(), "changed": changed}
 
 
 @router.patch("/sources/{source_name}")

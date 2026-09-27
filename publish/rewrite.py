@@ -46,6 +46,7 @@ from agents.signal_analyst import (
     _increment_daily_api_calls,
     _throttle,
 )
+from loader import pipeline_settings
 from loader.db import connect
 from publish.report import Section
 
@@ -160,9 +161,10 @@ def invented_numbers(computed: str, rewritten: str) -> set[str]:
 
 def _remaining_quota(target: str | Path | None) -> int:
     try:
+        limit = pipeline_settings.classifier(target).daily_calls
         with connect(target) as conn:
             _ensure_kv_store(conn)
-            return DAILY_API_CALL_LIMIT - _get_daily_api_calls(conn)
+            return limit - _get_daily_api_calls(conn)
     except Exception as exc:  # noqa: BLE001 - never block a report on the counter
         log.warning("publish.rewrite: could not read the quota counter (%s)", exc)
         return 0
@@ -194,7 +196,8 @@ def rewrite(
         if remaining <= 0:
             return RewriteOutcome(
                 sections, used_llm=False,
-                reason=(f"The daily Gemini limit of {DAILY_API_CALL_LIMIT} calls is used up. "
+                reason=(f"The daily AI limit of {pipeline_settings.classifier(target).daily_calls} "
+                        "calls is used up. "
                         "The report uses its computed wording; regenerate tomorrow to "
                         "have it rewritten."),
             )
@@ -208,7 +211,7 @@ def rewrite(
             # to Claude reads a sentence about a provider they are not using.
             return RewriteOutcome(sections, used_llm=False,
                                   reason=f"No model is available for rewriting ({exc}).")
-        _throttle()
+        _throttle(pipeline_settings.classifier(target).min_seconds)
 
     prompt = "\n\n".join(
         f"### {s.heading}\n{split_narrative(s.body)[0]}" for s in candidates
