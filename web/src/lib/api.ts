@@ -21,6 +21,7 @@ import type {
   CompanyCandidates,
   GoogleDocsStatus,
   SlackStatus,
+  PipelineSettings,
   ReportGoogleDoc,
   ReportSummary,
   SchedulePayload,
@@ -444,6 +445,21 @@ export async function revokeAccess(email: string): Promise<AccessPayload> {
 }
 
 /** Turn a source on or off for the next scrape. Returns the refreshed listing. */
+/** Records per source, and how records are batched to the AI. */
+export const pipelineSettingsQueryOptions = queryOptions({
+  queryKey: ['admin', 'pipeline-settings'],
+  queryFn: () => fetchJson<PipelineSettings>('/api/admin/pipeline-settings'),
+  retry: false,
+})
+
+export async function savePipelineSettings(values: Record<string, number>): Promise<PipelineSettings> {
+  return postOrExplain<PipelineSettings>('/api/admin/pipeline-settings', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ values }),
+  })
+}
+
 export async function setSourceEnabled(
   name: string,
   enabled: boolean,

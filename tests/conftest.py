@@ -107,7 +107,7 @@ def _no_classifier_throttle(monkeypatch):
     the wait would only slow the suite: no test reaches a real model."""
     import agents.signal_analyst as analyst
 
-    monkeypatch.setattr(analyst, "_throttle", lambda: None)
+    monkeypatch.setattr(analyst, "_throttle", lambda *_a, **_k: None)
 
 
 @pytest.fixture(autouse=True)

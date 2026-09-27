@@ -20,7 +20,14 @@ from agents.prompts import (
 )
 from agents.prospects import is_prospect
 from config.settings import settings
+from loader import pipeline_settings
 from loader.db import connect
+from loader.pipeline_settings import (
+    DEFAULT_BATCH_SIZE,
+    DEFAULT_DAILY_CALLS,
+    DEFAULT_MAX_CHARS,
+    DEFAULT_MIN_SECONDS,
+)
 
 log = logging.getLogger(__name__)
 
@@ -32,22 +39,14 @@ ALLOWED_CYCLES = {"weekly", "monthly", "quarterly"}
 
 FUZZY_THRESHOLD = 85
 
-# Free-tier hard limits (as of 2026-05 for gemini-2.5-flash / flash-lite)
-DAILY_API_CALL_LIMIT = 20
-# Signals per call. It was 100, sized so an 80-record run used one quota slot.
-# The output cap, not the input, is what limits a batch, and news articles and
-# tenders produce longer answers than job ads: once the new sources took a run
-# to 180 rows, a 100-row batch overran the cap, the truncated JSON failed to
-# parse, and every row in it stayed unclassified (99 of 180 on 14 Sep 2026).
-# A failed batch also loses all of its rows at once, so a small batch bounds the
-# damage too. 25 keeps a 250-row run to 10 calls, inside the daily limit.
-SIGNALS_PER_API_CALL = 25
-MAX_SIGNAL_CHARS = 3000           # truncate long raw_content to save tokens
+# The defaults for the settings an administrator changes under Admin › Data
+# sources (see loader/pipeline_settings.py, where each is explained). A run reads
+# the stored values; these names remain for callers that want the defaults.
+DAILY_API_CALL_LIMIT = DEFAULT_DAILY_CALLS
+SIGNALS_PER_API_CALL = DEFAULT_BATCH_SIZE
+MAX_SIGNAL_CHARS = DEFAULT_MAX_CHARS
 MAX_OUTPUT_TOKENS = 32000         # ~150 tok/record × 25 records, with ample headroom
-
-# Throttle: 6.5s between calls is plenty when you only get 20/day,
-# but keeps you under the per-minute burst limit too.
-MIN_SECONDS_BETWEEN_CALLS = 13
+MIN_SECONDS_BETWEEN_CALLS = DEFAULT_MIN_SECONDS
 
 # --------------------------------------------------------------------------
 # Throttling
@@ -56,12 +55,12 @@ MIN_SECONDS_BETWEEN_CALLS = 13
 _last_call_time: float = 0.0
 
 
-def _throttle() -> None:
-    """Ensure at least MIN_SECONDS_BETWEEN_CALLS since the last API call."""
+def _throttle(min_seconds: float = MIN_SECONDS_BETWEEN_CALLS) -> None:
+    """Ensure at least `min_seconds` since the last API call."""
     global _last_call_time
     elapsed = time.time() - _last_call_time
-    if elapsed < MIN_SECONDS_BETWEEN_CALLS:
-        sleep_for = MIN_SECONDS_BETWEEN_CALLS - elapsed
+    if elapsed < min_seconds:
+        sleep_for = min_seconds - elapsed
         log.debug("Throttling: sleeping %.2fs", sleep_for)
         time.sleep(sleep_for)
     _last_call_time = time.time()
@@ -395,11 +394,12 @@ def _build_batch_prompt(
     chunk: list[tuple[Any, str]],
     watchlist_canonicals: str,
     kinds: dict[Any, str | None] | None = None,
+    max_chars: int = MAX_SIGNAL_CHARS,
 ) -> str:
     kinds = kinds or {}
     parts: list[str] = []
     for idx, (signal_id, raw) in enumerate(chunk, start=1):
-        truncated = raw[:MAX_SIGNAL_CHARS] if len(raw) > MAX_SIGNAL_CHARS else raw
+        truncated = raw[:max_chars] if len(raw) > max_chars else raw
         kind = KIND_LABELS.get(kinds.get(signal_id) or "", "job ad")
         parts.append(f"--- SIGNAL {idx} ({kind}) ---\n{truncated}")
     return BATCH_USER_PROMPT_TEMPLATE.format(
@@ -477,14 +477,19 @@ def classify_pending(
 
         gemini_caller = caller_for(PURPOSE_CLASSIFY)
 
+    # As set under Admin › Data sources, read once so the whole run uses one
+    # consistent set of numbers.
+    cfg = pipeline_settings.classifier(db_path)
+    per_call = cfg.batch_size
+
     with connect(db_path) as conn:
         _ensure_kv_store(conn)
 
         # --- DAILY QUOTA CIRCUIT BREAKER ---
         daily_api_calls = _get_daily_api_calls(conn)
-        remaining_calls = DAILY_API_CALL_LIMIT - daily_api_calls
+        remaining_calls = cfg.daily_calls - daily_api_calls
         log.info("Daily quota: %d/%d API calls used, %d remaining",
-                 daily_api_calls, DAILY_API_CALL_LIMIT, remaining_calls)
+                 daily_api_calls, cfg.daily_calls, remaining_calls)
         if remaining_calls <= 0:
             log.warning("Daily Gemini quota exhausted. Skipping run.")
             counts["quota_exhausted"] = 1
@@ -492,7 +497,7 @@ def classify_pending(
             return dict(counts)
 
         # Cap signals to what quota allows, and to `batch_size` if one was given.
-        max_signals = remaining_calls * SIGNALS_PER_API_CALL
+        max_signals = remaining_calls * per_call
         effective_limit = max_signals if batch_size is None else min(batch_size, max_signals)
         # ------------------------------------
 
@@ -531,12 +536,12 @@ def classify_pending(
 
         # Group into chunks for batch API calls
         chunks = [
-            rows[i:i + SIGNALS_PER_API_CALL]
-            for i in range(0, len(rows), SIGNALS_PER_API_CALL)
+            rows[i:i + per_call]
+            for i in range(0, len(rows), per_call)
         ]
 
         for chunk in chunks:
-            if _get_daily_api_calls(conn) >= DAILY_API_CALL_LIMIT:
+            if _get_daily_api_calls(conn) >= cfg.daily_calls:
                 log.warning("Daily API call limit reached mid-run. Stopping.")
                 counts["quota_exhausted"] = 1
                 break
@@ -562,9 +567,10 @@ def classify_pending(
             if not pending_chunk:
                 continue
 
-            user_prompt = _build_batch_prompt(pending_chunk, watchlist_canonicals, kinds)
+            user_prompt = _build_batch_prompt(pending_chunk, watchlist_canonicals, kinds,
+                                              max_chars=cfg.max_chars)
 
-            _throttle()
+            _throttle(cfg.min_seconds)
             try:
                 payload = _call_with_retry(
                     gemini_caller,

@@ -2,6 +2,7 @@ import { Link, createFileRoute } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useRef, useState } from 'react'
 import { AdminOnly } from '~/components/AdminOnly'
+import { RunLimitsPanel } from '~/components/RunLimitsPanel'
 import { Explainer, Loading, Section } from '~/components/ui'
 import { setSourceEnabled, sourceHealthQueryOptions } from '~/lib/api'
 import { useFigure, useReveal } from '~/lib/motion'
@@ -220,7 +221,7 @@ function SourcesScreen() {
           <SourceRow
             key={s.name}
             s={s}
-            limit={data.perSourceLimit}
+            limit={s.limit ?? data.perSourceLimit}
             busy={toggle.isPending}
             onToggle={(name, enabled) => toggle.mutate({ name, enabled })}
           />
@@ -255,6 +256,7 @@ function SourcesScreen() {
         </Explainer>
       </Section>
 
+      <RunLimitsPanel labels={Object.fromEntries(data.sources.map((s) => [s.name, s.label]))} />
     </div>
   )
 }

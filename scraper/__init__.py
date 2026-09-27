@@ -60,12 +60,18 @@ async def scrape_all_async(
     limit: int = 200,
     sources: list[str] | None = None,
     base_url: str | None = None,
+    limits: dict[str, int] | None = None,
 ) -> list[dict[str, Any]]:
-    """Scrape the named sources sequentially in the caller's event loop."""
+    """Scrape the named sources sequentially in the caller's event loop.
+
+    `limits` gives each source its own cap; a source missing from it uses
+    `limit`.
+    """
     registry = _registry()
     out: list[dict[str, Any]] = []
     for name in _resolve(sources, base_url):
-        records = await registry[name](limit=limit, base_url=base_url)
+        cap = (limits or {}).get(name, limit)
+        records = await registry[name](limit=cap, base_url=base_url)
         if records:
             log.info("scrape_all: %s returned %d records", name, len(records))
         else:
@@ -86,6 +92,7 @@ def scrape_all(
     limit: int = 200,
     sources: list[str] | None = None,
     base_url: str | None = None,
+    limits: dict[str, int] | None = None,
 ) -> list[dict[str, Any]]:
     """Scrape the named sources (default: all) and return the merged records.
 
@@ -96,4 +103,5 @@ def scrape_all(
     more than one source is selected, since a single URL can't apply to both.
     """
     _resolve(sources, base_url)  # fail fast on bad args, before spinning a loop
-    return asyncio.run(scrape_all_async(limit=limit, sources=sources, base_url=base_url))
+    return asyncio.run(scrape_all_async(limit=limit, sources=sources, base_url=base_url,
+                                        limits=limits))

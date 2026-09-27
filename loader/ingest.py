@@ -191,6 +191,10 @@ def init_db(target: str | Path | None = None, watchlist_path: str | Path | None 
         _apply_indexes(conn)
         _seed_watchlist(conn, watchlist_path)
         _seed_bootstrap_admin(conn)
+        # The run limits an administrator can change, filled in at the values
+        # the code used before they were settings. Never overwrites a choice.
+        from loader.pipeline_settings import seed as _seed_pipeline_settings
+        _seed_pipeline_settings(conn)
     # Outside the block above: it needs the column the migration just added.
     backfill_regions(target)
     log.info("init_db complete: %s", describe(target))
