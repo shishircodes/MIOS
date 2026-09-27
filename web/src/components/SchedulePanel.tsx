@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 import { Section } from '~/components/ui'
 import { Link } from '@tanstack/react-router'
-import { runPipelineNow, saveSchedule, scheduleQueryOptions, slackStatusQueryOptions } from '~/lib/api'
+import { retryRun, runPipelineNow, saveSchedule, scheduleQueryOptions, slackStatusQueryOptions } from '~/lib/api'
 import type { PipelineRun, SchedulePayload } from '~/lib/types'
 
 /** Zones the operators actually work in, plus UTC as an escape hatch. A full
@@ -26,7 +26,17 @@ function when(iso: string | null, tz: string): string {
   })
 }
 
-function RunRow({ r, tz }: { r: PipelineRun; tz: string }) {
+function RunRow({
+  r, tz, retrying, blocked, onRetry,
+}: {
+  r: PipelineRun
+  tz: string
+  /** This run's retry is in progress. */
+  retrying: boolean
+  /** Why no retry can start now, if one cannot. */
+  blocked: string | null
+  onRetry: (id: string) => void
+}) {
   // A finished run with a note left part of its collection unclassified.
   const incomplete = r.status === 'ok' && !!r.note
   const label = incomplete
@@ -44,9 +54,28 @@ function RunRow({ r, tz }: { r: PipelineRun; tz: string }) {
       <div className="muted">{r.trigger === 'schedule' ? 'Automatic' : 'Started by hand'}</div>
       <div className="muted">{when(r.startedAt, tz)}</div>
       <div className="num">{r.collected === null ? '—' : r.collected.toLocaleString()}</div>
-      <div className="muted" title={r.note ?? undefined}>
+      <div className="muted">
         {r.startedBy ?? (r.trigger === 'schedule' ? 'On schedule' : '—')}
       </div>
+      {/* The note used to be a hover tooltip, so the reason a run was
+          incomplete — and what could be done about it — was easy to miss. */}
+      {r.note && r.status !== 'running' && (
+        <div className="run-extra">
+          <span className="run-note">{r.note}</span>
+          {retrying ? (
+            <span className="run-retrying">Retrying now…</span>
+          ) : incomplete && (r.waiting ?? 0) > 0 ? (
+            <button
+              className="btn sm"
+              disabled={!!blocked}
+              title={blocked ?? undefined}
+              onClick={() => onRetry(r.id)}
+            >
+              Retry the {r.waiting} unclassified
+            </button>
+          ) : null}
+        </div>
+      )}
     </div>
   )
 }
@@ -83,6 +112,16 @@ export function SchedulePanel() {
       qc.setQueryData(scheduleQueryOptions.queryKey, payload)
       setDraft(payload)
       setProblem(null)
+    },
+    onError: (e: Error) => setProblem(e.message),
+  })
+
+  const retry = useMutation({
+    mutationFn: retryRun,
+    onSuccess: (r) => {
+      setStarted(r.note)
+      setProblem(null)
+      void qc.invalidateQueries({ queryKey: scheduleQueryOptions.queryKey })
     },
     onError: (e: Error) => setProblem(e.message),
   })
@@ -237,8 +276,8 @@ export function SchedulePanel() {
       </div>
 
       <div className="sched-actions">
-        <button className="btn sm ghost" disabled={busy} onClick={() => runNow.mutate()}>
-          {data.activeRun ? 'A run is in progress' : 'Run now'}
+        <button className="btn sm ghost" disabled={busy || !!data.retrying} onClick={() => runNow.mutate()}>
+          {data.activeRun ? 'A run is in progress' : data.retrying ? 'A retry is running' : 'Run now'}
         </button>
         <span className="muted">
           Collects, classifies and builds the digest immediately. Takes a few minutes.{' '}
@@ -255,7 +294,20 @@ export function SchedulePanel() {
             <div className="num">Collected</div>
             <div>By</div>
           </div>
-          {data.history.map((r) => <RunRow key={r.id} r={r} tz={data.timezone} />)}
+          {data.history.map((r) => (
+            <RunRow
+              key={r.id}
+              r={r}
+              tz={data.timezone}
+              retrying={data.retrying?.runId === r.id}
+              blocked={
+                data.activeRun ? 'A run is in progress — it classifies waiting records itself.'
+                  : data.retrying ? 'A retry is already running.'
+                    : retry.isPending ? 'Starting…' : null
+              }
+              onRetry={(id) => retry.mutate(id)}
+            />
+          ))}
         </>
       )}
     </Section>

@@ -492,6 +492,11 @@ export async function runPipelineNow(): Promise<{ started: boolean; runId: strin
   return postOrExplain('/api/admin/schedule/run', { method: 'POST' })
 }
 
+/** Classify what a run left waiting and rebuild its pulse and digest. */
+export async function retryRun(runId: string): Promise<{ started: boolean; runId: string; note: string }> {
+  return postOrExplain(`/api/admin/schedule/runs/${encodeURIComponent(runId)}/retry`, { method: 'POST' })
+}
+
 /** Model routing, provider status and today's usage. Admin only. */
 export const llmSettingsQueryOptions = queryOptions({
   queryKey: ['admin', 'llm'],

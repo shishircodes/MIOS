@@ -33,6 +33,11 @@ from loader.feature_settings import describe as describe_feature
 from loader.feature_settings import set_enabled as set_feature_enabled
 from loader.llm_settings import UnknownPurpose, clear_route, set_route
 from loader import pipeline_settings
+from pipeline.retry import RetryRefused
+from pipeline.retry import check as retry_check
+from pipeline.retry import in_progress as retry_in_progress
+from pipeline.retry import retry_unclassified
+from pipeline.retry import waiting_for as retry_waiting_for
 from loader.db import connect
 from loader.schedule import (
     DAY_NAMES,
@@ -392,8 +397,25 @@ def _schedule_payload(sched: Schedule) -> dict[str, Any]:
         #: and never fire, which is the worst possible failure for this feature.
         "schedulerRunning": settings.scheduler_enabled,
         "activeRun": run_log.active_run(),
-        "history": run_log.recent(8),
+        #: An administrator's retry of a run's leftovers, while it runs.
+        "retrying": retry_in_progress(),
+        "history": [_with_waiting(r) for r in run_log.recent(8)],
     }
+
+
+def _with_waiting(run: dict[str, Any]) -> dict[str, Any]:
+    """A run, with how many of its records are still unclassified.
+
+    Counted only for finished runs that carry a note — the ones that read
+    "Incomplete" — which is all the Retry button needs.
+    """
+    waiting = None
+    if run["status"] == run_log.STATUS_OK and run.get("note"):
+        try:
+            waiting = retry_waiting_for(run["id"])
+        except Exception as exc:  # noqa: BLE001 - the button is optional, the row is not
+            log.warning("admin: could not count waiting rows for %s (%s)", run["id"], exc)
+    return {**run, "waiting": waiting}
 
 
 @router.get("/schedule")
@@ -463,6 +485,9 @@ async def run_now(user: dict[str, Any] = Depends(require_admin)) -> dict[str, An
             return run_log.claim(trigger=run_log.TRIGGER_MANUAL,
                                  started_by=user["email"])
 
+    if retry_in_progress():
+        raise HTTPException(status_code=409, detail="A retry of the last run is classifying its "
+                                                    "leftovers. Start a run when it has finished.")
     try:
         # Claim synchronously so a refusal is a 409 the administrator sees,
         # rather than a failure that only appears in the log a second later.
@@ -473,6 +498,34 @@ async def run_now(user: dict[str, Any] = Depends(require_admin)) -> dict[str, An
     asyncio.create_task(_finish_manual_run(run_id))
     return {"started": True, "runId": run_id,
             "note": "The run has started. It takes a few minutes; this page shows how it went."}
+
+
+@router.post("/schedule/runs/{run_id}/retry", status_code=202)
+async def retry_run(run_id: str, user: dict[str, Any] = Depends(require_admin)) -> dict[str, Any]:
+    """Classify what a run left waiting, then rebuild its pulse and digest.
+
+    For when the automatic retries were not enough — the provider was down for
+    longer, or the day's AI calls ran out. Runs in the background, like Run
+    now: with the pause between AI calls it takes a minute or more. Refused
+    while a pipeline run or another retry is going.
+    """
+    try:
+        await asyncio.to_thread(retry_check, run_id)
+    except RetryRefused as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    asyncio.create_task(_finish_retry(run_id, user["email"]))
+    return {"started": True, "runId": run_id,
+            "note": "Retrying. It takes a minute or two; this page shows how it went."}
+
+
+async def _finish_retry(run_id: str, by: str) -> None:
+    try:
+        result = await asyncio.to_thread(retry_unclassified, run_id, by=by)
+        log.info("admin: retry of %s by %s — %s", run_id, by, result)
+    except RetryRefused as exc:
+        log.info("admin: retry of %s not started (%s)", run_id, exc)
+    except Exception:  # noqa: BLE001 - nobody is waiting on this task
+        log.exception("admin: retry of %s failed", run_id)
 
 
 async def _finish_manual_run(run_id: str) -> None:

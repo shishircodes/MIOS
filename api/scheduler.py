@@ -185,6 +185,15 @@ async def _tick(sched: Any = None) -> None:
         if await asyncio.to_thread(run_log.has_run_for, due):
             return
 
+        # An administrator's retry is classifying the last run's leftovers.
+        # Starting now would send the same records to the AI twice; the due
+        # run is still owed on the next tick, well inside its catch-up window.
+        from pipeline.retry import in_progress as retry_in_progress
+
+        if retry_in_progress():
+            log.info("scheduler: %s is due, but a retry is running — waiting", sched.describe())
+            return
+
         log.info("scheduler: %s is due (%s) — starting", sched.describe(), due.isoformat())
         await run_pipeline(trigger=run_log.TRIGGER_SCHEDULE, due_at=due)
     except (run_log.RunInProgress, run_log.AlreadyRan) as exc:

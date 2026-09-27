@@ -3,6 +3,7 @@ import { Link } from '@tanstack/react-router'
 import { useRef, useState } from 'react'
 import { Explainer, Icons, Loading, Section } from '~/components/ui'
 import { dashboardQueryOptions } from '~/lib/api'
+import { useAuth } from '~/lib/auth-context'
 import type { DashboardFilters } from '~/lib/api'
 import { useDrawPath, useFigure, useGrowSlices, useReveal } from '~/lib/motion'
 import type { Breakdown, CollectionPoint } from '~/lib/types'
@@ -423,6 +424,7 @@ function Composition({ items, total }: { items: Breakdown[]; total: number }) {
 }
 
 export function DashboardScreen() {
+  const isAdmin = Boolean(useAuth().session?.isAdmin)
   const [filters, setFilters] = useState<DashboardFilters>({})
   const { data, isPending, isFetching, error } = useQuery(dashboardQueryOptions(filters))
   const scope = useRef<HTMLDivElement>(null)
@@ -681,6 +683,11 @@ export function DashboardScreen() {
               </div>
               <div className="hero-meta">{run.collected} records collected before classification</div>
               {run.note && <div className="hero-meta">{run.note}</div>}
+              {run.note && run.status === 'ok' && isAdmin && (
+                <div className="hero-meta">
+                  <Link to="/schedule">Retry what it left unclassified →</Link>
+                </div>
+              )}
             </>
           ) : (
             <div className="hero-meta">No run log for this collection.</div>

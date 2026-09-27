@@ -1485,6 +1485,15 @@ input, textarea, select { font-family: inherit; }
   font-variant-numeric: tabular-nums;
 }
 
+/* Under a run: its note, and the retry for what it left unclassified. */
+.run-extra {
+  grid-column: 1 / -1;
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+  font-size: 12.5px;
+}
+.run-note { color: var(--amber-ink); }
+.run-retrying { font-family: var(--mono); font-size: 11.5px; color: var(--ink-3); }
+
 @media (max-width: 760px) {
   .run-row {
     grid-template-columns: 1fr 1fr;
