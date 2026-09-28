@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
-import { Explainer, Section } from '~/components/ui'
+import { Explainer, Section, SkeletonCard } from '~/components/ui'
 import {
   clearSlackWebhook,
   sendSlackTest,
@@ -48,7 +48,7 @@ export function SlackPanel() {
   const toggle = useMutation({ mutationFn: setSlackEnabled, onSuccess: settle, onError })
   const test = useMutation({ mutationFn: sendSlackTest, onSuccess: settle, onError })
 
-  if (isPending) return null
+  if (isPending) return <SkeletonCard rows={3} />
   if (error || !data) {
     return (
       <Section title="Slack digest">

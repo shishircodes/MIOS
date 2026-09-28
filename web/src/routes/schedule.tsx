@@ -1,12 +1,15 @@
 import { useQuery } from '@tanstack/react-query'
+import { prefetch } from '~/lib/query-client'
+import { slackStatusQueryOptions } from '~/lib/api'
 import { Link, createFileRoute } from '@tanstack/react-router'
 import { AdminOnly } from '~/components/AdminOnly'
 import { SchedulePanel } from '~/components/SchedulePanel'
-import { Loading } from '~/components/ui'
+import { SkeletonCard } from '~/components/ui'
 import { scheduleQueryOptions } from '~/lib/api'
 
 export const Route = createFileRoute('/schedule')({
   head: () => ({ meta: [{ title: 'Schedule & runs · MIOS' }] }),
+  loader: prefetch(scheduleQueryOptions, slackStatusQueryOptions),
   component: () => (
     <AdminOnly>
       <ScheduleScreen />
@@ -32,7 +35,7 @@ function ScheduleScreen() {
           <div>What each run collects is set under <Link to="/sources">Data sources</Link></div>
         </div>
       </div>
-      {isPending ? <Loading lines={['Reading the schedule', 'Checking recent runs']} /> : <SchedulePanel />}
+      {isPending ? <SkeletonCard rows={5} tall={90} /> : <SchedulePanel />}
     </div>
   )
 }

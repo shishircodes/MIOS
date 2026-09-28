@@ -1,5 +1,5 @@
 import type { QueryClient } from '@tanstack/react-query'
-import { QueryClientProvider, QueryClient as QC, useQuery } from '@tanstack/react-query'
+import { QueryClientProvider, useQuery } from '@tanstack/react-query'
 import {
   HeadContent,
   Link,
@@ -12,7 +12,7 @@ import {
 import type { ReactNode } from 'react'
 import { useEffect, useRef, useState } from 'react'
 import { NotFound } from '~/components/NotFound'
-import { Icons, Loading } from '~/components/ui'
+import { Icons, Loading, ShellSkeleton } from '~/components/ui'
 import { watchlistQueryOptions } from '~/lib/api'
 import { AuthProvider, useAuth } from '~/lib/auth-context'
 import appCss from '~/styles/app.css?url'
@@ -155,11 +155,10 @@ function AuthGate({ children }: { children: ReactNode }) {
   }, [resolved, signedIn, onSignIn, pathname, search, navigate])
 
   if (!resolved) {
-    return (
-      <div className="signin-checking">
-        <Loading lines={['Checking you in…']} />
-      </div>
-    )
+    // The app's frame rather than a blank screen with a spinner: the page's
+    // own requests are already in flight (route loaders), so the wait is
+    // usually just the sign-in check.
+    return <ShellSkeleton />
   }
   // /signin renders bare — no sidebar, no topbar.
   if (onSignIn) {
@@ -406,15 +405,12 @@ function Shell({ children }: { children: ReactNode }) {
   )
 }
 
-// One QueryClient for the browser; router context provides its own per request on the server.
-const browserQueryClient = new QC({
-  defaultOptions: { queries: { staleTime: 30_000, refetchOnWindowFocus: false } },
-})
-
 function RootComponent() {
+  // The router's client, so loaders and components share one cache.
+  const { queryClient } = Route.useRouteContext()
   return (
     <RootDocument>
-      <QueryClientProvider client={browserQueryClient}>
+      <QueryClientProvider client={queryClient}>
         <AuthProvider>
           {/* AuthGate decides whether to wrap the route in the dashboard shell;
               /signin renders bare. */}

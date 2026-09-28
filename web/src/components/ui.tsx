@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { ReactNode } from 'react'
+import type { CSSProperties, ReactNode } from 'react'
 
 // ----- Inline monoline icons -----
 function Icon({ d, size = 14, sw = 1.4 }: { d: string; size?: number; sw?: number }) {
@@ -224,6 +224,107 @@ export function Drawer({ open, onClose, title, children }: { open: boolean; onCl
         <div className="drawer-body">{shown.children}</div>
       </div>
     </>
+  )
+}
+
+// ----- Skeletons -----
+//
+// Placeholders in the shape of what is coming, so the page is laid out before
+// its data arrives and nothing jumps when it does. One live region per
+// skeleton says "Loading…" to a screen reader; the blocks themselves are
+// decoration.
+
+/** One grey block. */
+export function Skel({ w = '100%', h = 12, r, style }: {
+  w?: number | string; h?: number | string; r?: number; style?: CSSProperties
+}) {
+  return <span className="skel" style={{ width: w, height: h, borderRadius: r, ...style }} />
+}
+
+function SkelLines({ n, widths = ['92%', '78%', '85%', '60%'] }: { n: number; widths?: string[] }) {
+  return (
+    <div className="skel-stack">
+      {Array.from({ length: n }, (_, i) => <Skel key={i} w={widths[i % widths.length]} />)}
+    </div>
+  )
+}
+
+/** A card with a heading rule and `rows` list rows — the shape of most panels. */
+export function SkeletonCard({ rows = 4, title = 180, tall }: { rows?: number; title?: number; tall?: number }) {
+  return (
+    <div className="section skel-card" aria-hidden="true">
+      <div className="section-h"><Skel w={title} h={14} /><Skel w={70} h={10} /></div>
+      {tall ? <div style={{ padding: 16 }}><Skel h={tall} r={4} /></div> : null}
+      {Array.from({ length: rows }, (_, i) => (
+        <div className="skel-row" key={i}>
+          <Skel w={28} h={28} r={6} />
+          <div className="skel-stack" style={{ flex: 1 }}>
+            <Skel w={i % 2 ? '55%' : '70%'} h={12} />
+            <Skel w={i % 2 ? '35%' : '45%'} h={10} />
+          </div>
+          <Skel w={48} h={12} />
+        </div>
+      ))}
+    </div>
+  )
+}
+
+/** A whole page: header, then the layout that page uses. */
+export function PageSkeleton({ kind = 'list', label = 'Loading…' }: {
+  kind?: 'dashboard' | 'list' | 'panels' | 'split'
+  label?: string
+}) {
+  return (
+    <div className="page" aria-busy="true">
+      <span className="sr-only" role="status">{label}</span>
+      <div className="page-header" aria-hidden="true">
+        <div className="skel-stack" style={{ gap: 10 }}>
+          <Skel w={140} h={10} />
+          <Skel w={320} h={26} />
+        </div>
+        <div className="skel-stack" style={{ alignItems: 'flex-end', gap: 8 }}>
+          <Skel w={180} h={10} />
+          <Skel w={120} h={10} />
+        </div>
+      </div>
+      {kind === 'dashboard' && (
+        <div aria-hidden="true">
+          <div className="skel-hero"><Skel w={90} h={10} /><Skel w={120} h={34} /><Skel w="60%" h={8} r={999} /></div>
+          <div className="kpi2-row">
+            {[0, 1, 2, 3].map((i) => (
+              <div className="section skel-card" key={i} style={{ padding: 16 }}>
+                <Skel w={90} h={10} /><Skel w={60} h={26} style={{ marginTop: 10 }} /><Skel h={24} style={{ marginTop: 10 }} />
+              </div>
+            ))}
+          </div>
+          <div className="split-2"><SkeletonCard rows={0} tall={220} /><SkeletonCard rows={5} /></div>
+        </div>
+      )}
+      {kind === 'list' && <div aria-hidden="true"><SkeletonCard rows={8} title={220} /></div>}
+      {kind === 'panels' && <div aria-hidden="true"><SkeletonCard rows={3} /><SkeletonCard rows={4} /></div>}
+      {kind === 'split' && (
+        <div className="split-2" aria-hidden="true"><SkeletonCard rows={7} /><SkeletonCard rows={4} /></div>
+      )}
+    </div>
+  )
+}
+
+/** The app frame while sign-in is being checked: top bar, sidebar and a page. */
+export function ShellSkeleton() {
+  return (
+    <div className="app" aria-busy="true">
+      <span className="sr-only" role="status">Checking you in…</span>
+      <div className="topbar" aria-hidden="true">
+        <Skel w={30} h={30} r={6} /><Skel w={60} h={14} /><Skel w={160} h={12} />
+        <span style={{ flex: 1 }} /><Skel w={28} h={28} r={14} />
+      </div>
+      <nav className="sidebar" aria-hidden="true">
+        {[90, 120, 110, 130, 100, 120, 90, 110].map((w, i) => (
+          <div key={i} className="skel-nav"><Skel w={16} h={16} r={4} /><Skel w={w} h={12} /></div>
+        ))}
+      </nav>
+      <div className="main"><PageSkeleton kind="dashboard" label="Checking you in…" /></div>
+    </div>
   )
 }
 

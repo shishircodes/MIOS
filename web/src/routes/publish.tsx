@@ -1,7 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { prefetch } from '~/lib/query-client'
 import { Link, createFileRoute } from '@tanstack/react-router'
 import { useEffect, useRef, useState } from 'react'
-import { Icons, Loading, Section } from '~/components/ui'
+import { Icons, Section, SkeletonCard } from '~/components/ui'
 import {
   approveReport,
   deleteReport,
@@ -22,6 +23,7 @@ import type { Report, ReportSection } from '~/lib/types'
 
 export const Route = createFileRoute('/publish')({
   head: () => ({ meta: [{ title: 'Quarterly reports · MIOS' }] }),
+  loader: prefetch(reportsQueryOptions, quartersQueryOptions),
   component: PublishScreen,
 })
 
@@ -157,7 +159,7 @@ function PublishScreen() {
         )}
       </div>
 
-      {list.isLoading && <Loading lines={['Looking for reports…']} />}
+      {list.isLoading && <SkeletonCard rows={6} title={240} />}
 
       {!list.isLoading && !list.data?.reports.length && (
         <Section title="No reports yet">

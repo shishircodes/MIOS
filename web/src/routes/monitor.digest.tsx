@@ -1,7 +1,8 @@
 import { useQuery } from '@tanstack/react-query'
+import { prefetch } from '~/lib/query-client'
 import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { CapturedAt, Icons, Loading, Section, SparkBar, TierChip, Trend } from '~/components/ui'
+import { CapturedAt, Icons, Section, SparkBar, TierChip, Trend, PageSkeleton } from '~/components/ui'
 import { SignalDrawer, openableRow } from '~/components/SignalDrawer'
 import { digestArchiveQueryOptions, digestByRunQueryOptions, digestQueryOptions } from '~/lib/api'
 import { UnauthenticatedError } from '~/lib/auth'
@@ -31,6 +32,7 @@ export const Route = createFileRoute('/monitor/digest')({
   validateSearch: (search: Record<string, unknown>): { q?: string } =>
     typeof search.q === 'string' && search.q ? { q: search.q } : {},
   head: () => ({ meta: [{ title: 'Weekly digest · MIOS' }] }),
+  loader: prefetch(digestQueryOptions, digestArchiveQueryOptions),
   component: WeeklyDigest,
 })
 
@@ -91,15 +93,7 @@ function WeeklyDigest() {
 
   if (isLoading) {
     return (
-      <div className="page">
-        <Loading
-          lines={[
-            'Reading this week’s market…',
-            'Sorting signal from noise…',
-            'Lining up the numbers…',
-          ]}
-        />
-      </div>
+      <PageSkeleton kind="split" />
     )
   }
 

@@ -1,15 +1,18 @@
 import { Link, createFileRoute } from '@tanstack/react-router'
+import { prefetch } from '~/lib/query-client'
+import { pipelineSettingsQueryOptions } from '~/lib/api'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useRef, useState } from 'react'
 import { AdminOnly } from '~/components/AdminOnly'
 import { RunLimitsPanel } from '~/components/RunLimitsPanel'
-import { Explainer, Loading, Section } from '~/components/ui'
+import { Explainer, Section, PageSkeleton } from '~/components/ui'
 import { setSourceEnabled, sourceHealthQueryOptions } from '~/lib/api'
 import { useFigure, useReveal } from '~/lib/motion'
 import type { SourceHealth, SourceStatus } from '~/lib/types'
 
 export const Route = createFileRoute('/sources')({
   head: () => ({ meta: [{ title: 'Data sources · MIOS' }] }),
+  loader: prefetch(sourceHealthQueryOptions, pipelineSettingsQueryOptions),
   component: () => (
     <AdminOnly>
       <SourcesScreen />
@@ -149,7 +152,7 @@ function SourcesScreen() {
   const totalRef = useFigure(data?.totalRecords ?? 0, { delay: 0.1 })
   useReveal(scope, '.src-row', { key: data?.sources.length ?? 0, delay: 0.12, max: 10 })
 
-  if (isPending) return <div className="page"><Loading lines={['Checking each source', 'Counting what came back']} /></div>
+  if (isPending) return <PageSkeleton kind="list" />
   if (error) return <div className="page"><div className="notice err">Could not load source health. {error.message}</div></div>
 
   const healthy = data.sources.filter((s) => s.status === 'ok').length

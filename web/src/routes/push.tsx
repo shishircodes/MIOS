@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { prefetch } from '~/lib/query-client'
 import { createFileRoute } from '@tanstack/react-router'
 import { Fragment, useEffect, useRef, useState } from 'react'
 import { ScoringExplainer } from '~/components/ScoringExplainer'
@@ -14,6 +15,7 @@ import { MatchDetail } from '~/components/MatchDetail'
 
 export const Route = createFileRoute('/push')({
   head: () => ({ meta: [{ title: 'Candidate matching · MIOS' }] }),
+  loader: prefetch(profilesQueryOptions(''), scoringModelQueryOptions),
   // Arriving from a signal's "Find candidates": open this saved profile's
   // matches, with the named company's working already open.
   validateSearch: (search: Record<string, unknown>): { profile?: string; company?: string } => ({

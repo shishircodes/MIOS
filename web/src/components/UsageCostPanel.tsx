@@ -1,6 +1,6 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { useRef, useState } from 'react'
-import { Explainer, Loading, Section } from '~/components/ui'
+import { Explainer, Section, Skel } from '~/components/ui'
 import { llmUsageQueryOptions } from '~/lib/api'
 import type { UsageBucket, UsageReport } from '~/lib/types'
 
@@ -150,7 +150,7 @@ export function UsageCostPanel() {
   if (isPending) {
     return (
       <Section title="Tokens & estimated cost">
-        <Loading lines={['Adding up tokens', 'Pricing each model']} />
+        <div aria-busy="true" style={{ padding: 16 }}><Skel h={180} r={4} /></div>
       </Section>
     )
   }

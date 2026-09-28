@@ -1,10 +1,12 @@
 import { useQuery } from '@tanstack/react-query'
+import { prefetch } from '~/lib/query-client'
 import { createFileRoute } from '@tanstack/react-router'
-import { Loading, Section, TierChip } from '~/components/ui'
+import { Section, TierChip, SkeletonCard } from '~/components/ui'
 import { watchlistQueryOptions } from '~/lib/api'
 
 export const Route = createFileRoute('/watchlist')({
   head: () => ({ meta: [{ title: 'Watchlist · MIOS' }] }),
+  loader: prefetch(watchlistQueryOptions),
   component: WatchlistScreen,
 })
 
@@ -52,9 +54,10 @@ function WatchlistScreen() {
       </div>
 
       {isLoading && (
-        <Section title="Watchlist">
-          <Loading lines={['Loading companies…']} />
-        </Section>
+        <>
+          <SkeletonCard rows={6} />
+          <SkeletonCard rows={4} />
+        </>
       )}
 
       {!isLoading &&

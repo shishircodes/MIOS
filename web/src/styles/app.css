@@ -2368,6 +2368,29 @@ input, textarea, select { font-family: inherit; }
 .limit-help { font-size: 12.5px; color: var(--ink-2); line-height: 1.45; margin: 6px 0 0; }
 .limits-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 14px 16px; }
 
+/* ---------- Skeletons ----------
+   The shape of what is loading, in the page's own layout. A slow sweep rather
+   than a pulse, so a long wait reads as progress rather than as blinking. */
+.skel {
+  display: block; flex-shrink: 0; border-radius: 4px;
+  background: linear-gradient(90deg, #E9ECE8 0%, #F4F6F3 45%, #E9ECE8 90%);
+  background-size: 300% 100%;
+  animation: skel-sweep 1.6s ease-in-out infinite;
+}
+@keyframes skel-sweep { from { background-position: 100% 0; } to { background-position: -50% 0; } }
+.skel-stack { display: flex; flex-direction: column; gap: 7px; min-width: 0; }
+.skel-card { margin-bottom: 18px; }
+.skel-card .section-h { box-shadow: inset 0 -2px 0 #D5DAD6; }
+.skel-row { display: flex; align-items: center; gap: 12px; padding: 12px 18px; border-bottom: 1px solid var(--line); }
+.skel-row:last-child { border-bottom: none; }
+.skel-hero {
+  display: flex; flex-direction: column; gap: 12px; padding: 22px 26px; margin-bottom: 18px;
+  border-radius: var(--radius); background: var(--ink);
+}
+.skel-hero .skel { background: linear-gradient(90deg, #2C3B4E 0%, #3A4A5E 45%, #2C3B4E 90%); background-size: 300% 100%; }
+.skel-nav { display: flex; align-items: center; gap: 10px; padding: 9px 10px; }
+@media (prefers-reduced-motion: reduce) { .skel { animation: none; } }
+
 /* ==========================================================================
    Responsive layout. Kept last on purpose: a media query adds no specificity,
    so these overrides only win against the component rules above if they come
