@@ -13,6 +13,8 @@ import type { ReactNode } from 'react'
 import { useEffect, useRef, useState } from 'react'
 import { NotFound } from '~/components/NotFound'
 import { Icons, Loading, ShellSkeleton } from '~/components/ui'
+import { PageGuideButton, PageGuideDialog } from '~/components/PageGuide'
+import { PAGE_GUIDES } from '~/lib/page-guides'
 import { watchlistQueryOptions } from '~/lib/api'
 import { AuthProvider, useAuth } from '~/lib/auth-context'
 import appCss from '~/styles/app.css?url'
@@ -288,6 +290,12 @@ function Shell({ children }: { children: ReactNode }) {
   }, [])
   // Choosing a page is the end of using the menu.
   useEffect(() => setMenuOpen(false), [pathname])
+
+  // What each part of the current page means. Closed on navigation, so it
+  // never describes a page other than the one behind it.
+  const guide = PAGE_GUIDES[pathname]
+  const [guideOpen, setGuideOpen] = useState(false)
+  useEffect(() => setGuideOpen(false), [pathname])
   useEffect(() => {
     if (!menuOpen) return
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setMenuOpen(false) }
@@ -383,6 +391,12 @@ function Shell({ children }: { children: ReactNode }) {
           </div>
         ))}
         <div className="footer">
+          {guide && (
+            <PageGuideButton
+              iconOnly={railCollapsed}
+              onOpen={() => { setMenuOpen(false); setGuideOpen(true) }}
+            />
+          )}
           <span
             className={`rail-dot ${CONNECTION[apiStatus].dot}`}
             title={CONNECTION[apiStatus].label}
@@ -401,6 +415,7 @@ function Shell({ children }: { children: ReactNode }) {
 
       <div className="main">{children}</div>
       </div>
+      {guide && <PageGuideDialog guide={guide} open={guideOpen} onClose={() => setGuideOpen(false)} />}
     </>
   )
 }

@@ -5,7 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useRef, useState } from 'react'
 import { AdminOnly } from '~/components/AdminOnly'
 import { RunLimitsPanel } from '~/components/RunLimitsPanel'
-import { Explainer, Section, PageSkeleton } from '~/components/ui'
+import { Section, PageSkeleton } from '~/components/ui'
 import { setSourceEnabled, sourceHealthQueryOptions } from '~/lib/api'
 import { useFigure, useReveal } from '~/lib/motion'
 import type { SourceHealth, SourceStatus } from '~/lib/types'
@@ -109,17 +109,11 @@ function SourceRow({
       </div>
 
       {/* Spans the whole row rather than sitting in the toggle column, which is
-          80px wide and rendered this one letter per line.
-
-          Visible, not a tooltip: the reason a source ships off is what stops
-          somebody switching it on, waiting a week and rediscovering the block
-          from scratch. A `title` is invisible on touch and undiscoverable on
-          desktop. */}
+          80px wide and rendered this one letter per line. The reason itself is
+          in the page guide, and repeated as a warning if the switch is turned
+          on — which is the moment it has to be read. */}
       {shipsOff && !s.enabled && (
-        <details className="src-why">
-          <summary>Why is this off?</summary>
-          <p>{s.offReason}</p>
-        </details>
+        <p className="src-why">Off by default for a known reason — the page guide explains it.</p>
       )}
     </div>
   )
@@ -159,7 +153,6 @@ function SourcesScreen() {
   // "N of M collecting" now excludes switched-off sources, because they are
   // not. It counted them whenever their last run was recent enough.
   const live = data.sources.filter((s) => s.status !== 'retired')
-  const pending = data.sources.reduce((n, s) => n + s.pending, 0)
 
 
   return (
@@ -230,33 +223,6 @@ function SourcesScreen() {
           />
         ))}
         </div>
-        {/* Attached to the table it explains, rather than a card of its own.
-            A separate "How to read this" panel holding one disclosure was two
-            headings deep for a paragraph nobody needs twice. */}
-        <Explainer title="Where these figures come from">
-          <p>
-            Every figure here is counted from the collected records themselves, not
-            from a separate log — so it cannot drift out of step with what is
-            actually in the database.
-          </p>
-          <p>
-            <strong>Last run</strong> is how many records a source returned the last
-            day it collected. Each source stops at {data.perSourceLimit} records per
-            run, so a run sitting exactly on that number was probably cut short
-            rather than finished.
-          </p>
-          <p>
-            A source is marked <strong>stale</strong> once {data.staleAfterDays} days
-            pass with nothing collected — longer than the weekly cycle, so a normal
-            week never trips it.
-          </p>
-          {pending > 0 && (
-            <p>
-              {pending.toLocaleString()} records are waiting to be classified. They
-              are collected and stored; they just have not been read yet.
-            </p>
-          )}
-        </Explainer>
       </Section>
 
       <RunLimitsPanel labels={Object.fromEntries(data.sources.map((s) => [s.name, s.label]))} />

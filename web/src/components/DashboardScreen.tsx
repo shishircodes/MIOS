@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 import { useRef, useState } from 'react'
-import { Explainer, Icons, PageSkeleton, Section } from '~/components/ui'
+import { Icons, PageSkeleton, Section } from '~/components/ui'
 import { dashboardQueryOptions } from '~/lib/api'
 import { useAuth } from '~/lib/auth-context'
 import type { DashboardFilters } from '~/lib/api'
@@ -764,25 +764,6 @@ export function DashboardScreen() {
                 </div>
               </div>
             </div>
-            <Explainer title="Why collections, not calendar weeks">
-              <p>
-                Each point is one collection, not one calendar week. The pipeline runs
-                weekly so the two usually coincide &mdash; but when a run is missed, a
-                calendar chart has to draw something for the gap, and every option
-                misleads: a zero says nobody was hiring, a joined line invents a
-                measurement, and repeating the last value states it twice.
-              </p>
-              <p>
-                Movement is measured against the previous collection. Where there is no
-                earlier one, the tile says so instead of showing a direction it cannot
-                justify.
-              </p>
-              <p>
-                Only classified signals are counted here. A row that has been collected
-                but not yet read has no sector or region, so including it would move the
-                totals without being able to say where.
-              </p>
-            </Explainer>
           </Section>
 
           <Section
@@ -842,21 +823,6 @@ export function DashboardScreen() {
             <div className="rail-body">
               <Composition items={groups} total={latest.total} />
             </div>
-            <Explainer title="What counts as a decision point">
-              <p>
-                <b>This grouping is a judgement, not a measurement.</b> Treating a project
-                or a leadership change as a decision point and a vacancy as routine is an
-                editorial call about what usually merits a call. The signal categories
-                panel below shows what the classifier actually recorded.
-              </p>
-              <ul className="group-notes">
-                {groups.map((g) => (
-                  <li key={g.key}>
-                    <b>{g.label}.</b> {g.what}
-                  </li>
-                ))}
-              </ul>
-            </Explainer>
           </Section>
 
           <Section title="Sectors">
@@ -880,20 +846,6 @@ export function DashboardScreen() {
                 total={sources.reduce((n, s) => n + s.count, 0)}
               />
             </div>
-            <Explainer title="Why this adds up differently">
-              <p>
-                These count what each source <i>collected</i>, including rows still
-                awaiting classification &mdash; a row not yet read was still collected by
-                its source, and excluding it would understate a scraper that ran
-                perfectly. Every other panel counts classified signals only, so this total
-                can be higher.
-              </p>
-              <p>
-                A source missing from this list contributed nothing to the collection,
-                which is the quickest way to see a scraper that has quietly stopped
-                working. <Link to="/sources">Source health &rarr;</Link>
-              </p>
-            </Explainer>
           </Section>
         </div>
       </div>

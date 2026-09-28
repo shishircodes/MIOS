@@ -254,24 +254,15 @@ export function SchedulePanel() {
         <p>
           {data.enabled ? (
             <>
-              The next automatic run is <strong>{when(data.nextRunAt, data.timezone)}</strong>.
-              Every time on this panel is shown in {data.timezone}, the schedule's own
-              timezone — not your browser's and not the server's, so it reads the same
-              wherever it is opened from and wherever MIOS is deployed. Changes take
-              effect as soon as they are saved; no redeploy is needed.
+              The next automatic run is <strong>{when(data.nextRunAt, data.timezone)}</strong>,
+              {' '}and every time here is in {data.timezone}.
             </>
           ) : (
             <>
-              Automatic runs are paused. Nothing will be collected until this is turned
-              back on or a run is started by hand.
+              Automatic runs are paused; nothing is collected until they are turned back
+              on or a run is started by hand.
             </>
           )}
-        </p>
-        <p>
-          A run missed because the server was down is picked up when it comes back, but
-          only within {data.graceHours} hours. Later than that the week is skipped
-          rather than collected late, because the digest is labelled with the week it
-          covers.
         </p>
       </div>
 

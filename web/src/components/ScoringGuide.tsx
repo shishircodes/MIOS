@@ -1,20 +1,20 @@
 import { useQuery } from '@tanstack/react-query'
-import { Drawer } from '~/components/ui'
 import { scoringModelQueryOptions } from '~/lib/api'
 
 /**
- * How a match score is arrived at.
+ * How a match score is arrived at — the Candidate matching page guide's
+ * scoring section.
  *
  * Every number here comes from the API, which reads the scorer's own constants.
  * Writing the weights out in this file would be quicker and would go stale the
  * first time somebody tuned one — silently, because a screen explaining a
  * calculation that no longer happens still renders perfectly.
  */
-export function ScoringExplainer({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const { data, isPending, error } = useQuery({ ...scoringModelQueryOptions, enabled: open })
+export function ScoringGuide() {
+  const { data, isPending, error } = useQuery(scoringModelQueryOptions)
 
   return (
-    <Drawer open={open} onClose={onClose} title="How the match score works">
+    <>
       {isPending && <p className="muted">Reading the scoring model…</p>}
       {error && (
         <div className="notice err">
@@ -25,7 +25,7 @@ export function ScoringExplainer({ open, onClose }: { open: boolean; onClose: ()
       {data && (
         <div className="scoring-doc">
           <p>
-            Each company is scored out of {data.total} against this candidate. Every point
+            Each company is scored out of {data.total} against the candidate. Every point
             comes from one of the contributors below, and each contributor produces the
             evidence line you see on the row — so any score can be taken apart and argued
             with.
@@ -96,6 +96,6 @@ export function ScoringExplainer({ open, onClose }: { open: boolean; onClose: ()
           </div>
         </div>
       )}
-    </Drawer>
+    </>
   )
 }

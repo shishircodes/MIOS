@@ -1,6 +1,6 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { useRef, useState } from 'react'
-import { Explainer, Section, Skel } from '~/components/ui'
+import { Section, Skel } from '~/components/ui'
 import { llmUsageQueryOptions } from '~/lib/api'
 import type { UsageBucket, UsageReport } from '~/lib/types'
 
@@ -255,41 +255,6 @@ export function UsageCostPanel() {
         )}
       </div>
 
-      <Explainer title="How these costs are estimated">
-        <p>
-          Every model call records the tokens the provider reported, and each call is priced
-          at that model&rsquo;s list rate as of {data.pricesAsOf}. For Claude, cached input
-          read back costs a tenth of the input rate and a cache write costs 1.25&times;.
-        </p>
-        <p>
-          <strong>These are estimates, not a bill.</strong> The free Gemini tier is not charged
-          at all, so a deployment inside it pays nothing; the figure is what the same usage
-          would cost on a paid plan. A model with no published rate shows its tokens with no
-          cost rather than a guess, and a failed call is counted but carries no tokens.
-        </p>
-        {data.trackedSince && (
-          <p>
-            Token tracking began {data.trackedSince.slice(0, 10)}. Calls before that were
-            counted but not measured, so a range reaching further back understates the total.
-          </p>
-        )}
-        <table className="cost-table cost-rates">
-          <caption>Rates used, US$ per million tokens</caption>
-          <thead>
-            <tr><th>Model</th><th className="num">Input</th><th className="num">Output</th><th className="num">Cache read</th></tr>
-          </thead>
-          <tbody>
-            {data.rates.map((r) => (
-              <tr key={`${r.provider}:${r.model}`}>
-                <td>{r.model}{r.longPromptThreshold && <span className="muted"> (higher above {compact(r.longPromptThreshold)} prompt tokens)</span>}</td>
-                <td className="num">{r.input.toFixed(2)}</td>
-                <td className="num">{r.output.toFixed(2)}</td>
-                <td className="num">{r.cacheRead.toFixed(3)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </Explainer>
     </Section>
   )
 }

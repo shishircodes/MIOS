@@ -287,8 +287,7 @@ function PublishScreen() {
                 </a>
               </div>
               <p className="muted" style={{ fontSize: 12, marginTop: 10 }}>
-                A draft exports with a “not approved” banner. Use the printable
-                view and your browser’s Print → Save as PDF.
+                A draft exports with a “not approved” banner.
               </p>
               <GoogleDocExport reportId={doc.id} approved={locked} />
 

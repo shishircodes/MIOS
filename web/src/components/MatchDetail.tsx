@@ -160,9 +160,8 @@ export function MatchDetail({
           <section className="drawer-section">
             <h3>What could not be judged</h3>
             <p className="drawer-lede">
-              These carry {unassessed.reduce((n, c) => n + c.weight, 0)} points between them.
-              They were removed from the total rather than scored zero, so the company is not
-              charged for gaps in our own data.
+              These carry {unassessed.reduce((n, c) => n + c.weight, 0)} points between them,
+              left out of the total rather than scored zero.
             </p>
             {unassessed.map((c) => <ContributionRow key={c.key} c={c} total={modelTotal} />)}
           </section>
@@ -172,9 +171,8 @@ export function MatchDetail({
           <section className="drawer-section">
             <h3>Skills</h3>
             <p className="drawer-lede">
-              {matchedSkills.length} of {skills.length} claimed skills appear in their adverts.
-              Rarer skills count for more: matching something the whole market asks for
-              separates nobody.
+              {matchedSkills.length} of {skills.length} claimed skills appear in their adverts;
+              rarer skills count for more.
             </p>
             <ul className="skill-list">
               {skills.map((s) => (
@@ -210,8 +208,7 @@ export function MatchDetail({
           <section className="drawer-section">
             <h3>What did you do?</h3>
             <p className="drawer-lede">
-              Recorded against the score as it stands now, so the weights can eventually be
-              checked against what actually led somewhere. Nothing here changes this ranking.
+              Recorded against today&rsquo;s score; it does not change this ranking.
             </p>
             {match.outcome ? (
               <div className="outcome-current">

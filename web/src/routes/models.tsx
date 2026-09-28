@@ -3,7 +3,7 @@ import { prefetch } from '~/lib/query-client'
 import { Link, createFileRoute } from '@tanstack/react-router'
 import { useState } from 'react'
 import { AdminOnly } from '~/components/AdminOnly'
-import { Explainer, Section, PageSkeleton } from '~/components/ui'
+import { Section, PageSkeleton } from '~/components/ui'
 import {
   clearLlmRoute,
   clearProviderKey,
@@ -429,30 +429,6 @@ function ModelsScreen() {
             />
           ))}
         </div>
-        <Explainer title="How keys are stored, and which one wins">
-          <p>
-            A key entered here takes effect on the next call — there is no redeploy to wait
-            for, which is the point: a key gets replaced because it leaked or because the
-            free allowance ran out, and both are moments where waiting for a build is the
-            opposite of what is wanted.
-          </p>
-          <p>
-            Keys are encrypted before they are written, with a secret held in the server’s
-            environment and never in the database. A database dump therefore yields
-            ciphertext rather than working credentials. The key is never sent back to this
-            page — the last four characters are shown so you can tell which one is loaded.
-          </p>
-          <p>
-            A key entered here takes precedence over the same provider’s server environment
-            variable, and the row says so when it is doing that. Remove it to go back.
-          </p>
-          <p>
-            <strong>Test</strong> spends one real call. That is deliberate: a key that is
-            stored is not necessarily a key that works — it can be truncated by a paste,
-            revoked, or belong to a project with the API switched off, and all three look
-            identical here until a run fails at five on a Monday morning.
-          </p>
-        </Explainer>
       </Section>
 
       <Section title="Model for each job">
@@ -466,17 +442,6 @@ function ModelsScreen() {
             onClear={(purpose) => reset.mutate(purpose)}
           />
         ))}
-        <Explainer title="When a model change takes effect">
-          <p>
-            A change applies to the next call — nothing is cached between requests, so there
-            is no restart to do.
-          </p>
-          <p>
-            A provider with no API key can still be selected. The choice is saved and takes
-            effect once the key is set on the server, which is more useful than refusing to
-            record a decision that has already been made.
-          </p>
-        </Explainer>
       </Section>
 
       {/* Switches for what the models are asked to do at all, as opposed to
@@ -485,12 +450,6 @@ function ModelsScreen() {
       {data.pushRationale && (
         <Section title="AI features">
           <PushRationaleRow feature={data.pushRationale} />
-          <Explainer title="What switching a feature off does">
-            <p>
-              The feature stops calling a model from the next request. Scores, rankings and
-              everything computed without a model are unchanged — only the written notes go.
-            </p>
-          </Explainer>
         </Section>
       )}
     </div>

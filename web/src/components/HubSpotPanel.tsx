@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
-import { Explainer, Section, SkeletonCard } from '~/components/ui'
+import { Section, SkeletonCard } from '~/components/ui'
 import {
   clearHubSpotKey,
   fetchHubSpotProperties,
@@ -230,8 +230,7 @@ export function HubSpotPanel() {
         <div>
           <div className="llm-purpose">Which HubSpot field is the tier</div>
           <div className="llm-needs">
-            Companies with a value in this field are the watchlist. Map each value to a tier, or
-            leave it blank to keep those companies off.
+            Companies with a value in this field become the watchlist.
           </div>
           {!fields && (
             <div className="llm-meta">
@@ -359,30 +358,6 @@ export function HubSpotPanel() {
         </div>
       </div>
 
-      <Explainer title="What syncing does">
-        <p>
-          MIOS reads the companies that have a tier in your HubSpot and makes them the watchlist.
-          Classification, the weekly digest, Mode Push and the dashboard all use the watchlist, so
-          every mode then works from the client&rsquo;s own tiers. HubSpot is only read, never changed.
-        </p>
-        <p>
-          A company already on the watchlist keeps its name and its aliases — HubSpot has no
-          aliases, and they are how an advert for &ldquo;BHP Group Limited&rdquo; is matched to
-          &ldquo;BHP&rdquo;. After a sync, companies HubSpot no longer tiers come off the watchlist,
-          the built-in list stops being applied, and signals already collected are re-tagged
-          against the new tiers without any AI calls.
-        </p>
-        <p>
-          By default only companies ticked as <strong>Target accounts</strong> are read — that is
-          how HubSpot marks the accounts a team is pursuing. A target account without a tier is
-          left off unless you choose a tier for them.
-        </p>
-        <p>
-          A sync that would leave the watchlist empty is refused, because that almost always means
-          the wrong field was chosen. The sync before each pipeline run never removes anyone: it
-          adds and updates, and lists what it would have removed here for you to apply.
-        </p>
-      </Explainer>
     </Section>
   )
 }

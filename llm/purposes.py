@@ -38,30 +38,25 @@ PURPOSES: dict[str, Purpose] = {
     PURPOSE_CLASSIFY: Purpose(
         name=PURPOSE_CLASSIFY,
         label="Signal classification",
-        needs="Strict JSON for up to a hundred records in one call. Cheap and fast "
-              "matters more than eloquence; the output is fields, not prose.",
+        needs="Tags each collected record with its company, sector, region and category.",
         calls_per_run=1,
     ),
     PURPOSE_PULSE: Purpose(
         name=PURPOSE_PULSE,
         label="Market Pulse",
-        needs="A short written read on the week that may interpret, not merely "
-              "restate. The one place where writing quality is the point.",
+        needs="Writes the short read on the week at the top of the weekly digest.",
         calls_per_run=1,
     ),
     PURPOSE_PUBLISH: Purpose(
         name=PURPOSE_PUBLISH,
         label="Mode Publish reports",
-        needs="Client-facing prose from figures that are already settled. Accuracy "
-              "to the supplied numbers matters more than range.",
+        needs="Writes the prose of the quarterly reports from figures already counted.",
         calls_per_run=1,
     ),
     PURPOSE_PUSH: Purpose(
         name=PURPOSE_PUSH,
         label="Mode Push rationale",
-        needs="One batched call covering the whole ranked list: a sentence a "
-              "consultant can send, and a flag where the numbers and the text "
-              "disagree. Never scores — the score stays deterministic.",
+        needs="Writes the notes beside the top candidate matches; it never sets a score.",
         calls_per_run=1,
     ),
 }

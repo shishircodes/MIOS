@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
-import { Explainer, Section, SkeletonCard } from '~/components/ui'
+import { Section, SkeletonCard } from '~/components/ui'
 import {
   clearGoogleDocsClient,
   disconnectGoogleDocs,
@@ -88,10 +88,8 @@ export function GoogleDocsPanel({ flash }: { flash?: { ok: boolean; text: string
       {!problem && !flash && note && <div className="notice ok" role="status">{note}</div>}
 
       <p className="muted key-row" style={{ margin: 0 }}>
-        Quarterly reports can be sent to Google Docs from Mode Publish. Each report gets one Doc
-        in a <b>MIOS Quarterly Reports</b> folder of the connected account&rsquo;s Drive; sending
-        it again updates that same Doc. MIOS never shares a Doc — whoever owns the Drive decides
-        who sees it.
+        Sends quarterly reports from Mode Publish to a <b>MIOS Quarterly Reports</b> folder in
+        the connected Drive.
       </p>
 
       {/* Account */}
@@ -197,25 +195,6 @@ export function GoogleDocsPanel({ flash }: { flash?: { ok: boolean; text: string
         </div>
       </div>
 
-      <Explainer title="Setting it up in Google Cloud">
-        <ol>
-          <li>
-            Open the Google Cloud project that holds MIOS&rsquo;s sign-in client (or any project
-            you prefer) and enable the <b>Google Drive API</b> under APIs &amp; Services › Library.
-          </li>
-          <li>
-            Under Credentials, open the OAuth client — the sign-in one is reused when no other is
-            entered — and add the redirect URI above to its authorised redirect URIs.
-          </li>
-          <li>
-            On the OAuth consent screen, add the <span className="mono">…/auth/drive.file</span>{' '}
-            scope. With an <b>Internal</b> (Workspace) app nothing else is needed. An{' '}
-            <b>External</b> app left in Testing loses access every 7 days — publish it; this
-            scope does not need Google&rsquo;s review.
-          </li>
-          <li>Press <b>Connect Google account</b> and sign in with the account whose Drive should hold the reports.</li>
-        </ol>
-      </Explainer>
     </Section>
   )
 }

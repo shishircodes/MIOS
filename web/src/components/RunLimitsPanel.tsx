@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useMemo, useState } from 'react'
-import { Explainer, Section, SkeletonCard } from '~/components/ui'
+import { Section, SkeletonCard } from '~/components/ui'
 import { pipelineSettingsQueryOptions, savePipelineSettings, sourceHealthQueryOptions } from '~/lib/api'
 import type { PipelineSetting, PipelineSettings } from '~/lib/types'
 
@@ -104,8 +104,7 @@ export function RunLimitsPanel({ labels }: { labels: Record<string, string> }) {
         <div className="limits-block">
           <div className="llm-purpose">Records taken from each source per run</div>
           <p className="llm-needs">
-            Up to {scrapeTotal.toLocaleString()} records a run across all sources. A run that comes
-            back exactly at a source’s limit was probably cut short — the collectors table flags it.
+            Up to {scrapeTotal.toLocaleString()} records a run across all sources.
           </p>
           <div className="limit-grid">
             {data.sources.map((s) => field(s, labels[s.source] ?? s.source))}
@@ -116,7 +115,7 @@ export function RunLimitsPanel({ labels }: { labels: Record<string, string> }) {
           <div className="llm-purpose">Sending records to the AI for classification</div>
           <p className="llm-needs">
             At these settings up to <strong>{perDay.toLocaleString()} records a day</strong> can be
-            classified. Anything beyond that waits for the next run and is not lost.
+            classified.
           </p>
           <div className="limit-grid">
             {data.classifier.map((s) => (
@@ -151,21 +150,6 @@ export function RunLimitsPanel({ labels }: { labels: Record<string, string> }) {
         </div>
       </form>
 
-      <Explainer title="What these numbers change">
-        <p>
-          A run fetches up to each source’s limit, stores what is new, then sends the new records
-          to the AI in batches to be classified. Nothing here changes records already collected.
-        </p>
-        <p>
-          Raising a source’s limit collects more per run, but repeats are not stored twice, so
-          the number of <em>new</em> records rarely rises as much. More records also means more
-          AI calls: if the day’s calls run out, the rest wait for the next run.
-        </p>
-        <p>
-          The records-per-call limit stops at 50 on purpose: at 100 the model’s answer ran past
-          its length limit and a whole batch was lost.
-        </p>
-      </Explainer>
     </Section>
   )
 }
