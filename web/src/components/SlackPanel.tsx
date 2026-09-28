@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
-import { Explainer, Section, SkeletonCard } from '~/components/ui'
+import { Section, SkeletonCard } from '~/components/ui'
 import {
   clearSlackWebhook,
   sendSlackTest,
@@ -70,9 +70,7 @@ export function SlackPanel() {
       )}
 
       <p className="muted key-row" style={{ margin: 0 }}>
-        After each pipeline run the weekly digest is posted to a Slack channel through an
-        incoming webhook. Switching it off here stops the post only — the digest is still built
-        and kept in the Weekly digest archive.
+        Posts the weekly digest to a Slack channel after each pipeline run.
       </p>
 
       {/* On / off */}
@@ -175,19 +173,6 @@ export function SlackPanel() {
         )}
       </div>
 
-      <Explainer title="Getting a webhook URL from Slack">
-        <ol>
-          <li>In Slack, open <b>Tools › Apps</b> (or api.slack.com/apps) and create an app for your workspace, or open an existing one.</li>
-          <li>Under <b>Incoming Webhooks</b>, switch them on and choose <b>Add New Webhook to Workspace</b>.</li>
-          <li>Pick the channel the digest should go to and allow it.</li>
-          <li>Copy the URL — it starts with <span className="mono">https://hooks.slack.com/services/</span> — add it here, and send a test message.</li>
-        </ol>
-        <p>
-          Anyone holding the URL can post to that channel, so it is stored encrypted and never
-          shown again in full. To move the digest to another channel, add a webhook for that
-          channel and replace this one.
-        </p>
-      </Explainer>
     </Section>
   )
 }

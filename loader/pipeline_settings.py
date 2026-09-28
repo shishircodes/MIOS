@@ -86,21 +86,15 @@ class Spec:
 
 CLASSIFIER_SPECS: tuple[Spec, ...] = (
     Spec("classify.batch_size", "Records per AI call", DEFAULT_BATCH_SIZE, 5, 50, "records",
-         "How many records go to the model in one call. Larger batches use fewer calls, "
-         "but a batch whose answer runs past the model's output limit fails as a whole — "
-         "at 100 per call, 99 of 180 rows were left unclassified on 14 Sep 2026."),
+         "How many records go to the model in one call."),
     Spec("classify.max_chars", "Characters kept per record", DEFAULT_MAX_CHARS, 500, 8000,
          "characters",
-         "Longer records are cut to this length before they are sent. The title, company "
-         "and location come first, so a lower number mostly trims the advert's body."),
+         "Longer records are cut to this length before they are sent to the model."),
     Spec("classify.daily_calls", "AI calls per day", DEFAULT_DAILY_CALLS, 1, 1000, "calls",
-         "The most AI calls classification and report rewriting may make in a day. Rows "
-         "beyond it wait for the next run. 20 is Gemini's free-tier limit; raise it on a "
-         "paid plan."),
+         "The most AI calls classification and report writing may make in a day."),
     Spec("classify.min_seconds", "Seconds between AI calls", DEFAULT_MIN_SECONDS, 0, 120,
          "seconds",
-         "A pause between calls, to stay under the provider's per-minute limit. A paid "
-         "plan usually allows this to be lower."),
+         "A pause between calls, to stay under the provider's per-minute limit."),
 )
 
 SCRAPE_LOW, SCRAPE_HIGH = 1, 500

@@ -330,20 +330,6 @@ function AccessScreen() {
               Anyone with an <strong>@{data.domain}</strong> Google account can also sign in
               as a member, without appearing above.
             </p>
-            <details className="tech-detail">
-              <summary>What that means</summary>
-              <p>
-                The domain is checked against the verified <code>hd</code> claim from Google,
-                not the text of the address. It only ever grants <strong>member</strong> —
-                administrators must be named in the list above. Changing it means changing{' '}
-                <code>ALLOWED_GOOGLE_DOMAIN</code> on the server.
-              </p>
-              <p>
-                Rows marked with a lock come from <code>ALLOWED_EMAILS</code> instead. They
-                sign in as members and cannot be edited here — that takes a configuration
-                change and a restart.
-              </p>
-            </details>
           </>
         ) : (
           <p>

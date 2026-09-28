@@ -3,7 +3,7 @@ import { prefetch } from '~/lib/query-client'
 import { Link, createFileRoute } from '@tanstack/react-router'
 import { AdminOnly } from '~/components/AdminOnly'
 import { UsageCostPanel } from '~/components/UsageCostPanel'
-import { Explainer, Section, PageSkeleton } from '~/components/ui'
+import { Section, PageSkeleton } from '~/components/ui'
 import { llmSettingsQueryOptions } from '~/lib/api'
 import type { LlmUsage } from '~/lib/types'
 
@@ -100,13 +100,6 @@ function UsageScreen() {
         <div className="usage-list">
           {data.usage.map((u) => <UsageBar key={u.provider} u={u} />)}
         </div>
-        <Explainer title="Why a failed call still counts">
-          <p>
-            Every attempt is counted, not just the ones that worked — a provider charges the
-            allowance for a rejected request the same as a served one. A counter that only
-            recorded successes read zero on the day this pipeline ran out.
-          </p>
-        </Explainer>
       </Section>
 
       {data.history.length > 0 && (

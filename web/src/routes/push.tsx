@@ -2,7 +2,6 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { prefetch } from '~/lib/query-client'
 import { createFileRoute } from '@tanstack/react-router'
 import { Fragment, useEffect, useRef, useState } from 'react'
-import { ScoringExplainer } from '~/components/ScoringExplainer'
 import { Icons, RegionChip, Section } from '~/components/ui'
 import { useCountUpAll, useReveal } from '~/lib/motion'
 import { deleteProfile, fetchMatches, fetchProfile, matchDraft, parseCV, profilesQueryOptions, recordOutcome, saveProfile, scoringModelQueryOptions, updateProfile } from '~/lib/api'
@@ -172,7 +171,6 @@ function PushScreen() {
   const [origin, setOrigin] = useState<{ source: 'cv_upload' | 'manual_form'; filename: string | null }>(
     { source: 'manual_form', filename: null },
   )
-  const [explainOpen, setExplainOpen] = useState(false)
   // The denominator, read from the scorer rather than written as 100 here. The
   // weights sum to 100 and a test keeps them there, but a number on screen
   // should follow the calculation instead of restating a fact about it.
@@ -416,9 +414,6 @@ function PushScreen() {
                 draft.region].filter(Boolean).join(' · ') || 'no details recorded'}
             </span>
           </div>
-          <button className="btn sm ghost" onClick={() => setExplainOpen(true)}>
-            How does the scoring work?
-          </button>
         </div>
 
         <div className="page-header">
@@ -565,7 +560,6 @@ function PushScreen() {
             ? (verb) => mark.mutate({ company: openMatch.co, verb, m: openMatch })
             : undefined}
         />
-        <ScoringExplainer open={explainOpen} onClose={() => setExplainOpen(false)} />
       </div>
     )
   }
@@ -580,15 +574,6 @@ function PushScreen() {
         <div className="meta">
           <div>{savedTotal} saved profile{savedTotal === 1 ? '' : 's'}</div>
           <div style={{ marginTop: 4 }}>Matched against the last 30 days of signals</div>
-          {/* In the header, not beside the results: "how does this decide who to
-              contact?" is a question somebody asks before trusting it with a
-              candidate, and answering it only after they already have a ranking
-              is answering it too late. */}
-          <div style={{ marginTop: 8 }}>
-            <button className="btn sm ghost" onClick={() => setExplainOpen(true)}>
-              How does the scoring work?
-            </button>
-          </div>
         </div>
       </div>
 
@@ -825,8 +810,6 @@ function PushScreen() {
       {/* Results live in their own view — see the results branch above. */}
 
       {/* ---------- Saved profiles ---------- */}
-      <ScoringExplainer open={explainOpen} onClose={() => setExplainOpen(false)} />
-
       <Section
         title="Saved profiles"
         tools={<span>{searchTerm ? `${savedTotal} MATCHING` : `${savedTotal} STORED`}</span>}

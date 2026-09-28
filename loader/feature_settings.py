@@ -43,9 +43,7 @@ FEATURES: dict[str, Feature] = {
         name=PUSH_RATIONALE,
         default=True,
         label="Mode Push AI notes",
-        what=("A written rationale, a fit verdict and a caveat for the top matches. "
-              "It never changes a score or the order, so turning it off only removes "
-              "the notes and saves one model call per search."),
+        what="A written rationale, a fit verdict and a caveat for the top matches.",
     ),
 }
 
