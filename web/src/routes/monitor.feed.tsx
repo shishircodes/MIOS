@@ -1,7 +1,8 @@
 import { useQuery } from '@tanstack/react-query'
+import { prefetch } from '~/lib/query-client'
 import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { CapturedAt, Icons, Loading, Section, TierChip } from '~/components/ui'
+import { CapturedAt, Icons, Section, TierChip, Skel } from '~/components/ui'
 import { SignalDrawer, openableRow } from '~/components/SignalDrawer'
 import { signalsQueryOptions } from '~/lib/api'
 import type { Signal } from '~/lib/types'
@@ -9,6 +10,7 @@ import { useFigure, useReveal } from '~/lib/motion'
 
 export const Route = createFileRoute('/monitor/feed')({
   head: () => ({ meta: [{ title: 'Signal feed · MIOS' }] }),
+  loader: prefetch(signalsQueryOptions({ limit: 50, offset: 0 })),
   component: SignalFeed,
 })
 
@@ -94,9 +96,13 @@ function SignalFeed() {
               ever collected?" is a different question from "what am I looking
               at?", and the latter is answered above the list. */}
           <div>
-            <strong className="tnum" style={{ fontSize: 18, color: 'var(--ink)' }} ref={scrapedRef}>
-              {(data?.scrapedAllTime ?? 0).toLocaleString()}
-            </strong>{' '}
+            {isLoading
+              ? <Skel w={44} h={16} style={{ display: 'inline-block', verticalAlign: 'middle' }} />
+              : (
+                <strong className="tnum" style={{ fontSize: 18, color: 'var(--ink)' }} ref={scrapedRef}>
+                  {(data?.scrapedAllTime ?? 0).toLocaleString()}
+                </strong>
+              )}{' '}
             signals collected all time
           </div>
           <div style={{ marginTop: 4 }}>
@@ -145,7 +151,19 @@ function SignalFeed() {
             : undefined
         }
       >
-        {isLoading && <Loading lines={['Gathering signals…']} />}
+        {isLoading && (
+          <div aria-busy="true">
+            {[0, 1, 2, 3, 4, 5].map((i) => (
+              // Not `.signal`: the reveal animation targets that class and
+              // would hold these rows invisible until it ran.
+              <div className="skel-row" key={i} style={{ alignItems: 'flex-start', padding: '14px 18px' }}>
+                <Skel w={22} h={12} />
+                <div className="skel-stack" style={{ flex: 1 }}><Skel w="45%" h={16} /><Skel w="80%" h={14} /><Skel w="35%" h={12} /></div>
+                <Skel w={60} h={12} />
+              </div>
+            ))}
+          </div>
+        )}
 
         {!isLoading && total === 0 && (
           <div className="center-empty">

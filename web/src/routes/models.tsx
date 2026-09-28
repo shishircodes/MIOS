@@ -1,8 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { prefetch } from '~/lib/query-client'
 import { Link, createFileRoute } from '@tanstack/react-router'
 import { useState } from 'react'
 import { AdminOnly } from '~/components/AdminOnly'
-import { Explainer, Loading, Section } from '~/components/ui'
+import { Explainer, Section, PageSkeleton } from '~/components/ui'
 import {
   clearLlmRoute,
   clearProviderKey,
@@ -16,6 +17,7 @@ import type { FeatureSetting, LlmProvider, LlmRoute } from '~/lib/types'
 
 export const Route = createFileRoute('/models')({
   head: () => ({ meta: [{ title: 'AI models · MIOS' }] }),
+  loader: prefetch(llmSettingsQueryOptions),
   component: () => (
     <AdminOnly>
       <ModelsScreen />
@@ -342,9 +344,7 @@ function ModelsScreen() {
 
   if (isPending) {
     return (
-      <div className="page">
-        <Loading lines={['Checking which models are configured', 'Reading the provider keys']} />
-      </div>
+      <PageSkeleton kind="panels" />
     )
   }
   if (error) {

@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
-import { Section } from '~/components/ui'
+import { Section, SkeletonCard } from '~/components/ui'
 import { Link } from '@tanstack/react-router'
 import { retryRun, runPipelineNow, saveSchedule, scheduleQueryOptions, slackStatusQueryOptions } from '~/lib/api'
 import type { PipelineRun, SchedulePayload } from '~/lib/types'
@@ -136,7 +136,7 @@ export function SchedulePanel() {
     onError: (e: Error) => { setProblem(e.message); setStarted(null) },
   })
 
-  if (isPending || !draft) return null
+  if (isPending || !draft) return <SkeletonCard rows={5} tall={90} />
   if (error) {
     return (
       <Section title="Automatic run">

@@ -174,7 +174,7 @@ def test_an_unreadable_database_is_empty_not_an_error(db, monkeypatch):
     def _broken(*_a, **_k):
         raise RuntimeError("connection refused")
 
-    monkeypatch.setattr(mod, "connect", _broken)
+    monkeypatch.setattr(mod, "read_parallel", _broken)
     assert build_dashboard_payload(db)["latest"] is None
 
 

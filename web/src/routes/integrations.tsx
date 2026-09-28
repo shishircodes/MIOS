@@ -1,15 +1,18 @@
 import { useQuery } from '@tanstack/react-query'
+import { prefetch } from '~/lib/query-client'
+import { slackStatusQueryOptions, googleDocsStatusQueryOptions } from '~/lib/api'
 import { Link, createFileRoute } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
 import { AdminOnly } from '~/components/AdminOnly'
 import { GoogleDocsPanel } from '~/components/GoogleDocsPanel'
 import { HubSpotPanel } from '~/components/HubSpotPanel'
 import { SlackPanel } from '~/components/SlackPanel'
-import { Loading } from '~/components/ui'
+import { SkeletonCard } from '~/components/ui'
 import { hubspotStatusQueryOptions } from '~/lib/api'
 
 export const Route = createFileRoute('/integrations')({
   head: () => ({ meta: [{ title: 'Integrations · MIOS' }] }),
+  loader: prefetch(slackStatusQueryOptions, hubspotStatusQueryOptions, googleDocsStatusQueryOptions),
   component: () => (
     <AdminOnly>
       <IntegrationsScreen />
@@ -59,7 +62,7 @@ function IntegrationsScreen() {
         </div>
       </div>
       <SlackPanel />
-      {isPending ? <Loading lines={['Checking the HubSpot connection']} /> : <HubSpotPanel />}
+      {isPending ? <SkeletonCard rows={4} /> : <HubSpotPanel />}
       <div id="google-docs">
         <GoogleDocsPanel flash={flash} />
       </div>

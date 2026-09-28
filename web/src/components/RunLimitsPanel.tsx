@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useMemo, useState } from 'react'
-import { Explainer, Section } from '~/components/ui'
+import { Explainer, Section, SkeletonCard } from '~/components/ui'
 import { pipelineSettingsQueryOptions, savePipelineSettings, sourceHealthQueryOptions } from '~/lib/api'
 import type { PipelineSetting, PipelineSettings } from '~/lib/types'
 
@@ -37,7 +37,7 @@ export function RunLimitsPanel({ labels }: { labels: Record<string, string> }) {
     onError: (e: Error) => { setProblem(e.message); setNote(null) },
   })
 
-  if (isPending) return null
+  if (isPending) return <SkeletonCard rows={4} />
   if (error || !data) {
     return (
       <Section title="Collection limits">

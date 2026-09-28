@@ -27,7 +27,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from loader.db import connect
+from loader.db import read_parallel
 
 log = logging.getLogger(__name__)
 
@@ -188,114 +188,107 @@ def build_dashboard_payload(
         "available": [], "selected": None, "region": region, "isLatest": True,
     }
 
+    # Two batches of independent queries rather than ten in a row. Against the
+    # hosted database each query is a network round trip, so a row of ten was
+    # most of the page's load time; `read_parallel` runs a batch side by side.
+    # The first batch finds the collection; the second describes it.
+    def count(sql: str, params: tuple):
+        return lambda conn: int((conn.execute(sql, params).fetchone() or {"n": 0})["n"] or 0)
+
+    def fetch(sql: str, params: tuple = ()):
+        return lambda conn: conn.execute(sql, params).fetchall()
+
+    def latest_run(conn):
+        # Read from the run log rather than inferred from the signals, so a run
+        # that collected nothing still reports itself.
+        try:
+            return conn.execute(
+                "SELECT id, trigger, status, started_at, finished_at, collected, note "
+                "FROM pipeline_runs ORDER BY started_at DESC LIMIT 1"
+            ).fetchone()
+        except Exception as exc:  # noqa: BLE001 - the log may not exist yet
+            log.debug("dashboard: no run log (%s)", exc)
+            return None
+
     try:
-        with connect(target, readonly=True) as conn:
+        rows, tiers, run_row = read_parallel(target, [
             # One row per collection day. Classified only: an unclassified row
             # has no sector or region yet, so counting it would move the totals
             # without being able to say where.
-            rows = conn.execute(
+            fetch(
                 "SELECT substr(captured_at, 1, 10) AS day, count(*) AS total, "
                 "sum(CASE WHEN region = 'AU' THEN 1 ELSE 0 END) AS au, "
                 "sum(CASE WHEN region = 'PNG' THEN 1 ELSE 0 END) AS png "
                 "FROM signals WHERE classified_at IS NOT NULL" + RELEVANT +
                 "GROUP BY substr(captured_at, 1, 10) ORDER BY day"
-            ).fetchall()
+            ),
+            fetch("SELECT tier, count(*) AS n FROM watchlist GROUP BY tier ORDER BY tier"),
+            latest_run,
+        ])
 
-            days = [str(r["day"]) for r in rows]
-            # An unrecognised date falls back to the newest rather than showing
-            # nothing: a stale link should land on the current week.
-            latest_day = (collection if collection in days else (days[-1] if days else None))
-            sector_rows: list = []
-            category_rows: list = []
-            source_rows: list = []
-            company_rows: list = []
-            new_names = 0
-            seen_watchlist = 0
-            not_relevant = 0
-            if latest_day:
-                # Everything below describes the most recent collection. Kept as
-                # separate aggregates rather than one wide query: they group by
-                # different columns, and a single query would either repeat the
-                # scan anyway or return a cross product to unpick in Python.
-                sector_rows = conn.execute(
+        days = [str(r["day"]) for r in rows]
+        # An unrecognised date falls back to the newest rather than showing
+        # nothing: a stale link should land on the current week.
+        latest_day = (collection if collection in days else (days[-1] if days else None))
+        sector_rows: list = []
+        category_rows: list = []
+        source_rows: list = []
+        company_rows: list = []
+        new_names = 0
+        seen_watchlist = 0
+        not_relevant = 0
+        if latest_day:
+            day = (latest_day, *args_region)
+            # Everything below describes the most recent collection. Kept as
+            # separate aggregates rather than one wide query: they group by
+            # different columns, and a single query would either repeat the
+            # scan anyway or return a cross product to unpick in Python.
+            (sector_rows, category_rows, source_rows, company_rows,
+             new_names, seen_watchlist, not_relevant) = read_parallel(target, [
+                fetch(
                     "SELECT sector, count(*) AS n FROM signals "
                     "WHERE classified_at IS NOT NULL AND substr(captured_at, 1, 10) = ?"
-                    + RELEVANT + where_region + "GROUP BY sector ORDER BY n DESC",
-                    (latest_day, *args_region),
-                ).fetchall()
-                category_rows = conn.execute(
+                    + RELEVANT + where_region + "GROUP BY sector ORDER BY n DESC", day),
+                fetch(
                     "SELECT signal_category, count(*) AS n FROM signals "
                     "WHERE classified_at IS NOT NULL AND substr(captured_at, 1, 10) = ?"
-                    + RELEVANT + where_region + "GROUP BY signal_category ORDER BY n DESC",
-                    (latest_day, *args_region),
-                ).fetchall()
+                    + RELEVANT + where_region + "GROUP BY signal_category ORDER BY n DESC", day),
                 # Not filtered on classified_at: a source's contribution is what
                 # it collected, and a row still awaiting classification was
-                # still collected by it.
-                # Grouped by the collector alone. Including source_type in the
-                # GROUP BY split one collector into two rows whenever its
-                # signals carried different types — the panel listed "adzuna"
-                # twice, which reads as two sources rather than one.
-                source_rows = conn.execute(
+                # still collected by it. Grouped by the collector alone, so one
+                # collector with mixed source types is still one row.
+                fetch(
                     "SELECT source_name, max(source_type) AS source_type, count(*) AS n "
                     "FROM signals WHERE substr(captured_at, 1, 10) = ?"
-                    + where_region + "GROUP BY source_name ORDER BY n DESC, source_name",
-                    (latest_day, *args_region),
-                ).fetchall()
-                company_rows = conn.execute(
+                    + where_region + "GROUP BY source_name ORDER BY n DESC, source_name", day),
+                # 'Unknown' is what the classifier emits when it could not
+                # identify the employer; nobody can act on it, so it is not
+                # listed among the most active companies.
+                fetch(
                     "SELECT company_name, count(*) AS n, "
                     "max(sector) AS sector, max(region) AS region, "
                     "max(watchlist_tier) AS tier, max(is_new_prospect) AS is_new "
                     "FROM signals WHERE classified_at IS NOT NULL "
                     "AND substr(captured_at, 1, 10) = ? "
-                    # 'Unknown' is what the classifier emits when it could not
-                    # identify the employer. Those rows cannot be approached, so
-                    # listing them among the most active companies would be
-                    # offering a name nobody can act on.
                     "AND company_name IS NOT NULL AND lower(company_name) <> 'unknown'"
                     + RELEVANT + where_region
                     + "GROUP BY company_name ORDER BY n DESC, company_name LIMIT ?",
-                    (latest_day, *args_region, TOP_COMPANIES),
-                ).fetchall()
-                new_names = int((conn.execute(
+                    (*day, TOP_COMPANIES)),
+                count(
                     "SELECT count(DISTINCT company_name) AS n FROM signals "
                     "WHERE is_new_prospect = 1 AND classified_at IS NOT NULL "
-                    "AND substr(captured_at, 1, 10) = ?" + RELEVANT + where_region,
-                    (latest_day, *args_region)
-                ).fetchone() or {"n": 0})["n"] or 0)
-                # How much of the watchlist actually appeared. "We watch twenty
-                # and saw seven this week" is the question the tile answers, and
-                # it cannot be derived from the tier counts alone.
-                seen_watchlist = int((conn.execute(
+                    "AND substr(captured_at, 1, 10) = ?" + RELEVANT + where_region, day),
+                # How much of the watchlist actually appeared: "we watch twenty
+                # and saw seven this week" cannot be derived from tier counts.
+                count(
                     "SELECT count(DISTINCT company_name) AS n FROM signals "
                     "WHERE watchlist_tier IS NOT NULL AND classified_at IS NOT NULL "
-                    "AND substr(captured_at, 1, 10) = ?" + where_region,
-                    (latest_day, *args_region)
-                ).fetchone() or {"n": 0})["n"] or 0)
-
-            if latest_day:
-                not_relevant = int((conn.execute(
+                    "AND substr(captured_at, 1, 10) = ?" + where_region, day),
+                count(
                     "SELECT count(*) AS n FROM signals WHERE classified_at IS NOT NULL "
                     "AND COALESCE(sector, '') = 'other' "
-                    "AND substr(captured_at, 1, 10) = ?" + where_region,
-                    (latest_day, *args_region)
-                ).fetchone() or {"n": 0})["n"] or 0)
-
-            tiers = conn.execute(
-                "SELECT tier, count(*) AS n FROM watchlist GROUP BY tier ORDER BY tier"
-            ).fetchall()
-
-            # The run behind the latest collection, for the header. Read from
-            # the run log rather than inferred from the signals, so a run that
-            # collected nothing still reports itself.
-            run_row = None
-            try:
-                run_row = conn.execute(
-                    "SELECT id, trigger, status, started_at, finished_at, collected, note "
-                    "FROM pipeline_runs ORDER BY started_at DESC LIMIT 1"
-                ).fetchone()
-            except Exception as exc:  # noqa: BLE001 - the log may not exist yet
-                log.debug("dashboard: no run log (%s)", exc)
+                    "AND substr(captured_at, 1, 10) = ?" + where_region, day),
+            ])
     except Exception as exc:  # noqa: BLE001 - an empty dashboard beats a broken one
         log.warning("dashboard: could not read (%s)", exc)
         return empty

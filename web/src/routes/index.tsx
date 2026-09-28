@@ -1,4 +1,6 @@
 import { createFileRoute } from '@tanstack/react-router'
+import { prefetch } from '~/lib/query-client'
+import { dashboardQueryOptions } from '~/lib/api'
 import { DashboardScreen } from '~/components/DashboardScreen'
 
 /** The dashboard is the site root.
@@ -12,5 +14,6 @@ import { DashboardScreen } from '~/components/DashboardScreen'
  */
 export const Route = createFileRoute('/')({
   head: () => ({ meta: [{ title: 'Dashboard · MIOS' }] }),
+  loader: prefetch(dashboardQueryOptions({})),
   component: DashboardScreen,
 })

@@ -1,13 +1,15 @@
 import { useQuery } from '@tanstack/react-query'
+import { prefetch } from '~/lib/query-client'
 import { Link, createFileRoute } from '@tanstack/react-router'
 import { AdminOnly } from '~/components/AdminOnly'
 import { UsageCostPanel } from '~/components/UsageCostPanel'
-import { Explainer, Loading, Section } from '~/components/ui'
+import { Explainer, Section, PageSkeleton } from '~/components/ui'
 import { llmSettingsQueryOptions } from '~/lib/api'
 import type { LlmUsage } from '~/lib/types'
 
 export const Route = createFileRoute('/usage')({
   head: () => ({ meta: [{ title: 'Usage & cost · MIOS' }] }),
+  loader: prefetch(llmSettingsQueryOptions),
   component: () => (
     <AdminOnly>
       <UsageScreen />
@@ -62,9 +64,7 @@ function UsageScreen() {
 
   if (isPending) {
     return (
-      <div className="page">
-        <Loading lines={['Counting today’s calls', 'Adding up tokens']} />
-      </div>
+      <PageSkeleton kind="panels" />
     )
   }
   if (error) {

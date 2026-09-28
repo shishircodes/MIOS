@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 import { useRef, useState } from 'react'
-import { Explainer, Icons, Loading, Section } from '~/components/ui'
+import { Explainer, Icons, PageSkeleton, Section } from '~/components/ui'
 import { dashboardQueryOptions } from '~/lib/api'
 import { useAuth } from '~/lib/auth-context'
 import type { DashboardFilters } from '~/lib/api'
@@ -446,9 +446,7 @@ export function DashboardScreen() {
 
   if (isPending) {
     return (
-      <div className="page">
-        <Loading lines={['Counting what the last run found', 'Lining up the collections']} />
-      </div>
+      <PageSkeleton kind="dashboard" />
     )
   }
   if (error) {

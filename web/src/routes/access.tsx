@@ -1,13 +1,15 @@
 import { useState } from 'react'
+import { prefetch } from '~/lib/query-client'
 import { createFileRoute } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AdminOnly } from '~/components/AdminOnly'
-import { Icons, Loading, Section } from '~/components/ui'
+import { Icons, Section, PageSkeleton } from '~/components/ui'
 import { accessQueryOptions, grantAccess, revokeAccess } from '~/lib/api'
 import type { AccessPayload, AccessUser } from '~/lib/types'
 
 export const Route = createFileRoute('/access')({
   head: () => ({ meta: [{ title: 'People & access · MIOS' }] }),
+  loader: prefetch(accessQueryOptions),
   component: () => (
     <AdminOnly>
       <AccessScreen />
@@ -232,9 +234,7 @@ function AccessScreen() {
 
   if (isPending) {
     return (
-      <div className="page">
-        <Loading lines={['Reading the access list']} />
-      </div>
+      <PageSkeleton kind="list" />
     )
   }
   if (error) {

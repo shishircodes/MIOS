@@ -32,9 +32,10 @@ import logging
 import re
 import sqlite3
 import threading
+import time
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Iterable, Iterator, Sequence
+from typing import Any, Callable, Iterable, Iterator, Sequence
 
 from config.settings import settings
 
@@ -298,7 +299,34 @@ _pool_lock = threading.Lock()
 #: with nobody using the app. Connections are opened on demand and closed after
 #: `POOL_MAX_IDLE_SECONDS`, which costs one connection set-up after a quiet spell.
 POOL_MIN_SIZE = 0
-POOL_MAX_SIZE = 8
+#: Room for a page's parallel reads (see `read_parallel`) while other requests
+#: are in flight. Neon's pooled endpoint accepts far more than this.
+POOL_MAX_SIZE = 12
+
+#: A connection returned to the pool this recently is handed out again without
+#: a liveness check. The check is a full round trip — about 0.1 s from the
+#: Singapore server to the Sydney database — and a page's requests arrive within
+#: seconds of each other, so checking every checkout doubled the cost of short
+#: queries. Anything idle longer is still checked, and nothing survives
+#: `POOL_MAX_IDLE_SECONDS`, so a socket the database has dropped is still
+#: replaced rather than handed out.
+POOL_TRUST_RECENT_SECONDS = 30.0
+
+_last_returned: dict[int, float] = {}
+
+
+def _mark_returned(conn) -> None:
+    _last_returned[id(conn)] = time.monotonic()
+
+
+def _check_unless_recent(conn) -> None:
+    if conn.closed or conn.broken:
+        raise RuntimeError("connection is closed")
+    if time.monotonic() - _last_returned.get(id(conn), 0.0) < POOL_TRUST_RECENT_SECONDS:
+        return
+    from psycopg_pool import ConnectionPool
+
+    ConnectionPool.check_connection(conn)
 
 #: Neon suspends an idle compute, which kills pooled connections with it. This
 #: recycles them first, so the pool does not hand out a socket the far end has
@@ -334,10 +362,11 @@ def _get_pool(dsn: str):
             # writes. Measured, this is the difference between 2 and 3.6 network
             # round trips per query.
             kwargs={"row_factory": _pg_row_factory, "autocommit": True},
-            # Costs one round trip per checkout, and buys back six. Without it a
-            # connection the database has closed underneath us surfaces as a
-            # failed request rather than a transparently replaced socket.
-            check=ConnectionPool.check_connection,
+            # Without a check, a connection the database has closed underneath
+            # us surfaces as a failed request rather than a replaced socket. It
+            # costs a round trip, so it is skipped for one used seconds ago.
+            check=_check_unless_recent,
+            reset=_mark_returned,
             timeout=15.0,
             open=True,
             name="mios",
@@ -406,6 +435,36 @@ def connect(target: str | Path | None = None, *, readonly: bool = False) -> Iter
         raise
     finally:
         conn.close()
+
+
+_parallel_pool: Any = None
+
+
+def read_parallel(target: str | Path | None, jobs: list[Callable[[Connection], Any]]) -> list[Any]:
+    """Run independent read-only jobs, concurrently on Postgres. Results in order.
+
+    Each job takes a connection and returns a value. On Postgres every query is
+    a network round trip, so ten queries in a row cost ten of them; run side by
+    side on separate pooled connections they cost about one. SQLite is local,
+    so the jobs simply run in turn on one connection.
+
+    For reads only: each job gets its own connection, so there is no shared
+    transaction to make several writes all-or-nothing.
+    """
+    global _parallel_pool
+    if len(jobs) < 2 or not is_postgres(resolve_target(target)):
+        with connect(target, readonly=True) as conn:
+            return [job(conn) for job in jobs]
+    if _parallel_pool is None:
+        from concurrent.futures import ThreadPoolExecutor
+
+        _parallel_pool = ThreadPoolExecutor(max_workers=POOL_MAX_SIZE, thread_name_prefix="db-read")
+
+    def run(job):
+        with connect(target, readonly=True) as conn:
+            return job(conn)
+
+    return [f.result() for f in [_parallel_pool.submit(run, job) for job in jobs]]
 
 
 def backend_label(target: str | Path | None = None) -> str:

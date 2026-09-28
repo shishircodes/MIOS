@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
-import { Explainer, Section } from '~/components/ui'
+import { Explainer, Section, SkeletonCard } from '~/components/ui'
 import {
   clearHubSpotKey,
   fetchHubSpotProperties,
@@ -140,7 +140,7 @@ export function HubSpotPanel() {
     onError: (e: Error) => setProblem(e.message),
   })
 
-  if (isPending || !draft) return null
+  if (isPending || !draft) return <SkeletonCard rows={4} />
   if (error) {
     return (
       <Section title="HubSpot watchlist">

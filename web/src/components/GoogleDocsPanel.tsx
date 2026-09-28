@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
-import { Explainer, Section } from '~/components/ui'
+import { Explainer, Section, SkeletonCard } from '~/components/ui'
 import {
   clearGoogleDocsClient,
   disconnectGoogleDocs,
@@ -64,7 +64,7 @@ export function GoogleDocsPanel({ flash }: { flash?: { ok: boolean; text: string
     onError: (e: Error) => setProblem(e.message),
   })
 
-  if (isPending) return null
+  if (isPending) return <SkeletonCard rows={3} />
   if (error || !data) {
     return (
       <Section title="Google Docs">
