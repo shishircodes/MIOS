@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -55,6 +56,16 @@ EVIDENCE_VELOCITY = 10
 
 KIND_FACT = "fact"
 KIND_INTERPRETATION = "interpretation"
+
+#: The label written into the text as well as the `kind` field —
+#: "interpretation: The cluster of…". The digest page and the Slack post each
+#: add their own marker from `kind`, so a copy in the text shows it twice.
+#: Only a label followed by a separator or in brackets matches, so a sentence
+#: that merely starts with the word ("Factory hiring rose…") is left alone.
+_LABEL = r"(?:fact|interpretation)"
+_LABEL_PREFIX = re.compile(
+    rf"^\s*(?:[\[(]\s*{_LABEL}\s*[\])]|{_LABEL}\s*[:\-–—](?=\s))\s*", re.IGNORECASE)
+_LABEL_SUFFIX = re.compile(rf"\s*_?[\[(]\s*{_LABEL}\s*[\])]_?\s*$", re.IGNORECASE)
 
 STATUS_GENERATED = "generated"
 STATUS_FAILED = "failed"
@@ -104,6 +115,8 @@ Rules:
   one.
 - Prefer naming companies and sectors over abstractions.
 - One sentence per bullet. No preamble, no headings, no markdown.
+- Put the label only in the "kind" field. Do not write "fact" or
+  "interpretation" in the bullet text.
 - If the evidence is too thin to support a trend, say so plainly in fewer
   bullets rather than padding."""
 
@@ -199,6 +212,12 @@ def build_evidence(payload: dict[str, Any]) -> str:
 # --------------------------------------------------------------------------
 
 
+def _strip_label(text: str) -> str:
+    """The bullet text without a `fact` / `interpretation` label the model
+    wrote into it. The label belongs in `kind`, and is shown from there."""
+    return _LABEL_SUFFIX.sub("", _LABEL_PREFIX.sub("", text)).strip()
+
+
 def _clean(bullets: Any, evidence: str) -> tuple[list[dict[str, str]], list[str]]:
     """Keep the bullets that are usable. Returns (kept, reasons_dropped).
 
@@ -212,7 +231,7 @@ def _clean(bullets: Any, evidence: str) -> tuple[list[dict[str, str]], list[str]
     for item in bullets if isinstance(bullets, list) else []:
         if not isinstance(item, dict):
             continue
-        text = str(item.get("text") or "").strip()
+        text = _strip_label(str(item.get("text") or ""))
         kind = str(item.get("kind") or "").strip().lower()
         if not text:
             continue
@@ -366,6 +385,12 @@ def load_pulse(window_from: str, window_to: str,
         return None
     if not bullets:
         return None
+    # Pulses stored before the label was stripped at generation still carry it
+    # in the text; cleaned here too, so they read correctly without a rewrite.
+    bullets = [
+        {**b, "text": _strip_label(str(b.get("text") or ""))} if isinstance(b, dict) else b
+        for b in bullets
+    ]
     return {
         "bullets": bullets,
         "signalsAnalysed": int(row["signals_analysed"] or 0),

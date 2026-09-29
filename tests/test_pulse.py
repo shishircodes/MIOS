@@ -26,6 +26,7 @@ from delivery.pulse import (
     KIND_INTERPRETATION,
     STATUS_FAILED,
     STATUS_GENERATED,
+    PulseOutcome,
     build_evidence,
     generate_pulse,
     load_pulse,
@@ -158,6 +159,50 @@ def test_at_most_five_bullets(db):
         [{"text": f"Bullet {i} about mining.", "kind": KIND_FACT} for i in range(9)]
     ))
     assert len(out.bullets) <= 5
+
+
+# ---------- the label lives in `kind`, not in the text ----------
+
+
+def test_a_label_written_into_the_text_is_removed(db):
+    """The page and the Slack post mark an interpretation from `kind`. A copy
+    of the label in the text showed it twice ("interpretation: … INTERPRETATION")."""
+    out = generate_pulse(PAYLOAD, target=db, gemini_caller=_caller([
+        {"text": "interpretation: The cluster at Newman suggests shutdown preparation.",
+         "kind": KIND_INTERPRETATION},
+        {"text": "Fact - 146 signals were collected.", "kind": KIND_FACT},
+        {"text": "(Interpretation) PNG hiring may be accelerating.", "kind": KIND_INTERPRETATION},
+        {"text": "BHP is down 29% against its baseline (fact)", "kind": KIND_FACT},
+    ]))
+    assert [b["text"] for b in out.bullets] == [
+        "The cluster at Newman suggests shutdown preparation.",
+        "146 signals were collected.",
+        "PNG hiring may be accelerating.",
+        "BHP is down 29% against its baseline",
+    ]
+
+
+def test_a_sentence_that_starts_with_the_word_is_left_alone(db):
+    out = generate_pulse(PAYLOAD, target=db, gemini_caller=_caller([
+        {"text": "Factory maintenance hiring rose in Western Australia.", "kind": KIND_FACT},
+    ]))
+    assert out.bullets[0]["text"] == "Factory maintenance hiring rose in Western Australia."
+
+
+def test_a_stored_pulse_with_a_label_in_the_text_reads_clean(db):
+    """Pulses saved before the fix keep the label in the database; they are
+    cleaned on the way out rather than rewritten."""
+    stored = PulseOutcome(
+        [{"text": "interpretation: PNG hiring may be accelerating.", "kind": KIND_INTERPRETATION},
+         {"text": "fact: 146 signals were collected.", "kind": KIND_FACT}],
+        STATUS_GENERATED, None, 146,
+    )
+    save_pulse(stored, window_from="2026-08-25T00:00:00", window_to="2026-08-25T06:00:00", target=db)
+
+    loaded = load_pulse("2026-08-25T00:00:00", "2026-08-25T23:59:59", db)
+    assert [b["text"] for b in loaded["bullets"]] == [
+        "PNG hiring may be accelerating.", "146 signals were collected."]
+    assert [b["kind"] for b in loaded["bullets"]] == [KIND_INTERPRETATION, KIND_FACT]
 
 
 # ---------- no fallback, ever ----------
