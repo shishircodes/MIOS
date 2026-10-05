@@ -135,8 +135,6 @@ export interface NewName {
   signal: string
   sector: string
   region: string
-  reco: string
-  status: string
 }
 
 // ---------- Watchlist ----------

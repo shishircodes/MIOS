@@ -602,14 +602,21 @@ input, textarea, select { font-family: inherit; }
 .vel-chg { margin-left: auto; display: flex; align-items: center; gap: 6px; flex: none; }
 
 /* ---- New names, rail form ---- */
-.nn-list { display: grid; }
-.nn-item { padding: 11px 14px; border-bottom: 1px solid var(--line); display: grid; gap: 5px; }
+/* One column that may shrink. Left to size itself, the column grew to fit
+   the longest company name on one line, wider than the rail, and everything
+   past the rail's edge was clipped: the end of each name and the market chip
+   beside it. A name or headline too long for the rail now wraps instead. */
+.nn-list { display: grid; grid-template-columns: minmax(0, 1fr); }
+.nn-item {
+  padding: 11px 14px; border-bottom: 1px solid var(--line);
+  display: grid; grid-template-columns: minmax(0, 1fr); gap: 5px;
+}
 .nn-item:last-child { border-bottom: none; }
-.nn-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.nn-head strong { font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nn-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.nn-head strong { font-size: 13.5px; line-height: 1.35; min-width: 0; overflow-wrap: anywhere; }
+.nn-head .chip { flex: none; }
 .nn-sig {
-  margin: 0; font-size: 12.5px; line-height: 1.45; color: var(--ink-3);
-  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  margin: 0; font-size: 12.5px; line-height: 1.45; color: var(--ink-3); overflow-wrap: anywhere;
 }
 .nn-foot {
   display: flex; align-items: center; justify-content: space-between; gap: 8px;

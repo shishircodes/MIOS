@@ -239,6 +239,20 @@ def test_a_new_name_is_described_by_its_headline_not_the_collected_text(db):
     assert name["signal"] == "Liontown approves Kathleen Valley expansion"
 
 
+def test_a_new_names_headline_is_whole_and_a_very_long_one_ends_at_a_word(db):
+    """It was cut at 90 characters mid-word, in a panel with room for all of it."""
+    long = ("What does the Kathleen Valley expansion say about lithium demand and the "
+            "contractors who will be hired to build it")
+    add(db, "p1", company="Liontown", tier=None, is_new=1, kind="news", category="project", title=long)
+    add(db, "p2", company="Wordy Co", tier=None, is_new=1, kind="news", category="project",
+        title="mining " * 60)
+    names = {n["co"]: n for n in build_digest_payload(db, days=7)["newNames"]}
+    assert names["Liontown"]["signal"] == long and len(long) > 90
+    cut = names["Wordy Co"]["signal"]
+    assert cut.endswith("mining…") and len(cut) <= 201
+    assert set(names["Liontown"]) == {"co", "signal", "sector", "region"}, "no tier to add it to"
+
+
 def test_the_page_never_shows_more_than_its_limit(db):
     for i in range(MAX_SIGNALS_SHOWN + 15):
         add(db, f"s{i}", company=f"Employer {i}", tier=None, is_new=1)
