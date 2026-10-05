@@ -85,7 +85,7 @@ def _never_a_live_model(request, monkeypatch):
 
     import llm.providers as providers
 
-    def refuse(model: str):
+    def refuse(model: str, **_kwargs):
         raise providers.ProviderNotConfigured(
             f"tests must not call a live model ({model}). Pass a fake caller, or "
             "mark the test @pytest.mark.real_llm if it genuinely needs one."

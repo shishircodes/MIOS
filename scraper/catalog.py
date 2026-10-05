@@ -526,7 +526,14 @@ SOURCES: tuple[Source, ...] = (
         market="PNG", sectors="Infrastructure",
         provides="EU-funded project tenders and infrastructure programs",
         access="TED API", url="https://ted.europa.eu", collector=MODULE, geography="PNG",
-        source_type="tender", limit=10,
+        source_type="tender", limit=10, default_enabled=False,
+        off_reason=(
+            "Every notice it returned for Papua New Guinea in its first run (5 Oct "
+            "2026) was consultancy for an aid programme: technical assistance, "
+            "digital transformation, water policy. None was work that needs "
+            "industrial labour, and the classifier filed all ten under \"other\". "
+            "Switch it on if the EU starts funding construction there."
+        ),
     ),
     Source(
         id="adb", label="Asian Development Bank", category="tenders",
