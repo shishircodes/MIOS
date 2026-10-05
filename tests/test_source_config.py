@@ -114,61 +114,35 @@ def test_a_board_needs_both_a_token_and_an_actor(panel):
     assert apify.configured(BOARD)[0] is False
 
 
-# ---------- default searches ----------
+def test_there_is_always_one_default_search(panel):
+    from scraper import apify_search
 
-SEEK_ACTOR = "websift/seek-job-scraper"
-JORA_ACTOR = "shahidirfan/Jora-Jobs-Scraper"   # as it was pasted in production
+    assert panel.apify_search() == apify_search.DEFAULT_KEYWORDS
+    search = panel.status()["apify"]["search"]
+    assert search["custom"] is False and search["keywords"] == search["default"]
+
+    assert panel.set_apify_search("  mining   OR  drilling ", changed_by=ADMIN) == "mining OR drilling"
+    assert panel.apify_search() == "mining OR drilling"
+    search = panel.status()["apify"]["search"]
+    assert search["custom"] is True and search["changedBy"] == ADMIN
+
+    assert panel.set_apify_search("", changed_by=ADMIN) == apify_search.DEFAULT_KEYWORDS
+    assert panel.status()["apify"]["search"]["custom"] is False
 
 
-def test_a_known_actor_searches_easy_skills_sectors_until_told_otherwise(panel):
-    """The first production run left both actors on their authors' defaults and
-    collected every kind of job. Nothing entered now means the sector search."""
-    panel.set_board("seek", SEEK_ACTOR, "", changed_by=ADMIN)
-    panel.set_board("jora", JORA_ACTOR, "", changed_by=ADMIN)
+@pytest.mark.parametrize("bad,message", [("x" * 201, "under 200"), (" OR ", "at least one keyword")])
+def test_a_default_search_that_is_wrong_is_refused(panel, bad, message):
+    with pytest.raises(panel.SourceConfigError, match=message):
+        panel.set_apify_search(bad, changed_by=ADMIN)
 
-    seek = panel.apify_input("seek")
-    assert seek["mining-resources-energy"] is True and seek["construction"] is True
-    assert seek["dateRange"] == 7 and seek["sortBy"] == "ListedDate"
-    assert panel.apify_input("jora") == {
-        "keyword": "mining", "country": "Australia", "posted_date": "7d"}, \
-        "the name is matched whatever its capitals"
 
+def test_a_board_says_whether_it_is_on_the_default_search(panel):
+    panel.set_board("seek", "someone/reader", "", changed_by=ADMIN)
+    panel.set_board("jora", "someone/other", '{"keyword": "driller"}', changed_by=ADMIN)
     boards = {b["id"]: b for b in panel.status()["apify"]["boards"]}
-    assert boards["seek"]["usingDefault"] is True and boards["seek"]["input"] == ""
-    assert json.loads(boards["seek"]["defaultInput"]) == seek
-
-    presets = {p["actor"]: p for p in panel.status()["apify"]["presets"]}
-    assert presets[SEEK_ACTOR]["board"] == "seek"
-    assert json.loads(presets[JORA_ACTOR.lower()]["input"])["keyword"] == "mining"
-
-
-def test_what_the_administrator_enters_replaces_the_default(panel):
-    panel.set_board("jora", JORA_ACTOR, '{"keyword": "diesel fitter"}', changed_by=ADMIN)
-    assert panel.apify_input("jora") == {"keyword": "diesel fitter"}, "replaced, not merged"
-    board = next(b for b in panel.status()["apify"]["boards"] if b["id"] == "jora")
-    assert board["usingDefault"] is False
-    assert json.loads(board["input"]) == {"keyword": "diesel fitter"}
-
-    # Clearing it goes back to the default.
-    panel.set_board("jora", JORA_ACTOR, "", changed_by=ADMIN)
-    assert panel.apify_input("jora")["keyword"] == "mining"
-
-
-def test_saving_the_default_unchanged_stores_nothing(panel):
-    """So a later correction to the default still reaches the board."""
-    from scraper import apify_presets
-
-    default = json.dumps(apify_presets.default_input(SEEK_ACTOR), indent=2)
-    panel.set_board("seek", SEEK_ACTOR, default, changed_by=ADMIN)
-    board = next(b for b in panel.status()["apify"]["boards"] if b["id"] == "seek")
-    assert board["input"] == "" and board["usingDefault"] is True
-
-
-def test_an_actor_mios_does_not_know_has_no_default(panel):
-    panel.set_board("seek", "someone/another-seek-reader", "", changed_by=ADMIN)
-    assert panel.apify_input("seek") == {}, "its field names are unknown, so nothing is guessed"
-    board = next(b for b in panel.status()["apify"]["boards"] if b["id"] == "seek")
-    assert board["usingDefault"] is False and board["defaultInput"] == ""
+    assert boards["seek"]["usingDefault"] is True
+    assert boards["jora"]["usingDefault"] is False
+    assert boards["indeed"]["usingDefault"] is False, "a board with no actor is on nothing"
 
 
 def test_the_tilde_form_of_an_actor_name_is_accepted(panel):
@@ -359,6 +333,7 @@ def _client(monkeypatch, *, auth_disabled: bool) -> TestClient:
     ("post", "/api/admin/source-config/apify/test"),
     ("put", f"/api/admin/source-config/apify/boards/{BOARD}"),
     ("put", "/api/admin/source-config/apify/run"),
+    ("put", "/api/admin/source-config/apify/search"),
     ("put", "/api/admin/source-config/asx"),
     ("put", "/api/admin/source-config/feeds"),
     ("post", "/api/admin/source-config/feeds/check"),
@@ -399,6 +374,12 @@ def test_the_panel_flow(panel, monkeypatch):
                      json={"actor": "nonsense"}).status_code == 400
     assert admin.put(f"{base}/apify/boards/pngworkforce", json={"actor": "a/b"}).status_code == 400
     assert admin.put(f"{base}/apify/token", json={"token": "x"}).status_code == 400
+
+    r = admin.put(f"{base}/apify/search", json={"keywords": "mining OR drilling"})
+    assert r.status_code == 200 and r.json()["apify"]["search"]["keywords"] == "mining OR drilling"
+    assert admin.put(f"{base}/apify/search", json={"keywords": "x" * 300}).status_code == 400
+    r = admin.put(f"{base}/apify/search", json={"keywords": ""})
+    assert r.json()["apify"]["search"]["custom"] is False and "built-in" in r.json()["note"]
 
     r = admin.put(f"{base}/apify/run", json={"maxChargeUsd": "0.75"})
     assert r.status_code == 200 and r.json()["apify"]["run"]["maxChargeUsd"] == 0.75

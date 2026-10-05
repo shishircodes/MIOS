@@ -16,11 +16,11 @@ actor to trust with a board is the administrator's choice when naming it.
 an account token and an actor named for it. Both are set under Admin ›
 Integrations (see `loader.source_config`), and nowhere else.
 
-An actor's own input (search terms, country, filters) differs per actor, so it
-is passed through untouched, as a JSON object entered beside the actor. Where
-nothing was entered and MIOS knows the actor, it sends a default search limited
-to Easy Skill's sectors instead (see `scraper.apify_presets`): an actor left on
-its author's defaults returns every kind of job.
+**What a board searches for** is the default search: one line of keywords,
+set under Admin › Integrations, which starts as the sectors Easy Skill recruits
+into. It is put into the actor under whatever name that actor uses for it (see
+`scraper.apify_search`). A board with search settings of its own, entered as
+JSON beside its actor, sends those instead, untouched.
 
 **Every run is capped twice, by Apify, whatever the actor is.** An actor is
 somebody else's program on a metered account, so neither cap relies on it
@@ -31,10 +31,9 @@ co-operating:
 * `maxTotalChargeUsd` is the administrator's ceiling on one run's cost, for
   every pricing model.
 
-The limit is also put into the actor's input as `maxItems`, which the actors
-that use that name read as "stop here", and it is the dataset limit, so MIOS
-never keeps more than it either. An actor that names its count differently may
-still fetch more than MIOS keeps; the caps above bound what that can cost.
+The limit is also put into the actor's input, as `maxItems` and under the
+actor's own name for it where that differs, so the actor stops there. It is the
+dataset limit too, so MIOS never keeps more than it either.
 
 **Field names differ between actors too**, so each record is read by trying
 the names actors commonly use for a title, an employer, a place and a link. A
@@ -55,7 +54,7 @@ from typing import Any
 import requests
 
 from loader import source_config
-from scraper import apify_presets
+from scraper import apify_search
 
 log = logging.getLogger(__name__)
 
@@ -144,16 +143,18 @@ def parse_items(items: Any, *, source_id: str, label: str, geography: str) -> li
 
 
 def _actor_input(source_id: str, limit: int) -> dict[str, Any]:
+    actor = actor_for(source_id) or ""
+    fields = apify_search.fetch_fields(actor, source_config.apify_token())
     body = source_config.apify_input(source_id)
-    # The run limit wins over whatever the stored input says, so the Admin
-    # panel's number is the one that applies.
-    body["maxItems"] = limit
-    # A known actor's own name for the same thing, so it stops there instead of
-    # fetching its default (300 for one SEEK actor) and running to a cap.
-    preset = apify_presets.preset_for(actor_for(source_id) or "")
-    if preset and preset.count_field:
-        body[preset.count_field] = min(limit, preset.max_count) if preset.max_count else limit
-    return body
+    if not body:
+        # No search settings of its own, so the default search.
+        body = apify_search.search_input(fields, source_config.apify_search())
+        if not body:
+            log.warning("apify: %s (%s) has no keyword field, so the default search cannot "
+                        "be applied — give the board its own search settings", source_id, actor)
+    # The run limit wins over whatever the input says, so the Admin panel's
+    # number is the one that applies.
+    return apify_search.with_limit(body, fields, limit)
 
 
 def _scrape_sync(source_id: str, label: str, geography: str, limit: int) -> list[dict[str, Any]]:

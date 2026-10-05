@@ -101,6 +101,26 @@ def _never_a_live_model(request, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _never_look_an_actor_up(monkeypatch):
+    """The Apify collector reads an actor's input schema from Apify before each
+    run. No test should: it would be a request to a real service, and a test's
+    answer would then depend on what an actor's author published that day.
+
+    The lookup fails instead, which is a path the collector has anyway (it
+    falls back to the common field names). A test of the lookup patches
+    `scraper.apify_search._http_get` itself, after this.
+    """
+    import requests
+
+    import scraper.apify_search as search
+
+    def refuse(*_a, **_k):
+        raise requests.ConnectionError("tests do not reach Apify")
+
+    monkeypatch.setattr(search, "_http_get", refuse)
+
+
+@pytest.fixture(autouse=True)
 def _no_classifier_throttle(monkeypatch):
     """The classifier waits 13 s between calls to respect the free tier's burst
     limit. With batches of 25, a test of a realistic run makes several calls, and

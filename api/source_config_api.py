@@ -85,6 +85,20 @@ def put_board(source_id: str, payload: dict[str, Any] = Body(...),
                  "under Data sources.")
 
 
+@router.put("/apify/search")
+def put_search(payload: dict[str, Any] = Body(...),
+               user: dict[str, Any] = Depends(require_admin)) -> dict[str, Any]:
+    """The default search every board uses. Empty returns to the built-in one."""
+    raw = payload.get("keywords")
+    try:
+        keywords = source_config.set_apify_search(raw, changed_by=user["email"])
+    except source_config.SourceConfigError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if raw is None or not str(raw).strip():
+        return _with(f"Back to the built-in search: {keywords}.")
+    return _with("Saved. Every board without search settings of its own uses it from the next run.")
+
+
 @router.put("/apify/run")
 def put_run(payload: dict[str, Any] = Body(...),
             user: dict[str, Any] = Depends(require_admin)) -> dict[str, Any]:

@@ -304,22 +304,6 @@ def test_apify_reads_what_the_seek_actors_return():
     assert all(r["source_name"] == "seek" and r["geography"] == "AU" for r in records)
 
 
-def test_a_known_actor_is_told_how_many_results_in_its_own_words(panel):
-    """One SEEK actor fetches 300 results unless told otherwise, whatever
-    `maxItems` says. The board's limit goes into the actor's own field too."""
-    panel.set_board("seek", "websift/seek-job-scraper", "", changed_by="admin@example.com")
-    panel.set_board("jora", "shahidirfan/Jora-Jobs-Scraper", '{"keyword": "driller"}',
-                    changed_by="admin@example.com")
-
-    seek = apify._actor_input("seek", 50)
-    assert seek["maxResults"] == 50 and seek["maxItems"] == 50
-    assert seek["mining-resources-energy"] is True, "the default search goes with it"
-    assert apify._actor_input("seek", 900)["maxResults"] == 550, "the actor accepts no more"
-
-    jora = apify._actor_input("jora", 30)
-    assert jora == {"keyword": "driller", "maxItems": 30, "results_wanted": 30}
-
-
 def test_apify_skips_listings_it_cannot_address_or_name():
     items = [{"title": "No link"}, {"url": "https://x.example/1"}, "not a dict",
              {"title": "Relative link", "url": "/jobs/1"}]

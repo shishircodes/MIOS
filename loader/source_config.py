@@ -1,8 +1,9 @@
 """What the collectors need to be told, set from the Admin panel.
 
-Five things: the Apify token, which actor reads which job board, the most one
-run of an actor may cost, the ASX companies to follow, and any extra news
-feeds. All five are set from the panel and nowhere else.
+Six things: the Apify token, which actor reads which job board, the default
+search every board uses, the most one run of an actor may cost, the ASX
+companies to follow, and any extra news feeds. All six are set from the panel
+and nowhere else.
 
 Same rules as every other setting in the panel:
 
@@ -51,6 +52,7 @@ CACHE_SECONDS = 15.0
 DEFAULT_RUN_CHARGE_USD = 1.00
 MIN_RUN_CHARGE_USD = 0.05
 MAX_RUN_CHARGE_USD = 50.00
+MAX_SEARCH_CHARS = 200
 MAX_TICKERS = 60
 MAX_FEEDS = 20
 MARKETS = ("AU", "PNG")
@@ -154,20 +156,44 @@ def apify_actor(source_id: str, target=None) -> str:
 
 
 def apify_input(source_id: str, target=None) -> dict[str, Any]:
-    """What a board's actor is asked to search for.
+    """A board's own search settings, as entered beside its actor. {} when
+    there are none, which means the board uses the default search."""
+    stored = _board(source_id, target).get("input")
+    return dict(stored) if isinstance(stored, dict) else {}
 
-    What the administrator entered beside the actor, or, while they have
-    entered nothing, MIOS's default search for that actor: Easy Skill's sectors
-    (see `scraper.apify_presets`). An actor MIOS has no default for gets {},
-    which is the actor's own defaults.
-    """
-    board = _board(source_id, target)
-    stored = board.get("input")
-    if isinstance(stored, dict) and stored:
-        return dict(stored)
-    from scraper import apify_presets
 
-    return apify_presets.default_input(str(board.get("actor") or ""))
+def apify_search(target=None) -> str:
+    """The default search: the keywords every board looks for unless it has
+    search settings of its own. Never empty."""
+    from scraper import apify_search as search
+
+    stored = (_read(target)["blob"].get("apifySearch") or {}).get("keywords")
+    return str(stored).strip() if stored and str(stored).strip() else search.DEFAULT_KEYWORDS
+
+
+def set_apify_search(raw: Any, *, changed_by: str, target=None) -> str:
+    """Set the default search. Empty returns to the built-in one."""
+    from scraper import apify_search as search
+
+    keywords = " ".join(str(raw or "").split())
+    if not keywords:
+        def drop(blob: dict[str, Any]) -> None:
+            blob.pop("apifySearch", None)
+        _write(drop, target)
+        log.info("source_config: %s reset the default search", changed_by)
+        return search.DEFAULT_KEYWORDS
+
+    if len(keywords) > MAX_SEARCH_CHARS:
+        raise SourceConfigError(
+            f"That is {len(keywords)} characters; keep the search under {MAX_SEARCH_CHARS}.")
+    if not search.terms(keywords):
+        raise SourceConfigError("Enter at least one keyword, like mining.")
+
+    def put(blob: dict[str, Any]) -> None:
+        blob["apifySearch"] = {"keywords": keywords, "changedBy": changed_by, "changedAt": _now()}
+    _write(put, target)
+    log.info("source_config: %s set the default search to %r", changed_by, keywords)
+    return keywords
 
 
 def apify_max_charge(target=None) -> float:
@@ -261,13 +287,6 @@ def set_board(source_id: str, actor: str, input_text: str | None, *,
             raise SourceConfigError(
                 'The search settings must be a JSON object, like {"position": "mining"}.')
         actor_input = parsed
-
-    from scraper import apify_presets
-
-    # The default, saved back unchanged, is still the default: storing nothing
-    # keeps the board on it, so a later correction to the default reaches it.
-    if actor_input == apify_presets.default_input(actor):
-        actor_input = {}
 
     def put(blob: dict[str, Any]) -> None:
         boards = dict(blob.get("apifyBoards") or {})
@@ -444,10 +463,13 @@ def status(target=None) -> dict[str, Any]:
         log.debug("source_config: could not read the run limits (%s)", exc)
         limits = {}
 
+    from scraper import apify_search as search
+
+    search_stored = blob.get("apifySearch") or {}
+    custom_search = bool(str(search_stored.get("keywords") or "").strip())
+
     run_stored = blob.get("apifyRun") or {}
     custom_charge = "maxChargeUsd" in run_stored
-
-    from scraper import apify_presets
 
     stored_boards = blob.get("apifyBoards") or {}
     boards = []
@@ -456,14 +478,12 @@ def status(target=None) -> dict[str, Any]:
         actor = str(stored.get("actor") or "")
         actor_input = stored.get("input")
         has_input = isinstance(actor_input, dict) and bool(actor_input)
-        default = apify_presets.default_input(actor)
         boards.append({
             "id": source_id, "label": src.label, "market": src.market, "url": src.url,
             "actor": actor,
             "input": json.dumps(actor_input, indent=2) if has_input else "",
-            #: MIOS's own search for this actor, shown when nothing was entered.
-            "defaultInput": json.dumps(default, indent=2) if default else "",
-            "usingDefault": bool(actor and default and not has_input),
+            #: True while the board has no search settings of its own.
+            "usingDefault": bool(actor) and not has_input,
             "ready": bool(has_token and actor),
             "limit": limits.get(source_id, src.limit),
             "changedBy": stored.get("changedBy"), "changedAt": stored.get("changedAt"),
@@ -480,11 +500,14 @@ def status(target=None) -> dict[str, Any]:
             "canStoreKey": available(),
             "boards": boards,
             "readyCount": sum(1 for b in boards if b["ready"]),
-            #: The actors MIOS has a default search for, so the form can fill
-            #: it in as soon as one is named.
-            "presets": [{"actor": name, "board": p.board,
-                         "input": json.dumps(p.input, indent=2)}
-                        for name, p in apify_presets.PRESETS.items()],
+            "search": {
+                "keywords": apify_search(target),
+                "custom": custom_search,
+                "default": search.DEFAULT_KEYWORDS,
+                "max": MAX_SEARCH_CHARS,
+                "changedBy": search_stored.get("changedBy") if custom_search else None,
+                "changedAt": search_stored.get("changedAt") if custom_search else None,
+            },
             "run": {
                 "maxChargeUsd": apify_max_charge(target),
                 "custom": custom_charge,
@@ -516,7 +539,8 @@ def status(target=None) -> dict[str, Any]:
 
 
 __all__ = [
-    "SourceConfigError", "apify_actor", "apify_input", "apify_max_charge", "apify_token",
+    "SourceConfigError", "apify_actor", "apify_input", "apify_max_charge", "apify_search",
+    "apify_token", "set_apify_search",
     "asx_tickers", "check_feed", "clear_apify_token", "custom_feeds", "forget",
     "set_apify_max_charge", "set_apify_token", "set_asx_tickers", "set_board",
     "set_custom_feeds", "status", "test_apify_token",
