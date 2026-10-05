@@ -63,6 +63,24 @@ def _answers(*items):
     return _call
 
 
+def _answers_by_text(answers: dict[str, dict]):
+    """A model that answers each record by what it says, whatever order the
+    records arrive in. Two records collected in the same second have no order
+    the database promises, so a fake that answers by position passes or fails
+    by luck: this one did on CI, and not locally."""
+    import re
+
+    def _call(_sys, user_prompt, schema=None, **_kw):
+        blocks = re.split(r"--- SIGNAL \d+ \([^)]*\) ---", user_prompt)[1:]
+        out = []
+        for block in blocks:
+            hits = [a for phrase, a in answers.items() if phrase in block]
+            assert len(hits) == 1, f"no single answer for: {block[:60]!r}"
+            out.append(hits[0])
+        return out
+    return _call
+
+
 def _stored(db: Path, sid: str) -> dict:
     with sqlite3.connect(db) as c:
         c.row_factory = sqlite3.Row
@@ -106,16 +124,23 @@ def test_an_unnamed_advertiser_is_nobody_to_approach():
     assert not is_prospect("Private Advertiser", "construction", "job_board", watchlisted=False)
 
 
-def test_the_rule_is_applied_to_what_the_model_returns(db):
-    gov = _row(db, "New works to clean the Monash Freeway | Roads & Infrastructure | The Victorian "
-                   "Government is rolling out works.")
-    co = _row(db, "Inland Rail track laying begins | Infrastructure Magazine | First section laid.")
+@pytest.mark.parametrize("government_first", [True, False])
+def test_the_rule_is_applied_to_what_the_model_returns(db, government_first):
+    texts = {
+        "gov": "New works to clean the Monash Freeway | Roads & Infrastructure | The Victorian "
+               "Government is rolling out works.",
+        "co": "Inland Rail track laying begins | Infrastructure Magazine | First section laid.",
+    }
+    # Stored in either order: the result must not depend on which the model saw first.
+    ids = {k: _row(db, texts[k]) for k in (("gov", "co") if government_first else ("co", "gov"))}
     answer = {"sector": "construction", "signal_category": "project", "watchlist_match": None,
               "is_new_prospect": True, "reasoning": "x"}
-    classify_pending(db, gemini_caller=_answers(
-        {**answer, "company_name": "Victorian Government"}, {**answer, "company_name": "Inland Rail"}))
-    assert _stored(db, gov)["is_new_prospect"] == 0
-    assert _stored(db, co)["is_new_prospect"] == 1
+    classify_pending(db, gemini_caller=_answers_by_text({
+        "Monash Freeway": {**answer, "company_name": "Victorian Government"},
+        "Inland Rail": {**answer, "company_name": "Inland Rail"},
+    }))
+    assert _stored(db, ids["gov"])["is_new_prospect"] == 0
+    assert _stored(db, ids["co"])["is_new_prospect"] == 1
 
 
 # ---------- 2. the review cycle follows from the category ----------
