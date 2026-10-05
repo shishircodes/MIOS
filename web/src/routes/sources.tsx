@@ -256,7 +256,7 @@ function SourcesScreen() {
 
   return (
     <div className="page" ref={scope}>
-      <div className="page-header">
+      <div className="page-header has-tabs">
         <div>
           <div className="kicker">Admin · Data sources</div>
           <h1>Data sources</h1>
@@ -274,20 +274,35 @@ function SourcesScreen() {
         </div>
       </div>
 
-      <div className="src-tabs" role="tablist" aria-label="Data sources">
-        <div className="seg">
-          {TABS.map((t) => (
-            <button
-              key={t.key}
-              role="tab"
-              aria-selected={tab === t.key}
-              className={`seg-btn${tab === t.key ? ' on' : ''}`}
-              onClick={() => setTab(t.key)}
-            >
-              {t.label}
-            </button>
-          ))}
-        </div>
+      {/* Tabs, not a filter: each one is a different page of settings, so they
+          are drawn as tabs on the header's rule rather than as the small
+          buttons that narrow the table below. */}
+      <div
+        className="page-tabs"
+        role="tablist"
+        aria-label="Data sources"
+        onKeyDown={(e) => {
+          // Left and right move between tabs, as a tab list is expected to.
+          if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return
+          const i = TABS.findIndex((t) => t.key === tab)
+          const next = TABS[(i + (e.key === 'ArrowRight' ? 1 : TABS.length - 1)) % TABS.length]!
+          setTab(next.key)
+          document.getElementById(`src-tab-${next.key}`)?.focus()
+        }}
+      >
+        {TABS.map((t) => (
+          <button
+            key={t.key}
+            id={`src-tab-${t.key}`}
+            role="tab"
+            aria-selected={tab === t.key}
+            tabIndex={tab === t.key ? 0 : -1}
+            className="page-tab"
+            onClick={() => setTab(t.key)}
+          >
+            {t.label}
+          </button>
+        ))}
       </div>
 
       {tab === 'options' ? (
