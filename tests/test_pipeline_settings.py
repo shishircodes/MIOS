@@ -180,7 +180,7 @@ def test_the_pipeline_scrapes_each_source_to_its_own_limit(db, monkeypatch):
 
     monkeypatch.setattr("pipeline.live.scrape_all", fake_scrape_all)
     monkeypatch.setattr("pipeline.live.settings",
-                        type("S", (), {"db_path": db, "slack_webhook_url": ""})())
+                        type("S", (), {"db_path": db})())
     live.run_live_cycle(db_path=db, do_slack=False, do_pulse=False,
                         gemini_caller=_fake([]))
     assert seen["limits"]["adzuna"] == 7

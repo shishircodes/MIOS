@@ -46,7 +46,7 @@ sync from the panel. A client clearing tiers by mistake then costs a warning,
 not a week of untagged signals.
 
 The service key is stored exactly like a model API key — encrypted in
-`llm_credentials` under the name "hubspot" — or read from HUBSPOT_SERVICE_KEY.
+`llm_credentials` under the name "hubspot". There is no environment fallback.
 It is never logged or returned.
 """
 from __future__ import annotations
@@ -71,7 +71,6 @@ API_VERSION = "2026-09"
 PROPERTIES_PATH = f"/crm/properties/{API_VERSION}/companies"
 SEARCH_PATH = f"/crm/objects/{API_VERSION}/companies/search"
 KEY_NAME = "hubspot"
-KEY_ENV = "HUBSPOT_SERVICE_KEY"
 
 MAPPING_KEY = "hubspot:watchlist:mapping"
 LAST_SYNC_KEY = "hubspot:watchlist:last_sync"
@@ -132,10 +131,10 @@ class HubSpotNotConfigured(HubSpotError):
 
 
 def api_key(target: str | Path | None = None) -> str:
-    """The key in play: one entered in the panel, else HUBSPOT_SERVICE_KEY."""
+    """The key entered in the panel, or "" when there is none."""
     from loader.credentials import key_for
 
-    return key_for(KEY_NAME, os.environ.get(KEY_ENV, "").strip(), target)
+    return key_for(KEY_NAME, target)
 
 
 def _now() -> str:
@@ -229,8 +228,7 @@ class HubSpotClient:
                  pause: float = PAGE_PAUSE_SECONDS) -> None:
         if not key:
             raise HubSpotNotConfigured(
-                "No HubSpot service key: none entered in the panel, and "
-                f"{KEY_ENV} is not set either.")
+                "No HubSpot service key. Add one under Admin › Integrations.")
         if session is None:
             import requests
 
@@ -615,7 +613,7 @@ def status(target: str | Path | None = None) -> dict[str, Any]:
     """Everything the admin panel shows, without the key and without calling HubSpot."""
     from loader.credentials import available, describe
 
-    key = describe(KEY_NAME, os.environ.get(KEY_ENV, "").strip(), target=target)
+    key = describe(KEY_NAME, target=target)
     counts: dict[str, int] = {}
     try:
         with connect(target, readonly=True) as conn:
@@ -631,9 +629,8 @@ def status(target: str | Path | None = None) -> dict[str, Any]:
     except Exception as exc:  # noqa: BLE001 - no watchlist table at all
         log.debug("hubspot: could not count the watchlist (%s)", exc)
     return {
-        "key": {k: key.get(k) for k in ("source", "hint", "shadowsEnvironment", "unreadable")},
+        "key": {k: key.get(k) for k in ("source", "hint", "unreadable")},
         "canStoreKey": available(),
-        "keyEnv": KEY_ENV,
         "mapping": get_mapping(target),
         "lastSync": last_sync(target),
         "watchlist": {"fromHubspot": counts.get("hubspot", 0), "fromSeed": counts.get("seed", 0)},

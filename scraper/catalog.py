@@ -121,8 +121,8 @@ class Source:
 
 _APIFY_OFF = (
     "The guide names an Apify actor as the way to read this board. It runs only "
-    "once an Apify token is set (APIFY_TOKEN) and an actor is named for it "
-    "(APIFY_ACTORS), so it ships switched off."
+    "once an Apify token has been added and an actor named for it, both under "
+    "Admin › Integrations, so it ships switched off."
 )
 
 
@@ -454,11 +454,11 @@ SOURCES: tuple[Source, ...] = (
     Source(
         id="newsfeed", label="Custom RSS feeds", category="news", group="Custom",
         market="AU + PNG", sectors="As configured",
-        provides="Any extra feeds named in NEWS_FEEDS", access="RSS",
+        provides="Any extra feeds an administrator adds", access="RSS",
         collector=MODULE, geography="AU", source_type="news", default_enabled=False,
         off_reason=(
-            "Reads only the feeds listed in the NEWS_FEEDS setting, as "
-            "Name|https://url/feed|AU entries. With none listed it has nothing to read."
+            "Reads only the extra feeds an administrator adds under Source options "
+            "on this page. With none added it has nothing to read."
         ),
     ),
 

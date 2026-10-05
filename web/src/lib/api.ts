@@ -21,6 +21,8 @@ import type {
   CompanyCandidates,
   GoogleDocsStatus,
   SlackStatus,
+  SourceConfigStatus,
+  CustomFeed,
   PipelineSettings,
   ReportGoogleDoc,
   ReportSummary,
@@ -178,6 +180,60 @@ export async function setSlackEnabled(enabled: boolean): Promise<SlackStatus> {
 
 export async function sendSlackTest(): Promise<SlackStatus> {
   return postOrExplain<SlackStatus>('/api/admin/slack/test', { method: 'POST' })
+}
+
+// ---------- Collector settings: Apify, ASX companies, custom feeds ----------
+
+export const sourceConfigQueryOptions = queryOptions({
+  queryKey: ['admin', 'source-config'],
+  queryFn: () => fetchJson<SourceConfigStatus>('/api/admin/source-config'),
+  retry: false,
+})
+
+const putJson = (body: unknown): RequestInit => ({
+  method: 'PUT',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify(body),
+})
+
+/** Store the Apify token, encrypted. The response never contains it. */
+export async function setApifyToken(token: string): Promise<SourceConfigStatus> {
+  return postOrExplain<SourceConfigStatus>('/api/admin/source-config/apify/token', putJson({ token }))
+}
+
+export async function clearApifyToken(): Promise<SourceConfigStatus> {
+  return postOrExplain<SourceConfigStatus>('/api/admin/source-config/apify/token', { method: 'DELETE' })
+}
+
+/** Asks Apify whose token it is. Runs no actor. */
+export async function testApifyToken(): Promise<SourceConfigStatus> {
+  return postOrExplain<SourceConfigStatus>('/api/admin/source-config/apify/test', { method: 'POST' })
+}
+
+/** Name the actor for one board. An empty actor forgets it. */
+export async function setApifyBoard(v: { id: string; actor: string; input: string }): Promise<SourceConfigStatus> {
+  return postOrExplain<SourceConfigStatus>(
+    `/api/admin/source-config/apify/boards/${encodeURIComponent(v.id)}`,
+    putJson({ actor: v.actor, input: v.input }),
+  )
+}
+
+/** Replace the ASX companies followed. An empty list returns to the built-in one. */
+export async function setAsxTickers(tickers: string): Promise<SourceConfigStatus> {
+  return postOrExplain<SourceConfigStatus>('/api/admin/source-config/asx', putJson({ tickers }))
+}
+
+export async function setCustomFeeds(feeds: CustomFeed[]): Promise<SourceConfigStatus> {
+  return postOrExplain<SourceConfigStatus>('/api/admin/source-config/feeds', putJson({ feeds }))
+}
+
+/** Fetch one address and say whether it is a readable feed. Saves nothing. */
+export async function checkFeed(url: string): Promise<{ ok: boolean; detail: string }> {
+  return postOrExplain('/api/admin/source-config/feeds/check', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url }),
+  })
 }
 
 // ---------- Google Docs (Mode Publish export) ----------

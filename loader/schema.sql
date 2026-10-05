@@ -325,7 +325,7 @@ CREATE INDEX IF NOT EXISTS idx_digests_window_to ON digests(window_to);
 -- ---------------------------------------------------------------------------
 
 -- Only deviations, like `source_settings`: a purpose with no row sits at
--- whatever LLM_ROUTING or the built-in default says. So a default can be
+-- the built-in default. So a default can be
 -- revised later without rewriting every row that merely agreed with the old
 -- one, and "reset this purpose" is a delete rather than a second kind of state.
 CREATE TABLE IF NOT EXISTS llm_settings (
@@ -344,10 +344,9 @@ CREATE TABLE IF NOT EXISTS llm_settings (
 -- Provider API keys entered in the panel
 -- ---------------------------------------------------------------------------
 
--- Only deviations, like `llm_settings` above: a provider with no row falls back
--- to its environment variable. That is what keeps `GEMINI_API_KEY` working on a
--- deployment nobody has touched the panel on, and makes "forget this key" a
--- delete rather than a second kind of state.
+-- One row per key an administrator has entered. A provider with no row has no
+-- key: there is no environment fallback, so "forget this key" is a delete and
+-- the feature that needed it reports itself as not configured.
 --
 -- `secret` is a Fernet token, not the key. It is encrypted with a value derived
 -- from MIOS_CREDENTIAL_KEY, which lives in the environment and never in this

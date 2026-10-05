@@ -28,9 +28,9 @@ edits made inside Google Docs are overwritten — the panel says so before it
 happens. MIOS remains the place the report is edited.
 
 Keys follow the same rules as every other integration: entered in the panel
-(encrypted with `MIOS_CREDENTIAL_KEY`) or taken from the environment, the panel
-winning. With neither, the Google client used for sign-in is reused, since it
-already lives in Easy Skill's Google Cloud project.
+(encrypted with `MIOS_CREDENTIAL_KEY`), with no environment fallback. With no
+client entered, the Google client used for sign-in is reused, since it already
+lives in Easy Skill's Google Cloud project and every deployment has it.
 """
 from __future__ import annotations
 
@@ -54,8 +54,6 @@ log = logging.getLogger(__name__)
 #: sits in `kv_store`.
 SECRET_NAME = "google_docs_client_secret"
 REFRESH_NAME = "google_docs_refresh_token"
-CLIENT_ID_ENV = "GOOGLE_DOCS_CLIENT_ID"
-CLIENT_SECRET_ENV = "GOOGLE_DOCS_CLIENT_SECRET"
 REDIRECT_ENV = "GOOGLE_DOCS_REDIRECT_URI"
 
 CLIENT_ID_KEY = "google_docs:client_id"
@@ -153,9 +151,9 @@ def _sign_in_client() -> tuple[str, str]:
 def client(target=None) -> dict[str, str]:
     """The OAuth client in play, and where it came from.
 
-    Entered in the panel, else GOOGLE_DOCS_CLIENT_ID/SECRET, else the sign-in
-    client. ID and secret always come from the same place — a panel ID paired
-    with an environment secret would be two different clients.
+    Entered in the panel, else the sign-in client, which every deployment
+    already has because nobody could sign in without it. ID and secret always
+    come from the same place.
     """
     from loader.credentials import stored_key
 
@@ -163,10 +161,6 @@ def client(target=None) -> dict[str, str]:
     panel_secret = stored_key(SECRET_NAME, target) or ""
     if panel_id and panel_secret:
         return {"id": panel_id, "secret": panel_secret, "source": "panel"}
-    env_id = os.environ.get(CLIENT_ID_ENV, "").strip()
-    env_secret = os.environ.get(CLIENT_SECRET_ENV, "").strip()
-    if env_id and env_secret:
-        return {"id": env_id, "secret": env_secret, "source": "environment"}
     sign_in_id, sign_in_secret = _sign_in_client()
     if sign_in_id and sign_in_secret:
         return {"id": sign_in_id, "secret": sign_in_secret, "source": "sign-in"}
@@ -221,7 +215,6 @@ def status(target=None) -> dict[str, Any]:
     return {
         "client": {"source": c["source"], "id": c["id"] or None},
         "canStoreKey": available(),
-        "clientEnv": [CLIENT_ID_ENV, CLIENT_SECRET_ENV],
         "redirectUri": redirect_uri(),
         "scopes": SCOPES.split(),
         "account": acct,
@@ -242,8 +235,8 @@ def start_connect(by: str, target=None) -> str:
     c = client(target)
     if not c["id"]:
         raise GoogleDocsNotConfigured(
-            "No Google OAuth client. Enter a client ID and secret, or set "
-            f"{CLIENT_ID_ENV} and {CLIENT_SECRET_ENV} on the server.")
+            "No Google OAuth client. Enter a client ID and secret under "
+            "Admin › Integrations.")
     state = secrets.token_urlsafe(24)
     _kv_set(STATE_PREFIX + state,
             {"by": by, "expires": (datetime.now(timezone.utc) + STATE_TTL).isoformat()}, target)

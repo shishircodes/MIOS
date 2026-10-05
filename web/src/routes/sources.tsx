@@ -1,10 +1,11 @@
 import { Link, createFileRoute } from '@tanstack/react-router'
 import { prefetch } from '~/lib/query-client'
-import { pipelineSettingsQueryOptions } from '~/lib/api'
+import { pipelineSettingsQueryOptions, sourceConfigQueryOptions } from '~/lib/api'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useMemo, useRef, useState } from 'react'
 import { AdminOnly } from '~/components/AdminOnly'
 import { RunLimitsPanel } from '~/components/RunLimitsPanel'
+import { SourceOptionsPanel } from '~/components/SourceOptionsPanel'
 import { Section, PageSkeleton } from '~/components/ui'
 import { setSourceEnabled, sourceHealthQueryOptions } from '~/lib/api'
 import { useFigure, useReveal } from '~/lib/motion'
@@ -12,7 +13,7 @@ import type { SourceHealth, SourceStatus } from '~/lib/types'
 
 export const Route = createFileRoute('/sources')({
   head: () => ({ meta: [{ title: 'Data sources · MIOS' }] }),
-  loader: prefetch(sourceHealthQueryOptions, pipelineSettingsQueryOptions),
+  loader: prefetch(sourceHealthQueryOptions, pipelineSettingsQueryOptions, sourceConfigQueryOptions),
   component: () => (
     <AdminOnly>
       <SourcesScreen />
@@ -341,6 +342,7 @@ function SourcesScreen() {
         </Section>
       ))}
 
+      <SourceOptionsPanel />
       <RunLimitsPanel active={active} />
     </div>
   )

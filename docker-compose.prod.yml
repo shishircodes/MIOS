@@ -18,11 +18,13 @@ services:
     restart: unless-stopped
     environment:
       DATABASE_URL: ${DATABASE_URL}
-      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
-      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+
+      # Not here, on purpose: model API keys and routing, the Slack webhook,
+      # the HubSpot key, the Apify token and actors, the ASX company list and
+      # custom news feeds. Each is set in the Admin panel and stored in the
+      # database, with no environment fallback — so passing one in here would
+      # do nothing at all.
 
       # Encrypts provider API keys entered in the Admin panel. Listed here for
       # the same reason as the scrape targets below: without it the panel
@@ -41,16 +43,6 @@ services:
       ADZUNA_APP_KEY: ${ADZUNA_APP_KEY:-}
       ADZUNA_COUNTRY: ${ADZUNA_COUNTRY:-au}
       ADZUNA_QUERIES: ${ADZUNA_QUERIES:-}
-
-      # The sources added with the catalogue. All optional: blank leaves the
-      # Apify boards "not configured", ASX on its built-in list of companies,
-      # and no custom feeds. Listed for the same reason as everything else
-      # here — a variable that never reaches the container cannot be set.
-      APIFY_TOKEN: ${APIFY_TOKEN:-}
-      APIFY_ACTORS: ${APIFY_ACTORS:-}
-      APIFY_INPUTS: ${APIFY_INPUTS:-}
-      ASX_TICKERS: ${ASX_TICKERS:-}
-      NEWS_FEEDS: ${NEWS_FEEDS:-}
 
       # Scrape targets. Defaulted in config/settings.py, listed here because a
       # source silently collecting nothing because the container never received

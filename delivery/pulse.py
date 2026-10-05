@@ -271,10 +271,10 @@ def generate_pulse(
                 "Daily model quota exhausted before the digest ran.", signals_analysed,
             )
 
-        # No Gemini-specific key check any more: this purpose may be routed to
-        # another provider entirely, and asking about GEMINI_API_KEY would
-        # refuse a perfectly configured Claude. `caller_for` raises with the
-        # name of whatever is actually missing.
+        # No Gemini-specific key check: this purpose may be routed to another
+        # provider entirely, and asking only about a Gemini key would refuse a
+        # perfectly configured Claude. `caller_for` raises with the name of
+        # whatever is actually missing.
         from llm import PURPOSE_PULSE, LLMError, caller_for
 
         try:

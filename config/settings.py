@@ -16,29 +16,21 @@ load_dotenv(REPO_ROOT / ".env")
 
 @dataclass(frozen=True, repr=False)
 class Settings:
-    gemini_api_key: str
-    gemini_model: str
-    #: Anthropic, for when a purpose is routed to Claude. Empty until somebody
-    #: sets it, which is what `llm.providers` reports as
-    #: available-but-not-configured rather than hiding the provider.
-    anthropic_api_key: str
-    #: Which provider and model answer each purpose, as "purpose=provider:model"
-    #: pairs. Empty means every purpose goes to Gemini, exactly as before this
-    #: existed. See llm/purposes.py for the purpose names.
-    llm_routing: dict[str, str]
-    slack_webhook_url: str
+    """What the deployment tells the app: where the database is, how sign-in is
+    wired, and the collectors that have no place in the Admin panel.
+
+    Anything an administrator can set in the panel is NOT here. Model keys and
+    routing, the Slack webhook, the HubSpot key, the Apify token and actors,
+    the ASX company list and custom news feeds are all panel-only, with no
+    environment fallback — one place to look, and no deployment quietly
+    overriding what was typed. See loader/credentials.py and
+    loader/source_config.py.
+    """
+
     db_path: Path
     #: Neon/PostgreSQL DSN. When set it wins over db_path everywhere.
     database_url: str
     log_level: str
-    apify_token: str
-    #: Which Apify actor reads which job board, as "source=actor" pairs
-    #: (APIFY_ACTORS="indeed=misceres/indeed-scraper,jora=..."). A board with no
-    #: actor named here is listed as not configured and never run.
-    apify_actors: dict[str, str]
-    #: ASX codes whose announcements are collected. Empty means the default
-    #: list in scraper/asx.py.
-    asx_tickers: tuple[str, ...]
     pngworkforce_base_url: str
     seek_base_url: str
     seek_paths: tuple[str, ...]
@@ -46,7 +38,6 @@ class Settings:
     adzuna_app_key: str
     adzuna_country: str
     adzuna_queries: tuple[str, ...]
-    news_feeds: tuple[str, ...]
     watchlist_path: Path
     # --- Google Sign-In (OAuth 2.0 / OIDC) ---
     google_client_id: str
@@ -71,9 +62,7 @@ class Settings:
     #: the session-signing secret into the log. CI logs are retained and, on a
     #: public repo, world-readable.
     _SECRET_FIELDS = frozenset({
-        "gemini_api_key", "anthropic_api_key", "slack_webhook_url", "database_url",
-        "apify_token",
-        "adzuna_app_key", "google_client_secret", "session_secret",
+        "database_url", "adzuna_app_key", "google_client_secret", "session_secret",
     })
 
     def __repr__(self) -> str:
@@ -163,17 +152,9 @@ def load_settings() -> Settings:
     api_base_url = _get("API_BASE_URL", "http://localhost:8787").rstrip("/")
 
     return Settings(
-        gemini_api_key=_get("GEMINI_API_KEY"),
-        gemini_model=_get("GEMINI_MODEL", "gemini-2.5-flash"),
-        anthropic_api_key=_get("ANTHROPIC_API_KEY"),
-        llm_routing=_get_routing("LLM_ROUTING"),
-        slack_webhook_url=_get("SLACK_WEBHOOK_URL"),
         db_path=db_path,
         database_url=_get("DATABASE_URL"),
         log_level=_get("LOG_LEVEL", "INFO"),
-        apify_token=_get("APIFY_TOKEN"),
-        apify_actors=_get_routing("APIFY_ACTORS"),
-        asx_tickers=tuple(t.upper() for t in _get_list("ASX_TICKERS")),
         # The listings page, not the homepage. The homepage carries no job
         # cards, so the default silently scraped nothing wherever
         # PNGWORKFORCE_BASE_URL was unset — which was every deployed
@@ -186,7 +167,6 @@ def load_settings() -> Settings:
         adzuna_app_key=_get("ADZUNA_APP_KEY"),
         adzuna_country=_get("ADZUNA_COUNTRY", "au"),
         adzuna_queries=_get_list("ADZUNA_QUERIES"),
-        news_feeds=_get_list("NEWS_FEEDS"),
         watchlist_path=REPO_ROOT / "config" / "watchlist.json",
         google_client_id=_get("GOOGLE_CLIENT_ID"),
         google_client_secret=_get("GOOGLE_CLIENT_SECRET"),
@@ -199,27 +179,6 @@ def load_settings() -> Settings:
         auth_disabled=_get_bool("AUTH_DISABLED", False),
         scheduler_enabled=_get_bool("SCHEDULER_ENABLED", False),
     )
-
-
-def _get_routing(name: str) -> dict[str, str]:
-    """Parse LLM_ROUTING="classify=gemini:gemini-2.5-flash,pulse=anthropic:claude-sonnet-4-5".
-
-    A malformed entry is skipped with a warning rather than raising: a typo in
-    one purpose should not stop the API booting, it should leave that purpose on
-    its default.
-    """
-    raw = _get(name)
-    if not raw:
-        return {}
-    out: dict[str, str] = {}
-    for pair in raw.split(","):
-        purpose, sep, target = pair.strip().partition("=")
-        if not sep or not purpose.strip() or not target.strip():
-            logging.getLogger(__name__).warning(
-                "settings: ignoring malformed %s entry %r", name, pair)
-            continue
-        out[purpose.strip()] = target.strip()
-    return out
 
 
 def configure_logging(level: str | None = None) -> None:

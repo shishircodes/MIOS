@@ -44,27 +44,23 @@ GEMINI_MAX_OUTPUT_TOKENS = 32000
 Caller = Callable[..., Any]
 
 
-def _key(provider: str, env_value: str,
-         rows: dict[str, dict[str, Any]] | None = None) -> str:
-    """The API key in play for this provider.
+def _key(provider: str, rows: dict[str, dict[str, Any]] | None = None) -> str:
+    """The API key in play for this provider: the one entered in the Admin panel.
 
-    A panel-entered key first, then the environment variable. Providers go
-    through here rather than reading `settings` directly so that order has one
-    definition — and so a key rotated in the panel takes effect on the next
-    call, with no redeploy.
+    Providers go through here rather than reading the store directly, so a key
+    rotated in the panel takes effect on the next call, with no redeploy.
 
-    Fails open to the environment value: if the credentials table is missing or
-    unreadable, a deployment that has only ever used environment variables goes
-    on working exactly as before.
+    Empty when there is none, or when the store cannot be read. Either way the
+    provider reports itself as not configured and its callers carry on without
+    a model, which every one of them already knows how to do.
     """
     try:
         from loader.credentials import key_for
 
-        return key_for(provider, env_value, rows=rows)
+        return key_for(provider, rows=rows)
     except Exception as exc:  # noqa: BLE001 - a key store problem is not an outage
-        log.warning("llm: could not read the stored %s key (%s) — using the "
-                    "environment", provider, exc)
-        return env_value
+        log.warning("llm: could not read the stored %s key (%s)", provider, exc)
+        return ""
 
 
 class LLMError(RuntimeError):
@@ -122,7 +118,7 @@ class GeminiProvider:
     free_tier_daily_requests = 20
 
     def configured(self, rows: dict[str, dict[str, Any]] | None = None) -> bool:
-        return bool(_key(self.name, settings.gemini_api_key, rows))
+        return bool(_key(self.name, rows))
 
     def models(self) -> list[str]:
         """Suggestions, not a whitelist — routing accepts any model string.
@@ -140,11 +136,10 @@ class GeminiProvider:
         return find_spec("google.genai") is not None
 
     def build(self, model: str) -> Caller:
-        api_key = _key(self.name, settings.gemini_api_key)
+        api_key = _key(self.name)
         if not api_key:
             raise ProviderNotConfigured(
-                "No Gemini API key: none entered in the Admin panel, and "
-                "GEMINI_API_KEY is not set either."
+                "No Gemini API key. Add one under Admin › AI models."
             )
         # Imported here rather than at module scope: importing this package must
         # not require every provider's SDK to be installed.
@@ -209,7 +204,7 @@ class AnthropicProvider:
     default_model = "claude-sonnet-5"
 
     def configured(self, rows: dict[str, dict[str, Any]] | None = None) -> bool:
-        return bool(_key(self.name, getattr(settings, "anthropic_api_key", ""), rows))
+        return bool(_key(self.name, rows))
 
     def models(self) -> list[str]:
         """Suggestions, not a whitelist. See `GeminiProvider.models`.
@@ -225,11 +220,10 @@ class AnthropicProvider:
         return find_spec("anthropic") is not None
 
     def build(self, model: str) -> Caller:
-        api_key = _key(self.name, getattr(settings, "anthropic_api_key", ""))
+        api_key = _key(self.name)
         if not api_key:
             raise ProviderNotConfigured(
-                "No Anthropic API key: none entered in the Admin panel, and "
-                "ANTHROPIC_API_KEY is not set either."
+                "No Anthropic API key. Add one under Admin › AI models."
             )
         try:
             import anthropic
@@ -289,10 +283,9 @@ def _configured_route(purpose: str,
                       stored: dict[str, dict[str, Any]] | None = None) -> tuple[str, str]:
     """Which provider and model serve this purpose.
 
-    Three layers, most deliberate first: an administrator's choice in the Admin
-    panel, then `LLM_ROUTING` for a deployment that pins a model, then Gemini —
-    which is what every purpose used before this package existed, so an
-    unconfigured deployment behaves exactly as it did.
+    An administrator's choice in the Admin panel, else Gemini on its default
+    model — which is what every purpose used before this package existed, so a
+    deployment where nobody has chosen behaves exactly as it did.
     """
     if stored is None:
         from loader.llm_settings import stored_routing
@@ -303,13 +296,7 @@ def _configured_route(purpose: str,
         provider = str(chosen["provider"])
         return provider, str(chosen.get("model") or "") or _PROVIDERS[provider].default_model
 
-    per_purpose = (getattr(settings, "llm_routing", None) or {}).get(purpose)
-    if per_purpose:
-        provider, _, model = per_purpose.partition(":")
-        if provider in _PROVIDERS:
-            return provider, model or _PROVIDERS[provider].default_model
-
-    return GeminiProvider.name, settings.gemini_model or GeminiProvider.default_model
+    return GeminiProvider.name, GeminiProvider.default_model
 
 
 def resolve(purpose: str, stored: dict[str, dict[str, Any]] | None = None) -> tuple[str, str]:
@@ -373,11 +360,6 @@ def available_providers() -> list[dict[str, Any]]:
         log.warning("llm: could not read stored keys (%s)", exc)
         rows = {}
 
-    envs = {
-        GeminiProvider.name: settings.gemini_api_key,
-        AnthropicProvider.name: getattr(settings, "anthropic_api_key", ""),
-    }
-
     out = []
     for p in _PROVIDERS.values():
         out.append({
@@ -386,11 +368,9 @@ def available_providers() -> list[dict[str, Any]]:
             "configured": p.configured(rows),
             "defaultModel": p.default_model,
             "models": p.models(),
-            #: Where the key came from and the last four characters of it —
-            #: never the key. Somebody debugging a failing provider needs to
-            #: know whether the one in play is theirs, the deployment's, or
-            #: absent, which are three different next actions.
-            "key": describe(p.name, envs.get(p.name, ""), rows),
+            #: Whether a key is stored and the last four characters of it —
+            #: never the key.
+            "key": describe(p.name, rows),
             "sdkInstalled": p.sdk_installed(),
         })
     # Whether the panel can accept a key at all, which is a property of the
@@ -460,24 +440,18 @@ def describe_routing() -> list[dict[str, Any]]:
 
     `source` matters as much as the answer. Somebody wondering why Market Pulse
     is using a model they did not pick needs to see whether it came from the
-    panel, from an environment variable, or from the built-in default — without
-    that, a model choice is an hour of debugging.
+    panel or from the built-in default — without that, a model choice is an
+    hour of debugging.
     """
     from loader.llm_settings import stored_routing
 
     # Read once, not once per purpose.
     stored = stored_routing()
-    env = getattr(settings, "llm_routing", None) or {}
 
     out = []
     for purpose in PURPOSES.values():
         provider, model = resolve(purpose.name, stored)
-        if purpose.name in stored:
-            source = "admin"
-        elif purpose.name in env:
-            source = "environment"
-        else:
-            source = "default"
+        source = "admin" if purpose.name in stored else "default"
         out.append({
             "purpose": purpose.name,
             "label": purpose.label,
@@ -489,8 +463,5 @@ def describe_routing() -> list[dict[str, Any]]:
             "source": source,
             "changedBy": (stored.get(purpose.name) or {}).get("changed_by"),
             "changedAt": (stored.get(purpose.name) or {}).get("changed_at"),
-            #: Present when the panel is overriding a pinned deployment value,
-            #: so that is visible rather than mysterious.
-            "overriddenEnv": env.get(purpose.name) if source == "admin" else None,
         })
     return out

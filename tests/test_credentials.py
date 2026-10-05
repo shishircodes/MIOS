@@ -69,7 +69,7 @@ def test_what_is_written_to_the_table_is_not_the_key(db):
 def test_the_description_carries_a_hint_and_never_the_key(db):
     set_key("gemini", KEY, changed_by="admin@example.com", target=db)
 
-    described = describe("gemini", "", target=db)
+    described = describe("gemini", target=db)
 
     assert described["hint"] == KEY[-4:]
     assert KEY not in str(described)
@@ -77,32 +77,41 @@ def test_the_description_carries_a_hint_and_never_the_key(db):
     assert described["changedBy"] == "admin@example.com"
 
 
-# ---------- the environment is a layer, not a casualty ----------
+# ---------- the panel is the only place a key comes from ----------
 
 
-def test_the_environment_key_is_used_when_nothing_is_stored(db):
-    """A deployment nobody has opened the panel on behaves exactly as before."""
-    assert key_for("gemini", "from-the-environment", target=db) == "from-the-environment"
-    assert describe("gemini", "from-the-environment", target=db)["source"] == "environment"
+def test_with_nothing_stored_there_is_no_key(db):
+    """Not configured, said plainly — not an error, and not a guess."""
+    assert key_for("gemini", target=db) == ""
+    assert describe("gemini", target=db)["source"] == "none"
 
 
-def test_a_stored_key_wins_over_the_environment_and_says_so(db):
-    """Same precedence as `llm_settings`: the panel is the more recent act. But
-    an environment variable that appears to do nothing has to be visible, or
-    somebody debugs it for an hour."""
+def test_a_stored_key_is_the_key_in_play(db):
     set_key("gemini", KEY, changed_by="admin@example.com", target=db)
 
-    assert key_for("gemini", "from-the-environment", target=db) == KEY
-    assert describe("gemini", "from-the-environment", target=db)["shadowsEnvironment"] is True
+    assert key_for("gemini", target=db) == KEY
+    assert describe("gemini", target=db)["source"] == "panel"
 
 
-def test_clearing_a_key_returns_the_provider_to_the_environment(db):
+def test_an_environment_variable_is_not_a_key(db, monkeypatch):
+    """There used to be a fallback to GEMINI_API_KEY. A deployment that still
+    sets it must not find the variable quietly doing anything."""
+    monkeypatch.setenv("GEMINI_API_KEY", "from-the-environment")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "from-the-environment")
+
+    assert key_for("gemini", target=db) == ""
+    described = describe("gemini", target=db)
+    assert described["source"] == "none"
+    assert "environment" not in str(described).lower()
+
+
+def test_clearing_a_key_leaves_the_provider_unconfigured(db):
     set_key("gemini", KEY, changed_by="admin@example.com", target=db)
 
     assert clear_key("gemini", target=db) is True
 
-    assert key_for("gemini", "from-the-environment", target=db) == "from-the-environment"
-    assert describe("gemini", "from-the-environment", target=db)["source"] == "environment"
+    assert key_for("gemini", target=db) == ""
+    assert describe("gemini", target=db)["source"] == "none"
 
 
 def test_a_key_can_be_stored_before_the_schema_has_been_applied(tmp_path, monkeypatch):
@@ -142,16 +151,16 @@ def test_the_lazy_table_matches_the_one_in_the_schema(tmp_path, monkeypatch):
     assert columns(lazily) == columns(from_schema) != []
 
 
-def test_a_missing_table_falls_back_rather_than_failing(tmp_path, monkeypatch):
-    """A database created before this feature must not stop the pipeline
-    reaching a model."""
+def test_a_missing_table_reads_as_no_key_rather_than_failing(tmp_path, monkeypatch):
+    """A database created before this feature must not crash the app; it has no
+    keys, which is all that needs saying."""
     monkeypatch.setenv(KEY_ENV, SECRET)
     path = tmp_path / "old.db"
     with connect(path) as conn:
         conn.execute("CREATE TABLE placeholder (x TEXT)")
 
     assert stored_rows(path) == {}
-    assert key_for("gemini", "from-the-environment", target=path) == "from-the-environment"
+    assert key_for("gemini", target=path) == ""
 
 
 # ---------- a locked deployment refuses loudly ----------
@@ -171,13 +180,14 @@ def test_without_a_bootstrap_secret_storing_is_refused(db, monkeypatch):
         assert conn.execute("SELECT count(*) FROM llm_credentials").fetchone()[0] == 0
 
 
-def test_a_locked_deployment_still_uses_its_environment_keys(db, monkeypatch):
-    """Refusing to store must not mean refusing to run."""
+def test_a_locked_deployment_still_runs_and_says_it_cannot_store(db, monkeypatch):
+    """Refusing to store must not mean refusing to run: reading is answered
+    with "no key", and the panel is told why it cannot accept one."""
     monkeypatch.delenv(KEY_ENV, raising=False)
     credentials._fernet_for.cache_clear()
 
-    assert key_for("gemini", "from-the-environment", target=db) == "from-the-environment"
-    assert describe("gemini", "from-the-environment", target=db)["canStore"] is False
+    assert key_for("gemini", target=db) == ""
+    assert describe("gemini", target=db)["canStore"] is False
 
 
 def test_an_empty_key_is_refused(db):
@@ -197,18 +207,18 @@ def test_a_key_encrypted_under_a_different_secret_reads_as_unreadable(db, monkey
     credentials._fernet_for.cache_clear()
 
     assert stored_key("gemini", db) is None
-    described = describe("gemini", "", target=db)
+    described = describe("gemini", target=db)
     assert described["unreadable"] is True
     assert described["source"] == "none"
 
 
-def test_an_unreadable_stored_key_falls_back_to_the_environment(db, monkeypatch):
+def test_an_unreadable_stored_key_is_no_key(db, monkeypatch):
     set_key("gemini", KEY, changed_by="admin@example.com", target=db)
 
     monkeypatch.setenv(KEY_ENV, "a-different-secret")
     credentials._fernet_for.cache_clear()
 
-    assert key_for("gemini", "from-the-environment", target=db) == "from-the-environment"
+    assert key_for("gemini", target=db) == ""
 
 
 # ---------- providers read through it ----------
@@ -217,13 +227,8 @@ def test_an_unreadable_stored_key_falls_back_to_the_environment(db, monkeypatch)
 def test_a_provider_reports_itself_configured_from_a_stored_key(db, monkeypatch):
     """The point of the feature: a key typed in the panel makes the provider
     usable without a redeploy."""
-    from config.settings import settings
     from llm.providers import AnthropicProvider
 
-    # `settings` is a frozen dataclass, so this asserts the precondition rather
-    # than arranging it: with no ANTHROPIC_API_KEY in the test environment, the
-    # only key that can make this provider configured is the stored one.
-    assert not settings.anthropic_api_key
     monkeypatch.setattr("loader.db.resolve_target", lambda *_a, **_k: str(db))
 
     provider = AnthropicProvider()

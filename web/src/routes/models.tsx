@@ -30,16 +30,13 @@ export const Route = createFileRoute('/models')({
  *  to find out. */
 const SOURCE_LABEL: Record<string, string> = {
   admin: 'Set here',
-  environment: 'Set on the server',
   default: 'Default',
 }
 
-/** Where a key came from. Text, not a colour: the distinction between "yours"
- *  and "the server's" decides what somebody does next, and a colour alone
- *  cannot be read by everyone (WCAG 1.4.1). */
+/** Whether a key has been entered. Text, not a colour: a colour alone cannot
+ *  be read by everyone (WCAG 1.4.1). */
 const KEY_SOURCE_LABEL: Record<string, string> = {
   panel: 'Entered here',
-  environment: 'Set on the server',
   none: 'No key',
 }
 
@@ -75,11 +72,6 @@ function KeyRow({
             {k.hint && <> · ends <span className="mono">…{k.hint}</span></>}
             {k.changedBy && k.source === 'panel' && <> · by {k.changedBy}</>}
           </div>
-          {k.shadowsEnvironment && (
-            <div className="llm-meta llm-warn">
-              This key is overriding the one set on the server.
-            </div>
-          )}
           {/* Two different reasons a stored key cannot be read, and naming the
               wrong one sends somebody to the wrong fix. */}
           {k.unreadable && (
@@ -199,11 +191,6 @@ function RouteRow({
             <span className="llm-warn"> · this provider has no API key</span>
           )}
         </div>
-        {r.overriddenEnv && (
-          <div className="llm-meta llm-warn">
-            Overriding the server setting ({r.overriddenEnv})
-          </div>
-        )}
       </div>
       <div className="llm-pick">
         <select
@@ -411,8 +398,8 @@ function ModelsScreen() {
               The server has no <span className="mono">MIOS_CREDENTIAL_KEY</span>, so there
               is nothing to encrypt a key with — and storing one in plain text would leave
               every provider key readable to anyone who can reach the database. Set that
-              variable in the deployment and restart, then keys can be added here. Keys set
-              as server environment variables keep working either way.
+              variable in the deployment and restart, then keys can be added here. Until
+              then no model can be called, and the rest of the app carries on without one.
             </p>
           </div>
         )}

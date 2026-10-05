@@ -119,6 +119,50 @@ def _no_retry_waits(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _fresh_source_config():
+    """The collectors' settings are read through a few seconds of cache. No
+    test should start with another test's answer in it."""
+    from loader import source_config
+
+    source_config.forget()
+    yield
+    source_config.forget()
+
+
+@pytest.fixture
+def panel(tmp_path, monkeypatch):
+    """The Admin panel's settings store, on a database of this test's own.
+
+    Since the environment fallbacks were removed, a test that needs an Apify
+    token, an actor, a list of ASX companies or a custom feed has to give it
+    the way an administrator does: by storing it. That is a write, so it must
+    not land on a database another test can see — on CI there is no
+    DATABASE_URL, and the default target would otherwise be one shared file.
+
+    Yields `loader.source_config`. A bootstrap secret is set so a token can be
+    stored.
+    """
+    import dataclasses
+
+    from loader import credentials, source_config
+    from loader.ingest import init_db
+
+    path = tmp_path / "panel.db"
+    watchlist = tmp_path / "panel-watchlist.json"
+    watchlist.write_text("[]")
+    init_db(path, watchlist_path=watchlist)
+    monkeypatch.setattr(
+        "loader.db.settings",
+        dataclasses.replace(db_module.settings, db_path=path, database_url=None))
+    monkeypatch.setenv(credentials.KEY_ENV, "test-only-bootstrap-passphrase")
+    credentials._fernet_for.cache_clear()
+    source_config.forget()
+    yield source_config
+    source_config.forget()
+    credentials._fernet_for.cache_clear()
+
+
+@pytest.fixture(autouse=True)
 def _never_the_real_database(request, tmp_path_factory, monkeypatch):
     """Redirect the default target to a scratch SQLite file for each test.
 

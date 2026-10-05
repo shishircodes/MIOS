@@ -175,11 +175,7 @@ def test_old_newsfeed_rows_count_towards_their_publication(db):
 
 
 def test_a_board_waiting_on_an_actor_is_not_configured(db, monkeypatch):
-    import scraper.apify as apify
-
-    monkeypatch.setattr(apify, "settings",
-                        dataclasses.replace(apify.settings, apify_token="", apify_actors={}))
     rows = {s["name"]: s for s in admin_api.source_health(ADMIN)["sources"]}
     assert rows["indeed"]["status"] == "not_configured"
-    assert "APIFY_TOKEN" in rows["indeed"]["note"]
+    assert "Integrations" in rows["indeed"]["note"], "the note says where to fix it"
     assert rows["indeed"]["enabled"] is False

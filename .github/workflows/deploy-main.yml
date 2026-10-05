@@ -191,25 +191,18 @@ jobs:
             API_IMAGE=${{ needs.gate.outputs.image_base }}/api:${{ needs.gate.outputs.sha }}
             WEB_IMAGE=${{ needs.gate.outputs.image_base }}/web:${{ needs.gate.outputs.sha }}
             DATABASE_URL=${{ secrets.PROD_DATABASE_URL }}
-            GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}
-            GEMINI_MODEL=${{ vars.GEMINI_MODEL || 'gemini-2.5-flash' }}
-            ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}
-            # Encrypts the provider API keys entered in the Admin panel. Must
-            # stay stable: change it and every stored key becomes undecryptable
-            # (the panel says so rather than reporting them as absent). Without
-            # it the app runs normally on the keys above, and panel entry is
-            # disabled.
+            # Encrypts every key entered in the Admin panel — model providers,
+            # Slack, HubSpot, Google Docs, Apify. Those keys are set in the
+            # panel and nowhere else, so this is what makes them storable at
+            # all. Must stay stable: change it and every stored key becomes
+            # undecryptable (the panel says so rather than reporting them as
+            # absent). Without it the app still runs, with every one of those
+            # features reporting itself as not configured.
             MIOS_CREDENTIAL_KEY=${{ secrets.MIOS_CREDENTIAL_KEY }}
-            SLACK_WEBHOOK_URL=${{ secrets.SLACK_WEBHOOK_URL }}
             ADZUNA_APP_ID=${{ secrets.ADZUNA_APP_ID }}
             ADZUNA_APP_KEY=${{ secrets.ADZUNA_APP_KEY }}
             ADZUNA_COUNTRY=${{ vars.ADZUNA_COUNTRY || 'au' }}
             ADZUNA_QUERIES=${{ vars.ADZUNA_QUERIES }}
-            APIFY_TOKEN=${{ secrets.APIFY_TOKEN }}
-            APIFY_ACTORS=${{ vars.APIFY_ACTORS }}
-            APIFY_INPUTS=${{ vars.APIFY_INPUTS }}
-            ASX_TICKERS=${{ vars.ASX_TICKERS }}
-            NEWS_FEEDS=${{ vars.NEWS_FEEDS }}
             PNGWORKFORCE_BASE_URL=${{ vars.PNGWORKFORCE_BASE_URL }}
             SEEK_BASE_URL=${{ vars.SEEK_BASE_URL }}
             SEEK_PATHS=${{ vars.SEEK_PATHS }}

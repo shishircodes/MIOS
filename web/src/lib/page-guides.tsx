@@ -695,18 +695,42 @@ const sources: PageGuide = {
     },
     {
       id: 'keys',
-      heading: 'Switching on a source that needs a key',
+      heading: 'Sources marked Not configured',
       body: (
         <>
           <p>
-            Two kinds of source wait on a setting in the server&rsquo;s environment. Once it is
-            there, the source switches itself on.
+            Two kinds of source wait for something to be entered. Until then they are skipped,
+            and everything else runs as normal. Once it is entered, the source switches itself
+            on for the next run.
           </p>
           <ul>
-            <li><b>Boards read through Apify</b> (Indeed, Jora, Glassdoor, LinkedIn Jobs and others): set <code>APIFY_TOKEN</code>, and name an actor for each board in <code>APIFY_ACTORS</code>, for example <code>indeed=user/indeed-scraper</code>. Each actor&rsquo;s own input goes in <code>APIFY_INPUTS</code>, one JSON object keyed by board.</li>
-            <li><b>Custom RSS feeds</b>: list extra feeds in <code>NEWS_FEEDS</code> as <code>Name|https://site/feed|AU</code> entries.</li>
-            <li><b>ASX Announcements</b> follows a built-in list of miners, energy producers and contractors. <code>ASX_TICKERS</code> replaces that list.</li>
+            <li><b>Boards read through Apify</b> (Indeed, Jora, Glassdoor, LinkedIn Jobs and others) need a token and an actor. Both are set under <b>Integrations › Apify job boards</b>, and its guide has the steps.</li>
+            <li><b>Custom RSS feeds</b> needs at least one feed, added under <b>Source options</b> on this page.</li>
           </ul>
+        </>
+      ),
+    },
+    {
+      id: 'options',
+      heading: 'Source options',
+      body: (
+        <>
+          <p>Both are optional. Nothing here needs filling in for a run to work.</p>
+          <p><b>ASX companies to follow.</b> ASX Announcements reads the market announcements of a list of companies. It starts on a built-in list of miners, energy producers and contractors.</p>
+          <ol>
+            <li>Press <b>Edit list</b>.</li>
+            <li>Type the ASX codes you want, separated by spaces or commas — for example <span className="mono">BHP RIO FMG</span>. This replaces the list, so keep the codes you still want.</li>
+            <li>Press <b>Save list</b>. The next run follows the new list.</li>
+          </ol>
+          <p><b>Use built-in list</b> goes back to the original companies. Each company is one request per run, which is why the list stops at 60.</p>
+          <p><b>Custom RSS feeds.</b> A publication that is not in the list above can be added if it has an RSS feed.</p>
+          <ol>
+            <li>Find the feed address on the publication&rsquo;s site. It often ends in <span className="mono">/feed</span> or <span className="mono">/rss</span>.</li>
+            <li>Press <b>Add feed</b>, then enter the publication&rsquo;s name, the feed address and its market.</li>
+            <li>Press <b>Check address</b>. It fetches the feed once and says how many articles it found, or why it cannot be read.</li>
+            <li>Press <b>Add feed</b> to save. Its articles are collected from the next run as <b>Custom RSS feeds</b>.</li>
+          </ol>
+          <p>A publication that already has its own row cannot be added again — switch that row on instead.</p>
         </>
       ),
     },
@@ -747,7 +771,7 @@ const sources: PageGuide = {
 
 const integrations: PageGuide = {
   title: 'Integrations',
-  summary: <>The outside systems MIOS talks to: Slack, HubSpot and Google Docs.</>,
+  summary: <>The outside systems MIOS talks to: Slack, HubSpot, Google Docs and Apify.</>,
   sections: [
     {
       id: 'slack',
@@ -821,6 +845,43 @@ const integrations: PageGuide = {
         </>
       ),
     },
+    {
+      id: 'apify',
+      heading: 'Apify job boards',
+      body: (
+        <>
+          <p>
+            Some job boards publish no feed and refuse ordinary readers. Apify is a paid service
+            that runs ready-made readers, called <b>actors</b>, for those boards. This is
+            optional: leave it empty and those boards are simply not read.
+          </p>
+          <p><b>Step 1 — add the token.</b></p>
+          <ol>
+            <li>Sign in at <span className="mono">console.apify.com</span>, or create an account. The free plan includes a small monthly credit.</li>
+            <li>Open <b>Settings › API &amp; Integrations</b> and copy the <b>Personal API token</b>.</li>
+            <li>Here, press <b>Add token</b>, paste it and save.</li>
+            <li>Press <b>Test token</b>. It asks Apify whose token it is — no actor runs and nothing is charged.</li>
+          </ol>
+          <p><b>Step 2 — name an actor for each board you want.</b></p>
+          <ol>
+            <li>In the <b>Apify Store</b>, search for the board (for example &ldquo;Indeed scraper&rdquo;) and open an actor. Check its price and reviews first.</li>
+            <li>Copy its name from the page address: <span className="mono">apify.com/<b>username/actor-name</b></span>.</li>
+            <li>Here, press <b>Set actor</b> beside the board and paste the name.</li>
+            <li>In <b>Search settings</b>, enter what that actor should search for, as JSON. Every actor has its own field names — they are listed on the actor&rsquo;s <b>Input</b> tab, which can also show the JSON to copy. Leave it empty to use the actor&rsquo;s defaults.</li>
+            <li>Save. The board shows <b>Ready</b> once it has both a token and an actor.</li>
+          </ol>
+          <p><b>Step 3 — check the result.</b></p>
+          <ol>
+            <li>A ready board is read from the next run. Under <b>Data sources</b> its row changes from <i>Not configured</i> to <i>No data yet</i>, then <i>Collecting</i>.</li>
+            <li>To stop reading a board, switch it off there, or remove its actor here.</li>
+          </ol>
+          <p>
+            Each run of an actor is charged to the Apify account, so name actors only for boards
+            worth the cost. The token is stored encrypted and never shown again in full.
+          </p>
+        </>
+      ),
+    },
   ],
 }
 
@@ -843,8 +904,8 @@ const models: PageGuide = {
             back to this page; the last four characters are shown so you can tell which is loaded.
           </p>
           <p>
-            A key added here wins over the same provider&rsquo;s key in the server settings, and
-            the row says when that is happening. Remove it to go back to the server&rsquo;s key.
+            Keys are entered here and nowhere else. With no key the app still runs: records are
+            still collected and stored, and the jobs that need a model wait until one is added.
           </p>
           <p>
             <b>Test</b> makes one real call. A saved key is not always a working key — it can be

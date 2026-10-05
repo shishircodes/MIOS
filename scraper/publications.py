@@ -36,7 +36,7 @@ def _feed_hosts() -> dict[str, str]:
     """Host -> publication name, from the feeds the collector is configured with.
 
     Read from the live configuration rather than a copy of the feed list, so a
-    publication added through NEWS_FEEDS is named correctly without anyone
+    publication an administrator adds is named correctly without anyone
     remembering to update a second table here.
     """
     try:
@@ -114,9 +114,10 @@ def label_for(source_name: str | None, source_url: str | None = None) -> str:
 
     source_id = source_id_for(source_name, source_url)
     if source_id == "newsfeed":
-        from config.settings import settings
+        from loader import source_config
 
         # With custom feeds configured this name is live; without them, every
         # row under it is from before the publications were split out.
-        return catalog.label_for("newsfeed") if settings.news_feeds else LEGACY_NEWSFEED_LABEL
+        return (catalog.label_for("newsfeed") if source_config.custom_feeds()
+                else LEGACY_NEWSFEED_LABEL)
     return catalog.label_for(source_id)

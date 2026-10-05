@@ -12,7 +12,6 @@ import type { GoogleDocsStatus } from '~/lib/types'
 
 const CLIENT_SOURCE: Record<string, string> = {
   panel: 'Entered here',
-  environment: 'Set on the server',
   'sign-in': 'Reusing the Google sign-in client',
   none: 'No client',
 }
@@ -136,8 +135,7 @@ export function GoogleDocsPanel({ flash }: { flash?: { ok: boolean; text: string
             </div>
             {!data.canStoreKey && data.client.source !== 'panel' && (
               <div className="llm-meta llm-warn">
-                A client cannot be stored here until the server has MIOS_CREDENTIAL_KEY. Setting{' '}
-                {data.clientEnv.join(' and ')} on the server works too.
+                A client of its own cannot be stored until the server has MIOS_CREDENTIAL_KEY.
               </div>
             )}
           </div>

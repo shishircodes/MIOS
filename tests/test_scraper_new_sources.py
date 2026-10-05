@@ -8,7 +8,6 @@ test that depends on a live site is a test of the site.
 from __future__ import annotations
 
 import asyncio
-import dataclasses
 
 from scraper import apify, asx, catalog, miningpeople, newsfeed, ted, worldbank
 
@@ -82,10 +81,12 @@ def test_asx_empty_or_malformed_payloads_yield_nothing():
     assert asx.parse_announcements({"data": None}, "BHP") == []
 
 
-def test_asx_ticker_list_can_be_replaced(monkeypatch):
-    assert asx.tickers() == asx.DEFAULT_TICKERS or asx.settings.asx_tickers
-    monkeypatch.setattr(asx, "settings", dataclasses.replace(asx.settings, asx_tickers=("BHP", "RIO")))
+def test_asx_follows_the_built_in_list_until_one_is_set(panel):
+    assert asx.tickers() == asx.DEFAULT_TICKERS
+    panel.set_asx_tickers("BHP, RIO", changed_by="admin@example.com")
     assert asx.tickers() == ("BHP", "RIO")
+    panel.set_asx_tickers("", changed_by="admin@example.com")
+    assert asx.tickers() == asx.DEFAULT_TICKERS
 
 
 # ---------- World Bank ----------
@@ -259,6 +260,7 @@ def test_a_catalogued_feed_reports_under_its_own_name():
 # ---------- Apify ----------
 
 INDEED = catalog.get("indeed")
+TOKEN = "apify_api_test_only_0123456789abcdef"
 
 
 def test_apify_reads_the_field_names_actors_commonly_use():
@@ -283,26 +285,29 @@ def test_apify_skips_listings_it_cannot_address_or_name():
     assert apify.parse_items(items, source_id="indeed", label="Indeed", geography="AU") == []
 
 
-def test_apify_a_board_needs_both_a_token_and_an_actor(monkeypatch):
-    monkeypatch.setattr(apify, "settings",
-                        dataclasses.replace(apify.settings, apify_token="", apify_actors={}))
+def test_apify_a_board_needs_both_a_token_and_an_actor(panel):
     ok, missing = apify.configured("indeed")
-    assert ok is False and "APIFY_TOKEN" in missing
+    assert ok is False and "token" in missing
 
-    monkeypatch.setattr(apify, "settings",
-                        dataclasses.replace(apify.settings, apify_token="t", apify_actors={}))
+    panel.set_apify_token(TOKEN, changed_by="admin@example.com")
     ok, missing = apify.configured("indeed")
-    assert ok is False and "APIFY_ACTORS" in missing
+    assert ok is False and "actor" in missing
 
-    monkeypatch.setattr(apify, "settings", dataclasses.replace(
-        apify.settings, apify_token="t", apify_actors={"indeed": "someone/indeed-scraper"}))
+    panel.set_board("indeed", "someone/indeed-scraper", "", changed_by="admin@example.com")
     assert apify.configured("indeed") == (True, None)
+    assert apify.configured("jora")[0] is False, "one board's actor is not another's"
 
 
-def test_apify_an_unconfigured_board_returns_nothing_without_calling_out(monkeypatch):
-    monkeypatch.setattr(apify, "settings",
-                        dataclasses.replace(apify.settings, apify_token="", apify_actors={}))
+def test_apify_environment_variables_configure_nothing(panel, monkeypatch):
+    """APIFY_TOKEN, APIFY_ACTORS and APIFY_INPUTS used to be a fallback."""
+    monkeypatch.setenv("APIFY_TOKEN", TOKEN)
+    monkeypatch.setenv("APIFY_ACTORS", "indeed=someone/indeed-scraper")
+    monkeypatch.setenv("APIFY_INPUTS", '{"indeed": {"position": "mining"}}')
+    panel.forget()
+    assert apify.configured("indeed")[0] is False
 
+
+def test_apify_an_unconfigured_board_returns_nothing_without_calling_out(panel, monkeypatch):
     def _no_network(*_a, **_k):
         raise AssertionError("an unconfigured board must not make a request")
 
@@ -310,11 +315,11 @@ def test_apify_an_unconfigured_board_returns_nothing_without_calling_out(monkeyp
     assert asyncio.run(apify.scrape_async(INDEED, limit=5)) == []
 
 
-def test_apify_sends_the_token_in_a_header_and_the_limit_as_max_items(monkeypatch):
-    monkeypatch.setattr(apify, "settings", dataclasses.replace(
-        apify.settings, apify_token="secret-token", apify_actors={"indeed": "someone/indeed-scraper"}))
-    monkeypatch.setenv("APIFY_INPUTS",
-                       '{"indeed": {"position": "mining", "maxItems": 999}, "jora": {"q": "x"}}')
+def test_apify_sends_the_token_in_a_header_and_the_limit_as_max_items(panel, monkeypatch):
+    panel.set_apify_token(TOKEN, changed_by="admin@example.com")
+    panel.set_board("indeed", "someone/indeed-scraper",
+                    '{"position": "mining", "maxItems": 999}', changed_by="admin@example.com")
+    panel.set_board("jora", "someone/jora-scraper", '{"q": "x"}', changed_by="admin@example.com")
     seen = {}
 
     class _Res:
@@ -330,6 +335,6 @@ def test_apify_sends_the_token_in_a_header_and_the_limit_as_max_items(monkeypatc
 
     assert [r["title"] for r in records] == ["Driller"]
     assert "someone~indeed-scraper" in seen["url"]
-    assert "secret-token" not in seen["url"], "the token must never be in the address"
-    assert seen["headers"]["Authorization"] == "Bearer secret-token"
+    assert TOKEN not in seen["url"], "the token must never be in the address"
+    assert seen["headers"]["Authorization"] == f"Bearer {TOKEN}"
     assert seen["json"] == {"position": "mining", "maxItems": 7}, "the run limit wins"

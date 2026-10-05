@@ -275,7 +275,7 @@ def test_the_seed_no_longer_overwrites_a_synced_watchlist(db):
 
 
 def test_auto_sync_waits_for_a_first_sync_by_hand(db, monkeypatch):
-    monkeypatch.setenv(hs.KEY_ENV, "pat-from-env")
+    monkeypatch.setattr(hs, "api_key", lambda target=None: "pat-stored-in-the-panel")
     assert hs.auto_sync() is None
 
 
@@ -295,10 +295,21 @@ def test_status_counts_an_unmigrated_watchlist_as_the_built_in_list(tmp_path, mo
 
 
 def test_status_never_contains_the_key(db, monkeypatch):
-    monkeypatch.setenv(hs.KEY_ENV, "pat-na1-very-secret-value")
+    from loader import credentials
+
+    monkeypatch.setenv(credentials.KEY_ENV, "a-stable-bootstrap-secret")
+    credentials._fernet_for.cache_clear()
+    credentials.set_key(hs.KEY_NAME, "pat-na1-very-secret-value", changed_by="admin")
     body = json.dumps(hs.status())
     assert "very-secret" not in body
-    assert '"source": "environment"' in body
+    assert '"source": "panel"' in body
+
+
+def test_an_environment_variable_is_not_a_hubspot_key(db, monkeypatch):
+    """HUBSPOT_SERVICE_KEY used to be a fallback. It no longer does anything."""
+    monkeypatch.setenv("HUBSPOT_SERVICE_KEY", "pat-from-the-environment")
+    assert hs.api_key() == ""
+    assert '"source": "none"' in json.dumps(hs.status())
 
 
 # ---------- target accounts without a tier ----------

@@ -51,8 +51,10 @@ def test_live_cycle_scrape_classify_post(db, monkeypatch):
     monkeypatch.setattr("pipeline.live.scrape_all", lambda **_kw:fake_records)
     # Force settings to point at the test DB and a non-placeholder webhook
     monkeypatch.setattr("pipeline.live.settings",
-                        type("S", (), {"db_path": db,
-                                       "slack_webhook_url": "https://hooks.slack.com/services/T/X/Y"})())
+                        type("S", (), {"db_path": db})())
+    # The webhook comes from the panel store, so that is where it is given.
+    monkeypatch.setattr("delivery.slack_config.webhook",
+                        lambda target=None: "https://hooks.slack.com/services/T/X/Y")
 
     fake = _fake_gemini({
         "company_name": "Newmont",
@@ -95,8 +97,10 @@ def test_live_cycle_scrape_failure_still_posts_digest(db, monkeypatch):
     # Scraper returns nothing — but a previously-classified row exists
     monkeypatch.setattr("pipeline.live.scrape_all", lambda **_kw:[])
     monkeypatch.setattr("pipeline.live.settings",
-                        type("S", (), {"db_path": db,
-                                       "slack_webhook_url": "https://hooks.slack.com/services/T/X/Y"})())
+                        type("S", (), {"db_path": db})())
+    # The webhook comes from the panel store, so that is where it is given.
+    monkeypatch.setattr("delivery.slack_config.webhook",
+                        lambda target=None: "https://hooks.slack.com/services/T/X/Y")
 
     classified_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
     with sqlite3.connect(db) as c:
@@ -142,7 +146,7 @@ def test_a_clean_run_has_no_note(db, monkeypatch):
          "raw_content": "Process Operator at Newmont Lihir, PNG. FIFO ex-Cairns 4/4."},
     ])
     monkeypatch.setattr("pipeline.live.settings",
-                        type("S", (), {"db_path": db, "slack_webhook_url": ""})())
+                        type("S", (), {"db_path": db})())
     summary = run_live_cycle(scrape_limit=10, db_path=db, do_scrape=True, do_slack=False,
                              gemini_caller=_fake_gemini({
                                  "company_name": "Newmont", "sector": "mining",
@@ -165,7 +169,7 @@ def test_a_run_that_leaves_rows_unclassified_says_so(db, monkeypatch):
         for i in range(3)
     ])
     monkeypatch.setattr("pipeline.live.settings",
-                        type("S", (), {"db_path": db, "slack_webhook_url": ""})())
+                        type("S", (), {"db_path": db})())
 
     def broken(*_a, **_kw):
         raise ValueError("truncated JSON")

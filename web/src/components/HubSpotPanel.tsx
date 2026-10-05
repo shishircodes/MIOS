@@ -14,7 +14,6 @@ import type { HubSpotMapping, HubSpotProperty, HubSpotStatus, HubSpotSyncSummary
 
 const KEY_SOURCE: Record<string, string> = {
   panel: 'Entered here',
-  environment: 'Set on the server',
   none: 'No key',
 }
 
@@ -183,8 +182,7 @@ export function HubSpotPanel() {
             )}
             {!data.canStoreKey && data.key.source === 'none' && (
               <div className="llm-meta llm-warn">
-                Keys cannot be stored here until the server has MIOS_CREDENTIAL_KEY. Setting{' '}
-                {data.keyEnv} on the server works too.
+                A key cannot be stored until the server has MIOS_CREDENTIAL_KEY.
               </div>
             )}
           </div>

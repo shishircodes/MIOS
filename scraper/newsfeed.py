@@ -14,8 +14,9 @@ vacancy. "Downer wins $340M rail contract" can only arrive this way.
 One module serves every feed rather than a file per publication. The
 publications themselves are listed in `scraper/catalog.py`, each as a source of
 its own — with its own switch and its own per-run limit — so adding one is an
-entry there and nothing here. `NEWS_FEEDS` adds feeds without a code change;
-those are read together as the "Custom RSS feeds" source.
+entry there and nothing here. An administrator can add feeds without a code
+change, under Admin › Data sources; those are read together as the "Custom RSS
+feeds" source.
 
 Both RSS 2.0 (`<item>`) and Atom (`<entry>`) are handled: the AU mining titles
 publish RSS, some PNG outlets publish Atom, and which one a site emits is not
@@ -56,7 +57,7 @@ class Feed:
     url: str
     geography: str
     #: The source its records are stored under. A catalogued publication uses
-    #: its own id; a feed added through NEWS_FEEDS shares the custom source.
+    #: its own id; a feed an administrator adds shares the custom source.
     source: str = SOURCE_NAME
 
 
@@ -286,24 +287,15 @@ def parse_feed(xml_text: str, feed: Feed) -> list[dict[str, Any]]:
 
 
 def _custom_feeds() -> tuple[Feed, ...]:
-    """The feeds named in `NEWS_FEEDS`, as `name|url|geography` entries.
+    """The extra feeds an administrator has added under Admin › Data sources.
 
     These are extra to the catalogued publications, not a replacement for them:
     a catalogued feed is switched off from the Admin panel, not by overriding
-    the whole list from the environment.
+    the whole list.
     """
-    feeds: list[Feed] = []
-    for spec in settings.news_feeds:
-        parts = [p.strip() for p in spec.split("|")]
-        if len(parts) != 3 or not all(parts):
-            log.warning(
-                "newsfeed: ignoring malformed NEWS_FEEDS entry %r "
-                "(expected Name|https://url/feed|AU)",
-                spec,
-            )
-            continue
-        feeds.append(Feed(parts[0], parts[1], parts[2].upper()))
-    return tuple(feeds)
+    from loader import source_config
+
+    return tuple(Feed(f["name"], f["url"], f["market"]) for f in source_config.custom_feeds())
 
 
 def _configured_feeds() -> tuple[Feed, ...]:
@@ -376,7 +368,7 @@ async def scrape_feed_async(feed: Feed, limit: int = 50,
 
 
 async def scrape_async(limit: int = 50, base_url: str | None = None) -> list[dict[str, Any]]:
-    """The custom feeds from `NEWS_FEEDS`, read together as one source.
+    """The feeds an administrator has added, read together as one source.
 
     Never raises; returns [] on any failure, like the other sources.
 
@@ -385,7 +377,7 @@ async def scrape_async(limit: int = 50, base_url: str | None = None) -> list[dic
     """
     feeds = (Feed("Override", base_url, "AU"),) if base_url else _custom_feeds()
     if not feeds:
-        log.info("newsfeed: no custom feeds in NEWS_FEEDS — nothing to read")
+        log.info("newsfeed: no custom feeds configured — nothing to read")
         return []
     try:
         return await asyncio.to_thread(_scrape_sync, limit, feeds)

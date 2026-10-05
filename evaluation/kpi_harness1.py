@@ -21,6 +21,7 @@ from typing import Any
 
 from agents.signal_analyst import classify_pending
 from config.settings import REPO_ROOT, configure_logging, settings
+from delivery import slack_config
 from delivery.digest import build_digest
 from delivery.slack import post_digest
 from loader.db import connect, resolve_target
@@ -260,14 +261,14 @@ def main(argv: list[str] | None = None) -> int:
     result = run_evaluation(db_path=args.db, ground_truth_path=args.ground_truth, runs=args.runs)
 
     if not args.no_slack:
-        if not settings.slack_webhook_url or settings.slack_webhook_url.endswith("..."):
-            log.warning("SLACK_WEBHOOK_URL not configured — skipping Slack delivery")
+        if not slack_config.webhook():
+            log.warning("No Slack webhook in Admin › Integrations — skipping Slack delivery")
         else:
             digest = build_digest(
                 db_path=resolve_target(),
                 since=datetime.now(timezone.utc) - timedelta(days=7),
             )
-            ok = post_digest(settings.slack_webhook_url, digest)
+            ok = post_digest(slack_config.webhook(), digest)
             log.info("Slack delivery: %s", "ok" if ok else "failed")
 
     return 0 if result["per_run"] else 1

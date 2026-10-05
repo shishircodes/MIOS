@@ -151,41 +151,34 @@ def test_entries_without_a_link_still_get_a_unique_url():
 # ---------- configuration ----------
 
 
-def _with_feeds(monkeypatch, feeds: tuple[str, ...]):
-    """Settings is frozen, so swap in a clone rather than assigning to a field."""
-    import dataclasses
+def test_the_catalogue_is_used_when_nothing_is_added(panel):
     import scraper.newsfeed as nf
-    monkeypatch.setattr(nf, "settings", dataclasses.replace(nf.settings, news_feeds=feeds))
-    return nf
 
-
-def test_defaults_are_used_when_nothing_is_configured(monkeypatch):
-    nf = _with_feeds(monkeypatch, ())
+    assert _custom_feeds() == ()
     assert _configured_feeds() == nf.FEEDS
 
 
-def test_news_feeds_env_adds_custom_feeds(monkeypatch):
-    """NEWS_FEEDS adds to the catalogued publications; it no longer replaces
+def test_feeds_added_in_the_panel_are_read_beside_the_catalogue(panel):
+    """Custom feeds add to the catalogued publications; they do not replace
     them. A catalogued feed is switched off from the Admin panel instead."""
-    nf = _with_feeds(monkeypatch, ("The National|https://thenational.com.pg/feed|png",))
+    import scraper.newsfeed as nf
+
+    panel.set_custom_feeds(
+        [{"name": "The National", "url": "https://thenational.com.pg/feed", "market": "png"}],
+        changed_by="admin@example.com")
     feeds = _custom_feeds()
     assert len(feeds) == 1
     assert feeds[0].name == "The National"
-    assert feeds[0].geography == "PNG", "geography is normalised to upper case"
+    assert feeds[0].geography == "PNG", "the market is normalised to upper case"
     assert feeds[0].source == "newsfeed", "custom feeds report as the custom source"
     assert _configured_feeds() == nf.FEEDS + feeds
 
 
-def test_malformed_config_entries_are_skipped_not_fatal(monkeypatch):
-    _with_feeds(monkeypatch, ("missing-the-other-fields", "Good|https://example.com/feed|AU"))
-    feeds = _custom_feeds()
-    assert len(feeds) == 1 and feeds[0].name == "Good"
-
-
-def test_a_wholly_malformed_config_falls_back_to_defaults(monkeypatch):
-    """Better a working default than no source at all."""
-    nf = _with_feeds(monkeypatch, ("nonsense",))
-    assert _configured_feeds() == nf.FEEDS
+def test_an_environment_variable_adds_no_feeds(panel, monkeypatch):
+    """NEWS_FEEDS used to be how extra feeds were added. It no longer does anything."""
+    monkeypatch.setenv("NEWS_FEEDS", "Good|https://example.com/feed|AU")
+    panel.forget()
+    assert _custom_feeds() == ()
 
 
 def test_settings_repr_does_not_leak_secrets():
@@ -193,12 +186,23 @@ def test_settings_repr_does_not_leak_secrets():
     key, because the default dataclass repr includes every field."""
     from config.settings import settings as real
     text = repr(real)
-    for name in ("gemini_api_key", "session_secret", "database_url",
-                 "google_client_secret", "slack_webhook_url"):
+    for name in ("session_secret", "database_url", "google_client_secret", "adzuna_app_key"):
         value = getattr(real, name)
         if value:
             assert str(value) not in text, f"{name} appears in repr(Settings)"
-    assert "gemini_model" in text, "non-secret fields should still be visible"
+    assert "web_app_url" in text, "non-secret fields should still be visible"
+
+
+def test_settings_no_longer_carry_what_the_panel_owns():
+    """Model keys, routing, the Slack webhook and the collector settings are
+    set in the Admin panel and nowhere else. A field left behind here would be
+    a second place to look, and an environment variable that appears to work."""
+    from config.settings import settings as real
+    for gone in ("gemini_api_key", "anthropic_api_key", "gemini_model", "llm_routing",
+                 "slack_webhook_url", "apify_token", "apify_actors", "asx_tickers", "news_feeds"):
+        assert not hasattr(real, gone), gone
+    # The one access setting that stays in the environment, by request.
+    assert hasattr(real, "allowed_emails")
 
 
 # ---------- off-topic headlines ----------

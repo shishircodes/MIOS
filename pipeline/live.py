@@ -278,10 +278,9 @@ def run_live_cycle(
 
     slack_ok = False
     if do_slack:
-        # The webhook set under Admin › Integrations, else SLACK_WEBHOOK_URL —
-        # and only if an administrator has not switched the post off.
-        slack_ok = slack_config.deliver_digest(
-            digest_text, target=db_path, env_value=settings.slack_webhook_url)
+        # The webhook set under Admin › Integrations, and only if an
+        # administrator has not switched the post off.
+        slack_ok = slack_config.deliver_digest(digest_text, target=db_path)
         log.info("live: Slack delivery: %s", "ok" if slack_ok else "not delivered")
     else:
         log.info("live: --no-slack; skipping Slack delivery")

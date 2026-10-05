@@ -291,7 +291,7 @@ def source_health(user: dict[str, Any] = Depends(require_admin)) -> dict[str, An
 
             row["label"] = LEGACY_NEWSFEED_LABEL
             missing = ("Records from before each publication became a source of its own. "
-                       "Add feeds to NEWS_FEEDS to use this for custom feeds.")
+                       "Add feeds under Source options below to use this for custom feeds.")
         last_seen = s.get("lastSeen")
         limit = limits.get(name, pipeline_settings.DEFAULT_SCRAPE_LIMIT)
         chosen = settings_by_source.get(name, {"enabled": True})

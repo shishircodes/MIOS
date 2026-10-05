@@ -2255,6 +2255,50 @@ html:has(dialog.guide[open]) { overflow: hidden; }
 
 .key-result { margin: 12px 0 0; }
 
+/* Numbered setup steps inside a panel: the number is the order to do them in. */
+.step-no {
+  display: inline-grid; place-items: center; width: 20px; height: 20px; margin-right: 8px;
+  border-radius: 50%; background: var(--ink); color: var(--surface);
+  font-family: var(--mono); font-size: 11px; font-weight: 600; vertical-align: 1px;
+}
+
+/* Apify: one line per board, with its form opening underneath. */
+.apify-boards { margin-top: 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); }
+.apify-board { padding: 10px 12px; border-bottom: 1px solid var(--line); }
+.apify-board:last-child { border-bottom: 0; }
+.apify-board-head { display: grid; grid-template-columns: 1fr auto auto; gap: 12px; align-items: center; }
+.apify-board-name { font-weight: 600; font-size: 13.5px; }
+.apify-board .llm-meta { margin-top: 2px; }
+/* JSON and lists of codes: several lines, and no ellipsis. */
+textarea.apify-json { resize: vertical; min-height: 64px; line-height: 1.5; text-overflow: clip; width: 100%; }
+.apify-form-actions { grid-column: 2; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.gd-form .apify-form-actions .btn { grid-column: auto; }
+
+/* Source options: the ASX codes followed, and the custom feeds. */
+.ticker-list { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 10px; }
+.ticker {
+  font-family: var(--mono); font-size: 11.5px; padding: 1px 7px; color: var(--ink-2);
+  background: var(--surface-2); border: 1px solid var(--line-2); border-radius: var(--radius-sm);
+}
+.opt-form { flex-direction: column; align-items: stretch; }
+.opt-form .btn { align-self: flex-start; }
+.opt-select { flex: 0 0 auto; min-width: 0; width: max-content; font-family: var(--sans); }
+.feed-list { list-style: none; margin: 10px 0 0; padding: 0; border: 1px solid var(--line); border-radius: var(--radius-sm); }
+.feed-list li {
+  display: grid; grid-template-columns: minmax(140px, 220px) minmax(0, 1fr) auto; gap: 12px;
+  align-items: center; padding: 6px 12px; border-bottom: 1px solid var(--line);
+}
+.feed-list li:last-child { border-bottom: 0; }
+.feed-name { font-weight: 600; font-size: 13.5px; }
+.feed-url { font-size: 12px; color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 640px) {
+  .apify-board-head { grid-template-columns: 1fr auto; }
+  .apify-board-head .btn { grid-column: 1 / -1; justify-self: start; }
+  .apify-form-actions { grid-column: 1; }
+  .feed-list li { grid-template-columns: 1fr auto; }
+  .feed-url { grid-column: 1 / -1; grid-row: 2; }
+}
+
 /* Two fields (client ID and secret): label beside input, one pair per row. */
 .gd-form { display: grid; grid-template-columns: max-content 1fr; align-items: center; }
 .gd-form .btn { grid-column: 2; justify-self: start; }

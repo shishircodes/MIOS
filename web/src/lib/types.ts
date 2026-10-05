@@ -176,9 +176,8 @@ export interface HubSpotSyncSummary {
 }
 
 export interface HubSpotStatus {
-  key: { source: 'panel' | 'environment' | 'none'; hint: string | null; shadowsEnvironment: boolean; unreadable: boolean }
+  key: { source: 'panel' | 'none'; hint: string | null; unreadable: boolean }
   canStoreKey: boolean
-  keyEnv: string
   mapping: HubSpotMapping
   lastSync: HubSpotSyncSummary | null
   watchlist: { fromHubspot: number; fromSeed: number }
@@ -218,9 +217,8 @@ export interface PipelineSettings {
 // ---------- Slack digest (api/slack_api.py) ----------
 
 export interface SlackStatus {
-  webhook: { source: 'panel' | 'environment' | 'none'; hint: string | null; shadowsEnvironment: boolean; unreadable: boolean }
+  webhook: { source: 'panel' | 'none'; hint: string | null; unreadable: boolean }
   canStoreKey: boolean
-  keyEnv: string
   /** Whether runs post the digest. The webhook is kept either way. */
   enabled: boolean
   changedBy: string | null
@@ -230,13 +228,63 @@ export interface SlackStatus {
   testOk?: boolean
 }
 
+// ---------- Collector settings (api/source_config_api.py) ----------
+
+export interface ApifyBoard {
+  /** The source's id, as on the Data sources page. */
+  id: string
+  label: string
+  market: string
+  url: string
+  /** `username/actor-name`, or '' when none has been named. */
+  actor: string
+  /** The actor's own input, as JSON text. '' when there is none. */
+  input: string
+  /** True when there is both a token and an actor, so the board can be read. */
+  ready: boolean
+  changedBy: string | null
+  changedAt: string | null
+}
+
+export interface CustomFeed {
+  name: string
+  url: string
+  market: string
+}
+
+export interface SourceConfigStatus {
+  apify: {
+    token: { source: 'panel' | 'none'; hint: string | null; unreadable: boolean }
+    canStoreKey: boolean
+    boards: ApifyBoard[]
+    readyCount: number
+  }
+  asx: {
+    /** The list in play: the administrator's, or the built-in one. */
+    tickers: string[]
+    custom: boolean
+    defaults: string[]
+    max: number
+    changedBy: string | null
+    changedAt: string | null
+  }
+  feeds: {
+    feeds: CustomFeed[]
+    max: number
+    markets: string[]
+    changedBy: string | null
+    changedAt: string | null
+  }
+  note?: string
+  testOk?: boolean
+}
+
 // ---------- Google Docs (api/google_docs_api.py) ----------
 
 export interface GoogleDocsStatus {
-  /** Where the OAuth client comes from: typed in here, server env, or the sign-in client. */
-  client: { source: 'panel' | 'environment' | 'sign-in' | 'none'; id: string | null }
+  /** Where the OAuth client comes from: typed in here, or the sign-in client. */
+  client: { source: 'panel' | 'sign-in' | 'none'; id: string | null }
   canStoreKey: boolean
-  clientEnv: string[]
   /** Must be listed as an authorised redirect URI on the Google OAuth client. */
   redirectUri: string
   scopes: string[]
@@ -682,12 +730,10 @@ export interface LlmRoute {
   model: string
   /** False when the chosen provider has no API key. */
   configured: boolean
-  /** Where this choice came from: 'admin', 'environment' or 'default'. */
+  /** Where this choice came from: 'admin' or 'default'. */
   source: string
   changedBy: string | null
   changedAt: string | null
-  /** Set when an admin choice is overriding a value pinned on the server. */
-  overriddenEnv: string | null
 }
 
 /** Where a provider's API key comes from, and never the key itself.
@@ -697,13 +743,10 @@ export interface LlmRoute {
  *  show it to them. */
 export interface LlmKeyStatus {
   provider: string
-  /** 'panel' (entered here), 'environment' (set on the server), or 'none'. */
+  /** 'panel' (entered here) or 'none'. Keys are set here and nowhere else. */
   source: string
-  /** Last four characters of whichever key is in play. Null when there is none. */
+  /** Last four characters of the stored key. Null when there is none. */
   hint: string | null
-  /** A key entered here is overriding one set on the server. Shown so an
-   *  environment variable that appears to do nothing is explainable. */
-  shadowsEnvironment: boolean
   /** A stored key that will not decrypt — almost always because the server's
    *  MIOS_CREDENTIAL_KEY changed. Looks identical to "no key" and needs a
    *  completely different fix, so it is reported separately. */

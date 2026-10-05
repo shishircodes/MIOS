@@ -30,8 +30,6 @@ from typing import Any
 
 import requests
 
-from config.settings import settings
-
 log = logging.getLogger(__name__)
 
 SOURCE_NAME = "asx"
@@ -51,7 +49,7 @@ REQUEST_DELAY_SECONDS = 0.4
 PER_COMPANY = 10
 
 #: Miners, energy producers and the contractors that staff their projects.
-#: `ASX_TICKERS` replaces this list.
+#: A list set under Admin › Data sources replaces this one.
 DEFAULT_TICKERS: tuple[str, ...] = (
     "BHP", "RIO", "FMG", "S32", "NEM", "NST", "EVN", "MIN", "PLS", "IGO", "LYC", "WHC",
     "WDS", "STO", "ORG", "BPT", "KAR",
@@ -90,7 +88,11 @@ def _now_iso() -> str:
 
 
 def tickers() -> tuple[str, ...]:
-    return settings.asx_tickers or DEFAULT_TICKERS
+    """The companies to follow: the list set under Admin › Data sources, else
+    the built-in one."""
+    from loader import source_config
+
+    return source_config.asx_tickers() or DEFAULT_TICKERS
 
 
 def is_signal(headline: str, price_sensitive: bool) -> bool:
