@@ -84,6 +84,9 @@ def _describe(src: catalog.Source) -> dict[str, Any]:
         "priority": src.priority,
         "url": src.url,
         "collectable": src.collectable,
+        #: Where a source that is waiting on a setting gets it. Filled in below
+        #: for the ones that are; the page turns it into a button.
+        "setup": None,
     }
 
 
@@ -291,7 +294,7 @@ def source_health(user: dict[str, Any] = Depends(require_admin)) -> dict[str, An
 
             row["label"] = LEGACY_NEWSFEED_LABEL
             missing = ("Records from before each publication became a source of its own. "
-                       "Add feeds under Source options below to use this for custom feeds.")
+                       "Add a feed under Options & limits to use this for custom feeds.")
         last_seen = s.get("lastSeen")
         limit = limits.get(name, pipeline_settings.DEFAULT_SCRAPE_LIMIT)
         chosen = settings_by_source.get(name, {"enabled": True})
@@ -308,6 +311,8 @@ def source_health(user: dict[str, Any] = Depends(require_admin)) -> dict[str, An
         # of the row still carry what it collected while it was on.
         if not configured:
             status = "not_configured"
+            row["setup"] = ("apify" if src.collector == catalog.APIFY
+                            else "feeds" if name == "newsfeed" else None)
         elif not chosen.get("enabled", True):
             status = "off"
         elif not last_seen:
@@ -354,7 +359,7 @@ def source_health(user: dict[str, Any] = Depends(require_admin)) -> dict[str, An
             "name": name, "label": name, "category": "retired", "group": "Retired",
             "market": "—", "sectors": "—", "provides": "—", "kind": "Retired",
             "cost": "—", "priority": None, "url": "", "collectable": False,
-            "status": "retired", "statusLabel": "Retired",
+            "setup": None, "status": "retired", "statusLabel": "Retired",
             "note": "This source is no longer registered, but its signals remain.",
             "lastSeen": s.get("lastSeen"), "totalRecords": s.get("total", 0),
             "last7Days": s.get("last7", 0), "lastRunRecords": s.get("lastRunRecords", 0),

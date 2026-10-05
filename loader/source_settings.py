@@ -67,7 +67,7 @@ def configured(source_name: str, target: str | Path | None = None) -> tuple[bool
     if source_name == "adzuna" and not settings.adzuna_configured:
         return False, "ADZUNA_APP_ID / ADZUNA_APP_KEY are not set, so this source is skipped."
     if source_name == "newsfeed" and not source_config.custom_feeds(target):
-        return False, "No custom feeds yet. Add them under Source options below."
+        return False, "No custom feeds yet. Add one under Options & limits."
     if src is not None and src.collector == catalog.APIFY:
         from scraper import apify
 

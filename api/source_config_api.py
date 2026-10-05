@@ -114,7 +114,7 @@ def put_feeds(payload: dict[str, Any] = Body(...),
     if not feeds:
         return _with("No custom feeds. The catalogued publications are unaffected.")
     return _with(f"Saved {len(feeds)} feed{'' if len(feeds) == 1 else 's'}. "
-                 "Read from the next run, as “Custom RSS feeds” in the list above.")
+                 "Read from the next run, as “Custom RSS feeds” on the Sources tab.")
 
 
 @router.post("/feeds/check")

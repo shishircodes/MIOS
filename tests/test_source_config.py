@@ -338,8 +338,12 @@ def test_the_source_list_follows_the_panel(panel, monkeypatch):
 
     before = row(BOARD)
     assert before["status"] == "not_configured" and "Integrations" in before["note"]
+    assert before["setup"] == "apify", "the page links to where it is set up"
+    assert row("newsfeed")["setup"] == "feeds"
+    assert row("pngworkforce")["setup"] is None, "a source that is set up needs no link"
 
     panel.set_apify_token(TOKEN, changed_by=ADMIN)
     panel.set_board(BOARD, "someone/reader", "", changed_by=ADMIN)
     after = row(BOARD)
     assert after["status"] != "not_configured" and after["enabled"] is True
+    assert after["setup"] is None, "set up, so it sits in the main table"

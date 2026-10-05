@@ -36,7 +36,7 @@ export function SourceOptionsPanel() {
 
   const settle = (p: SourceConfigStatus) => {
     qc.setQueryData(sourceConfigQueryOptions.queryKey, p)
-    // "Custom RSS feeds" goes from not configured to collecting in the list above.
+    // "Custom RSS feeds" moves from Needs setup into the table on the Sources tab.
     void qc.invalidateQueries({ queryKey: sourceHealthQueryOptions.queryKey })
     setProblem(null)
     setNote(p.note ?? null)

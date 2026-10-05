@@ -457,8 +457,8 @@ SOURCES: tuple[Source, ...] = (
         provides="Any extra feeds an administrator adds", access="RSS",
         collector=MODULE, geography="AU", source_type="news", default_enabled=False,
         off_reason=(
-            "Reads only the extra feeds an administrator adds under Source options "
-            "on this page. With none added it has nothing to read."
+            "Reads only the extra feeds an administrator adds under Options & limits "
+            "on the Data sources page. With none added it has nothing to read."
         ),
     ),
 

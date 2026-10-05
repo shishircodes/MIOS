@@ -646,6 +646,9 @@ export interface SourceHealth {
   /** Whether MIOS can collect from it at all. False rows carry a reason in
    *  `note` instead of collection figures. */
   collectable: boolean
+  /** Where a source waiting on a setting gets it: the Apify panel under
+   *  Integrations, or the custom feeds under Options & limits. Null otherwise. */
+  setup: 'apify' | 'feeds' | null
   status: SourceStatus
   note: string | null
   lastSeen: string | null
