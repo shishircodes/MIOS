@@ -84,7 +84,9 @@ function WeeklyDigest() {
     // rather than widening the way a plain OR would.
     const terms = q.split(/\s+/)
     return all.filter((s) => {
-      const haystack = [s.company, s.title, s.desc, s.sector, s.region, s.source, s.tier ?? '']
+      // A folded line is searched by the roles inside it too.
+      const roles = (s.roles ?? []).map((r) => r.title)
+      const haystack = [s.company, s.title, s.desc, s.sector, s.region, s.source, s.tier ?? '', ...roles]
         .join(' ')
         .toLowerCase()
       return terms.every((t) => haystack.includes(t))
@@ -540,11 +542,18 @@ function SignalRow({ s, onOpen }: { s: Signal; onOpen: () => void }) {
           <span className="chip">{s.cycle}</span>
         </div>
         <p className="title">{s.company} — {s.title}</p>
-        <p className="desc">{s.desc}</p>
+        {/* The collected text itself is not shown here: a row is the headline
+            and what the AI made of it. Opening the row shows the original. */}
         {s.action && <div className="action">→ {s.action}</div>}
       </div>
       <div className="meta-col">
-        <div>conf {s.conf}</div>
+        {/* The digest's own score, and the working on hover. Older digests
+            were stored before there was one. */}
+        {s.score != null && (
+          <div title={(s.scoreParts ?? []).map((p) => `${p.label} +${p.points}`).join(' · ')}>
+            score {s.score}
+          </div>
+        )}
         <div style={{ color: 'var(--ink-3)' }}>{s.sourceLabel ?? s.source}</div>
         {/* The publication, only where it says more than the source's own
             name does — a publication is its own source now, so usually not. */}

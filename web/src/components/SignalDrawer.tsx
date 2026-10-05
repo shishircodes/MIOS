@@ -41,6 +41,9 @@ function SignalDetail({ s }: { s: Signal }) {
   const [showCandidates, setShowCandidates] = useState(false)
   // A signal the classifier could not attribute has nobody to match against.
   const named = !!s.company && s.company.toLowerCase() !== 'unknown'
+  // A company's job ads folded into one line: the panel lists the roles, each
+  // with its own text and link, in place of a single advert.
+  const folded = !!s.roles && s.roles.length > 1
 
   return (
     <>
@@ -61,14 +64,57 @@ function SignalDetail({ s }: { s: Signal }) {
             <div className="publication">{s.publication}</div>
           )}
         </div>
-        <div>
-          <div className="drawer-fact-label">Confidence</div>
-          <div className="drawer-fact mono">{s.conf}/100</div>
-        </div>
+        {s.score != null && (
+          <div>
+            <div className="drawer-fact-label">Digest score</div>
+            <div className="drawer-fact mono">{s.score}/100</div>
+          </div>
+        )}
       </div>
-      <Tag>Detection</Tag>
-      <p className="drawer-desc">{s.desc}</p>
-      {s.action && (
+      {s.scoreParts && s.scoreParts.length > 0 && (
+        <>
+          <Tag>How it scored</Tag>
+          <ul className="score-parts">
+            {s.scoreParts.map((p) => (
+              <li key={p.label}>
+                <span>{p.label}</span>
+                <span className="mono">+{p.points}</span>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+      {folded ? (
+        <>
+          <Tag>{`${s.count} roles advertised`}</Tag>
+          <div className="role-list">
+            {s.roles!.map((r) => (
+              <details key={r.id} className="role">
+                <summary>
+                  <span className="role-title">{r.title}</span>
+                  <span className="role-src">{r.sourceLabel ?? r.source}</span>
+                </summary>
+                <p className="drawer-desc">{r.desc}</p>
+                {r.action && <p className="role-note">→ {r.action}</p>}
+                {r.sourceUrl && (
+                  <a href={r.sourceUrl} target="_blank" rel="noopener">Open source</a>
+                )}
+              </details>
+            ))}
+          </div>
+          {s.count! > s.roles!.length && (
+            <p className="muted drawer-small">
+              Showing the {s.roles!.length} most recent of {s.count}.
+            </p>
+          )}
+        </>
+      ) : (
+        <>
+          <Tag>Detection</Tag>
+          <p className="drawer-desc">{s.desc}</p>
+        </>
+      )}
+      {!folded && s.action && (
         <>
           <Tag>Recommended action / analyst note</Tag>
           <div className="pull">{s.action}</div>
@@ -87,7 +133,7 @@ function SignalDetail({ s }: { s: Signal }) {
             {Icons.push} {showCandidates ? 'Hide candidates' : 'Find candidates'}
           </button>
         )}
-        {s.sourceUrl && (
+        {!folded && s.sourceUrl && (
           <a className="btn" href={s.sourceUrl} target="_blank" rel="noopener">
             {Icons.ext} Open source
           </a>

@@ -211,11 +211,11 @@ function SignalFeed() {
                   <span className="chip">{s.region}</span>
                 </div>
                 <p className="title">{s.company} — {s.title}</p>
-                <p className="desc">{s.desc}</p>
+                {/* The collected text is in the panel that opens on click, not
+                    in the list. */}
                 {s.action && <div className="action">→ {s.action}</div>}
               </div>
               <div className="meta-col">
-                <div>conf {s.conf}</div>
                 <div style={{ color: 'var(--ink-3)' }}>{s.sourceLabel ?? s.source}</div>
                 {s.publication && s.publication.toLowerCase() !== (s.sourceLabel ?? s.source).toLowerCase() && (
                   <div className="publication">{s.publication}</div>

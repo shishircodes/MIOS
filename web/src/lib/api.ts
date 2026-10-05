@@ -6,6 +6,7 @@ import type {
   DashboardPayload,
   DigestArchiveEntry,
   DigestPayload,
+  DigestRanking,
   FeedPayload,
   FeedQuery,
   MatchResponse,
@@ -43,6 +44,14 @@ export const digestQueryOptions = queryOptions({
   queryKey: ['digest'],
   queryFn: fetchDigest,
   // A 401 means "sign in", not "retry" — the auth gate handles it.
+  retry: false,
+})
+
+/** How a digest scores and chooses its lines, for the page guide. */
+export const digestRankingQueryOptions = queryOptions({
+  queryKey: ['digest', 'ranking'],
+  queryFn: () => fetchJson<DigestRanking>('/api/digest/ranking'),
+  staleTime: 60 * 60 * 1000,
   retry: false,
 })
 

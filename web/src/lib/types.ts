@@ -36,6 +36,30 @@ export interface MarketPulse {
   note: string | null
 }
 
+/** One job ad inside a folded line. */
+export interface SignalRole {
+  id: string
+  title: string
+  desc: string
+  action: string | null
+  source: string
+  sourceLabel?: string
+  sourceUrl: string | null
+  capturedAt: string | null
+}
+
+/** How a digest scores and chooses its lines (GET /api/digest/ranking). */
+export interface DigestRanking {
+  max: number
+  who: { label: string; points: number }[]
+  what: { label: string; points: number }[]
+  more: { label: string; points: number }[]
+  perCompany: number
+  regionShare: number
+  regions: string[]
+  limit: number
+}
+
 export interface Signal {
   id: string
   n: string
@@ -56,7 +80,15 @@ export interface Signal {
   /** Original posting URL when available; null when missing or not http(s). */
   sourceUrl: string | null
   cycle: string
-  conf: number
+  /** How strongly the digest ranked this line, out of 100, and the working
+   *  behind it. Only on digest rows: the feed is not ranked. Absent on digests
+   *  stored before scoring existed. */
+  score?: number
+  scoreParts?: { label: string; points: number }[]
+  /** Set when this row is a company's job ads folded into one line: how many,
+   *  and the ads themselves. */
+  count?: number
+  roles?: SignalRole[]
   /** When the scraper collected this. Lets a reader tell a posting found in
    *  this run from one carried over from an earlier run in the same window. */
   capturedAt: string | null
