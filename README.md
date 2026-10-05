@@ -724,7 +724,7 @@ Variables:
 | `PROD_HOST` | VPS IP | production deploys |
 | `PROD_WEB_URL` / `PROD_API_URL` | `https://mios.example.com` | production |
 | `DEPLOY_USER` | `deploy` (default) | both |
-| `ALLOWED_GOOGLE_DOMAIN` / `ALLOWED_EMAILS` | `easyskill.com` | production sign-in |
+| `ALLOWED_EMAILS` | comma-separated addresses, or empty | production sign-in |
 
 Secrets:
 
@@ -735,6 +735,7 @@ Secrets:
 | `PROD_DATABASE_URL` | Neon pooled connection string |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Cloud Console |
 | `SESSION_SECRET` | `python -c "import secrets;print(secrets.token_urlsafe(48))"` |
+| `ALLOWED_GOOGLE_DOMAIN` | the company's Google Workspace domain. Required: the deploy stops without it, because a blank domain admits any Google account |
 | `MIOS_CREDENTIAL_KEY` | `python -c "import secrets;print(secrets.token_urlsafe(48))"` — encrypts the keys entered in the Admin panel; keep it stable |
 
 `GITHUB_TOKEN` is provided automatically — no setup for GHCR.

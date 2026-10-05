@@ -164,6 +164,19 @@ jobs:
         with:
           ref: ${{ needs.gate.outputs.sha }}
 
+      # The sign-in domain is a secret, and with it blank the API admits any
+      # Google account at all. So a missing secret stops the deploy here,
+      # before the server is touched, and the previous release keeps running.
+      - name: Check the sign-in domain is set
+        if: vars.PROD_AUTH_DISABLED != 'true'
+        env:
+          DOMAIN: ${{ secrets.ALLOWED_GOOGLE_DOMAIN }}
+        run: |
+          if [ -z "$DOMAIN" ]; then
+            echo "::error::The ALLOWED_GOOGLE_DOMAIN secret is not set. Add it under Settings > Secrets and variables > Actions > Secrets, then run the deploy again."
+            exit 1
+          fi
+
       - name: Copy compose file
         uses: appleboy/scp-action@v0.1.7
         with:
@@ -209,7 +222,7 @@ jobs:
             GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }}
             GOOGLE_CLIENT_SECRET=${{ secrets.GOOGLE_CLIENT_SECRET }}
             SESSION_SECRET=${{ secrets.SESSION_SECRET }}
-            ALLOWED_GOOGLE_DOMAIN=${{ vars.ALLOWED_GOOGLE_DOMAIN }}
+            ALLOWED_GOOGLE_DOMAIN=${{ secrets.ALLOWED_GOOGLE_DOMAIN }}
             ALLOWED_EMAILS=${{ vars.ALLOWED_EMAILS }}
             # Set PROD_AUTH_DISABLED=true only while there is no domain/TLS:
             # Google refuses redirect URIs on a raw IP over http, so sign-in
