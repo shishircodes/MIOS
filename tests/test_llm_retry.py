@@ -83,12 +83,22 @@ def test_a_server_error_is_retried_after_a_short_wait(waits):
     assert waits == [retry.SERVER_RETRY_WAITS[0]]
 
 
-def test_server_errors_are_retried_twice_then_raised(waits):
-    fn = Flaky([ServerError("1"), ServerError("2"), ServerError("3")])
-    with pytest.raises(ServerError, match="3"):
+def test_server_errors_are_retried_then_raised(waits):
+    fn = Flaky([ServerError(str(i)) for i in range(1, 5)])
+    with pytest.raises(ServerError, match="4"):
         with_retry(fn)
-    assert fn.calls == 3
+    assert fn.calls == 1 + len(retry.SERVER_RETRY_WAITS)
     assert waits == list(retry.SERVER_RETRY_WAITS)
+
+
+def test_an_outage_of_a_minute_and_a_half_is_ridden_out(waits):
+    """5 Oct 2026: Gemini answered ServerError for about ninety seconds. Two
+    short retries were over in forty, so the last batch and the Market Pulse
+    both failed. The last wait is long enough to outlast that."""
+    fn = Flaky([ServerError("503"), ServerError("503"), ServerError("503")], result="served")
+    assert with_retry(fn) == "served"
+    assert fn.calls == 4
+    assert sum(waits) >= 80, "the retries together must outlast the outage that was seen"
 
 
 def test_a_bad_request_is_not_retried(waits):

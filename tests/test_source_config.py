@@ -114,6 +114,37 @@ def test_a_board_needs_both_a_token_and_an_actor(panel):
     assert apify.configured(BOARD)[0] is False
 
 
+def test_there_is_always_one_default_search(panel):
+    from scraper import apify_search
+
+    assert panel.apify_search() == apify_search.DEFAULT_KEYWORDS
+    search = panel.status()["apify"]["search"]
+    assert search["custom"] is False and search["keywords"] == search["default"]
+
+    assert panel.set_apify_search("  mining   OR  drilling ", changed_by=ADMIN) == "mining OR drilling"
+    assert panel.apify_search() == "mining OR drilling"
+    search = panel.status()["apify"]["search"]
+    assert search["custom"] is True and search["changedBy"] == ADMIN
+
+    assert panel.set_apify_search("", changed_by=ADMIN) == apify_search.DEFAULT_KEYWORDS
+    assert panel.status()["apify"]["search"]["custom"] is False
+
+
+@pytest.mark.parametrize("bad,message", [("x" * 201, "under 200"), (" OR ", "at least one keyword")])
+def test_a_default_search_that_is_wrong_is_refused(panel, bad, message):
+    with pytest.raises(panel.SourceConfigError, match=message):
+        panel.set_apify_search(bad, changed_by=ADMIN)
+
+
+def test_a_board_says_whether_it_is_on_the_default_search(panel):
+    panel.set_board("seek", "someone/reader", "", changed_by=ADMIN)
+    panel.set_board("jora", "someone/other", '{"keyword": "driller"}', changed_by=ADMIN)
+    boards = {b["id"]: b for b in panel.status()["apify"]["boards"]}
+    assert boards["seek"]["usingDefault"] is True
+    assert boards["jora"]["usingDefault"] is False
+    assert boards["indeed"]["usingDefault"] is False, "a board with no actor is on nothing"
+
+
 def test_the_tilde_form_of_an_actor_name_is_accepted(panel):
     panel.set_board(BOARD, "someone~board-reader", "", changed_by=ADMIN)
     assert panel.apify_actor(BOARD) == "someone~board-reader"
@@ -302,6 +333,7 @@ def _client(monkeypatch, *, auth_disabled: bool) -> TestClient:
     ("post", "/api/admin/source-config/apify/test"),
     ("put", f"/api/admin/source-config/apify/boards/{BOARD}"),
     ("put", "/api/admin/source-config/apify/run"),
+    ("put", "/api/admin/source-config/apify/search"),
     ("put", "/api/admin/source-config/asx"),
     ("put", "/api/admin/source-config/feeds"),
     ("post", "/api/admin/source-config/feeds/check"),
@@ -342,6 +374,12 @@ def test_the_panel_flow(panel, monkeypatch):
                      json={"actor": "nonsense"}).status_code == 400
     assert admin.put(f"{base}/apify/boards/pngworkforce", json={"actor": "a/b"}).status_code == 400
     assert admin.put(f"{base}/apify/token", json={"token": "x"}).status_code == 400
+
+    r = admin.put(f"{base}/apify/search", json={"keywords": "mining OR drilling"})
+    assert r.status_code == 200 and r.json()["apify"]["search"]["keywords"] == "mining OR drilling"
+    assert admin.put(f"{base}/apify/search", json={"keywords": "x" * 300}).status_code == 400
+    r = admin.put(f"{base}/apify/search", json={"keywords": ""})
+    assert r.json()["apify"]["search"]["custom"] is False and "built-in" in r.json()["note"]
 
     r = admin.put(f"{base}/apify/run", json={"maxChargeUsd": "0.75"})
     assert r.status_code == 200 and r.json()["apify"]["run"]["maxChargeUsd"] == 0.75

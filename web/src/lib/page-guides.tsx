@@ -870,15 +870,30 @@ const integrations: PageGuide = {
             <li>Here, press <b>Add token</b>, paste it and save.</li>
             <li>Press <b>Test token</b>. It asks Apify whose token it is — no actor runs and nothing is charged.</li>
           </ol>
-          <p><b>Step 2 — name an actor for each board you want.</b></p>
+          <p><b>Step 2 — check the default search.</b></p>
+          <p>
+            One search is used for every board: a line of keywords. It starts as the sectors
+            Easy Skill recruits into (mining, oil and gas, energy, construction, defence).
+          </p>
+          <ol>
+            <li>Press <b>Change</b> to edit the keywords. Put <span className="mono">OR</span> between them to match any one of them.</li>
+            <li>Save. Every board uses the new search from the next run. <b>Use built-in</b> goes back to the original.</li>
+          </ol>
+          <p>
+            MIOS reads each actor&rsquo;s input from Apify and puts the keywords in the field that
+            actor uses for them, so the same search works whichever actor a board has. A board
+            that does not understand <span className="mono">OR</span> will match less; give that
+            board a search of its own (below), or shorten the default.
+          </p>
+          <p><b>Step 3 — name an actor for each board you want.</b></p>
           <ol>
             <li>In the <b>Apify Store</b>, search for the board (for example &ldquo;SEEK scraper&rdquo;) and open an actor. Check its price and reviews first.</li>
             <li>Copy its name from the page address: <span className="mono">apify.com/<b>username/actor-name</b></span>.</li>
             <li>Here, press <b>Set actor</b> beside the board and paste the name.</li>
-            <li>In <b>Search settings</b>, enter what that actor should search for, as JSON. Every actor has its own field names — they are listed on the actor&rsquo;s <b>Input</b> tab, which can also show the JSON to copy. Leave it empty to use the actor&rsquo;s defaults.</li>
+            <li>Leave <b>Own search</b> empty, and the board uses the default search. Fill it in only when one board should look for something different: it is JSON in that actor&rsquo;s own field names, which are on the actor&rsquo;s <b>Input</b> tab in the Apify Store, and it replaces the default search for that board.</li>
             <li>Save. The board shows <b>Ready</b> once it has both a token and an actor.</li>
           </ol>
-          <p><b>Step 3 — set the spending limit.</b></p>
+          <p><b>Step 4 — set the spending limit.</b></p>
           <p>
             Every run of an actor is capped twice, by Apify itself, so neither depends on the
             actor behaving:
@@ -891,17 +906,16 @@ const integrations: PageGuide = {
             A limit set too low can stop a run before it has collected anything. If a board shows
             fewer records than expected, check the run in the Apify Console before raising it.
           </p>
-          <p><b>Step 4 — check the result.</b></p>
+          <p><b>Step 5 — check the result.</b></p>
           <ol>
             <li>A ready board is read from the next run. Under <b>Data sources</b> its row changes from <i>Not configured</i> to <i>No data yet</i>, then <i>Collecting</i>.</li>
             <li>To stop reading a board, switch it off there, or remove its actor here.</li>
           </ol>
           <p>
             Each run of an actor is charged to the Apify account, so name actors only for boards
-            worth the cost. Some actors have their own setting for how many results to fetch
-            (for example <span className="mono">maxResults</span>); set it in Search settings near
-            the board&rsquo;s limit, so the actor stops early instead of running until a cap stops
-            it. The token is stored encrypted and never shown again in full.
+            worth the cost. The board&rsquo;s limit is also sent to the actor under its own name
+            for it, so it stops there instead of running until a cap stops it. The token is
+            stored encrypted and never shown again in full.
           </p>
         </>
       ),

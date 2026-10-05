@@ -218,6 +218,11 @@ export async function setApifyBoard(v: { id: string; actor: string; input: strin
   )
 }
 
+/** The default search every Apify board uses. '' returns to the built-in one. */
+export async function setApifySearch(keywords: string): Promise<SourceConfigStatus> {
+  return postOrExplain<SourceConfigStatus>('/api/admin/source-config/apify/search', putJson({ keywords }))
+}
+
 /** The most one run of an actor may be charged, in dollars. '' returns to the default. */
 export async function setApifyRunCharge(maxChargeUsd: string): Promise<SourceConfigStatus> {
   return postOrExplain<SourceConfigStatus>('/api/admin/source-config/apify/run', putJson({ maxChargeUsd }))

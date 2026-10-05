@@ -238,8 +238,10 @@ export interface ApifyBoard {
   url: string
   /** `username/actor-name`, or '' when none has been named. */
   actor: string
-  /** The actor's own input, as JSON text. '' when there is none. */
+  /** The board's own search settings, as JSON text. '' when there are none. */
   input: string
+  /** True while the board has none, so it uses the default search. */
+  usingDefault: boolean
   /** True when there is both a token and an actor, so the board can be read. */
   ready: boolean
   /** Results taken per run, set under Data sources › Options & limits. Apify
@@ -261,6 +263,15 @@ export interface SourceConfigStatus {
     canStoreKey: boolean
     boards: ApifyBoard[]
     readyCount: number
+    /** The one search every board uses unless it has settings of its own. */
+    search: {
+      keywords: string
+      custom: boolean
+      default: string
+      max: number
+      changedBy: string | null
+      changedAt: string | null
+    }
     /** The most one run of one actor may be charged, in US dollars. */
     run: {
       maxChargeUsd: number

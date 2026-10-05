@@ -2250,6 +2250,11 @@ html:has(dialog.guide[open]) { overflow: hidden; }
 /* A dollar amount: a few digits, not a long key. */
 .key-input.cap-input { flex: 0 0 110px; min-width: 0; width: 110px; }
 
+/* The default search, shown as what it is: the words that are searched for. */
+.apify-search { margin: 6px 0 2px; font-size: 13px; color: var(--ink); overflow-wrap: anywhere; }
+/* A line of help that takes the full width under a one-line form. */
+.key-form-help { flex-basis: 100%; }
+
 /* Apify: one line per board, with its form opening underneath. */
 .apify-boards { margin-top: 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); }
 .apify-board { padding: 10px 12px; border-bottom: 1px solid var(--line); }

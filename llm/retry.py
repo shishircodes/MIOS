@@ -31,10 +31,12 @@ log = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
-#: Seconds to wait before each retry of a server error. Two retries: long
-#: enough together to ride out the outages seen so far, short enough that a
-#: provider that is properly down does not hold a run for minutes.
-SERVER_RETRY_WAITS: tuple[float, ...] = (5.0, 20.0)
+#: Seconds to wait before each retry of a server error. Two short ones for a
+#: hiccup, then a minute: on 5 Oct 2026 Gemini answered `ServerError` for about
+#: ninety seconds, the two short retries were over in forty, and the last batch
+#: and the Market Pulse both went unwritten. A provider that is properly down
+#: still holds a call for under a minute and a half before it is given up on.
+SERVER_RETRY_WAITS: tuple[float, ...] = (5.0, 20.0, 60.0)
 
 #: The wait before retrying a rate limit — the per-minute window.
 RATE_LIMIT_WAIT = 60.0
