@@ -540,7 +540,8 @@ function SignalRow({ s, onOpen }: { s: Signal; onOpen: () => void }) {
           <span className="chip">{s.cycle}</span>
         </div>
         <p className="title">{s.company} — {s.title}</p>
-        <p className="desc">{s.desc}</p>
+        {/* The collected text itself is not shown here: a row is the headline
+            and what the AI made of it. Opening the row shows the original. */}
         {s.action && <div className="action">→ {s.action}</div>}
       </div>
       <div className="meta-col">
