@@ -40,6 +40,20 @@ SECTOR_PRETTY = {
 }
 
 
+def _headline(raw: str, limit: int = 200) -> str:
+    """A record's headline in full: the text before its first separator.
+
+    `_title_and_desc` cuts a title at 90 characters for a one-line row. Where
+    there is room for the whole headline it is given whole, and one too long
+    even for that ends at a word with an ellipsis, not mid-word.
+    """
+    raw = (raw or "").strip()
+    head = raw.split("|", 1)[0].strip() if "|" in raw else raw
+    if len(head) <= limit:
+        return head or "Signal"
+    return head[:limit].rsplit(" ", 1)[0].rstrip(" ,;:-") + "…"
+
+
 def _title_and_desc(raw: str) -> tuple[str, str]:
     raw = (raw or "").strip()
     # Synthetic postings use " | "-delimited segments; live scrapes do too.
@@ -538,11 +552,9 @@ def build_digest_payload(
         ):
             new_names[company] = {
                 "co": company,
-                "signal": signal["title"],
+                "signal": _headline(raw),
                 "sector": sector,
                 "region": region,
-                "reco": f"Add to Tier {('B' if tier is None else tier)}",
-                "status": "review",
             }
 
     # The baseline is measured, not assumed. This used to be `round(n * 0.7)`,

@@ -328,7 +328,6 @@ function WeeklyDigest() {
                     <p className="nn-sig">{n.signal}</p>
                     <div className="nn-foot">
                       <span className="muted">{n.sector}</span>
-                      <span className="chip teal">{n.reco}</span>
                     </div>
                   </div>
                 ))}
