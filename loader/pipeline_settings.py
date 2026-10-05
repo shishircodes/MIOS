@@ -61,6 +61,16 @@ DEFAULT_DAILY_CALLS = 20
 #: Seconds between AI calls, to stay under the per-minute burst limit.
 DEFAULT_MIN_SECONDS = 13
 
+#: Tokens the model may spend reasoning to itself before it answers a
+#: classification call. Gemini 2.5 does this by default and bills it as output:
+#: in production a record cost about 320 output tokens, of which the answer
+#: that is stored is about 90. Sorting a job ad into six sectors does not need
+#: an essay first, so it is off. It is a setting rather than a constant because
+#: that judgement has not been measured against labelled records; if sorting
+#: gets worse, an administrator can give the model its thinking back without a
+#: deploy.
+DEFAULT_THINKING_TOKENS = 0
+
 _DDL = """
 CREATE TABLE IF NOT EXISTS pipeline_settings (
     key        TEXT PRIMARY KEY,
@@ -95,6 +105,9 @@ CLASSIFIER_SPECS: tuple[Spec, ...] = (
     Spec("classify.min_seconds", "Seconds between AI calls", DEFAULT_MIN_SECONDS, 0, 120,
          "seconds",
          "A pause between calls, to stay under the provider's per-minute limit."),
+    Spec("classify.thinking_tokens", "Reasoning tokens per AI call", DEFAULT_THINKING_TOKENS,
+         0, 24576, "tokens",
+         "How much the model may reason to itself before answering. 0 switches that off."),
 )
 
 SCRAPE_LOW, SCRAPE_HIGH = 1, 500
@@ -181,6 +194,7 @@ class ClassifierSettings:
     max_chars: int
     daily_calls: int
     min_seconds: int
+    thinking_tokens: int = DEFAULT_THINKING_TOKENS
 
 
 def classifier(target: str | Path | None = None) -> ClassifierSettings:
@@ -195,6 +209,7 @@ def classifier(target: str | Path | None = None) -> ClassifierSettings:
         max_chars=v("classify.max_chars"),
         daily_calls=v("classify.daily_calls"),
         min_seconds=v("classify.min_seconds"),
+        thinking_tokens=v("classify.thinking_tokens"),
     )
 
 
@@ -289,6 +304,7 @@ def update(values: dict[str, Any], *, changed_by: str,
 
 __all__ = [
     "CLASSIFIER_SPECS", "ClassifierSettings", "DEFAULT_BATCH_SIZE", "DEFAULT_DAILY_CALLS",
-    "DEFAULT_MAX_CHARS", "DEFAULT_MIN_SECONDS", "DEFAULT_SCRAPE_LIMIT", "SettingError",
+    "DEFAULT_MAX_CHARS", "DEFAULT_MIN_SECONDS", "DEFAULT_SCRAPE_LIMIT",
+    "DEFAULT_THINKING_TOKENS", "SettingError",
     "classifier", "describe", "scrape_limits", "seed", "update",
 ]

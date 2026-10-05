@@ -38,6 +38,22 @@ ALLOWED_CATEGORIES = {
 }
 ALLOWED_CYCLES = {"weekly", "monthly", "quarterly"}
 
+#: How often each kind of signal is worth looking at again. The model used to
+#: be asked for this as well as the category, and gave the answer below for
+#: 1,473 of 1,487 records in production: it was the category said twice, at
+#: the cost of a field in every answer. The other 14 were the same category
+#: given two different cycles, which is the inconsistency this removes.
+#: Competitor moves were split evenly between monthly and quarterly; a lost
+#: contract or a merger changes who is hiring soon, so they are monthly.
+CYCLE_FOR_CATEGORY = {
+    "hiring_velocity": "weekly",
+    "project": "monthly",
+    "leadership": "monthly",
+    "competitive": "monthly",
+    "financial": "quarterly",
+    "market_intel": "quarterly",
+}
+
 FUZZY_THRESHOLD = 85
 
 # The defaults for the settings an administrator changes under Admin › Data
@@ -300,7 +316,7 @@ def fuzzy_match_watchlist(
 SINGLE_RESPONSE_SCHEMA: dict[str, Any] = {
     "type": "object",
     "required": [
-        "company_name", "sector", "signal_category", "review_cycle",
+        "company_name", "sector", "signal_category",
         "watchlist_match", "is_new_prospect", "reasoning",
     ],
     "properties": {
@@ -313,7 +329,6 @@ SINGLE_RESPONSE_SCHEMA: dict[str, Any] = {
             "type": "string",
             "enum": ["hiring_velocity", "project", "leadership", "financial", "competitive", "market_intel"],
         },
-        "review_cycle": {"type": "string", "enum": ["weekly", "monthly", "quarterly"]},
         "watchlist_match": {"type": "string", "nullable": True},
         "is_new_prospect": {"type": "boolean"},
         "reasoning": {"type": "string"},
@@ -359,7 +374,6 @@ Each one is labelled with its kind (job ad, news or tender); follow the rules fo
 
 Allowed sectors: mining, oil_gas, construction, defence, energy_transition, other
 Allowed categories: hiring_velocity, project, leadership, financial, competitive, market_intel
-Allowed review cycles: weekly, monthly, quarterly
 
 Watchlist companies: {watchlist_companies}
 
@@ -367,7 +381,6 @@ Return a JSON array containing exactly {count} classification objects, in the sa
 - company_name: string or null
 - sector: one of the allowed sectors
 - signal_category: one of the allowed categories
-- review_cycle: one of weekly, monthly, quarterly
 - watchlist_match: string or null (the matched watchlist company name, if any)
 - is_new_prospect: boolean
 - reasoning: string
@@ -414,9 +427,8 @@ def _coerce_classification(payload: dict[str, Any]) -> dict[str, Any]:
     category = payload.get("signal_category")
     if category not in ALLOWED_CATEGORIES:
         category = "hiring_velocity"
-    cycle = payload.get("review_cycle")
-    if cycle not in ALLOWED_CYCLES:
-        cycle = "weekly"
+    # Not asked of the model: it follows from the category. See CYCLE_FOR_CATEGORY.
+    cycle = CYCLE_FOR_CATEGORY[category]
     return {
         "company_name": payload.get("company_name"),
         "sector": sector,
@@ -463,10 +475,14 @@ def classify_pending(
     supplied_caller = gemini_caller is not None
     if gemini_caller is None:
         # Through the seam, so the call is counted and the model is whatever an
-        # administrator routed this purpose to.
+        # administrator routed this purpose to. The reasoning budget is the
+        # administrator's too; it is read here because the caller is built
+        # before the run's other settings are.
         from llm import PURPOSE_CLASSIFY, caller_for
 
-        gemini_caller = caller_for(PURPOSE_CLASSIFY)
+        gemini_caller = caller_for(
+            PURPOSE_CLASSIFY,
+            thinking_budget=pipeline_settings.classifier(db_path).thinking_tokens)
 
     # As set under Admin › Data sources, read once so the whole run uses one
     # consistent set of numbers.

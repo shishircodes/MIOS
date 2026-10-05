@@ -23,7 +23,6 @@ Always respond with VALID JSON matching this exact schema:
   "company_name":     "string or null",
   "sector":           "mining | oil_gas | construction | defence | energy_transition | other",
   "signal_category":  "hiring_velocity | project | leadership | financial | competitive | market_intel",
-  "review_cycle":     "weekly | monthly | quarterly",
   "watchlist_match":  "string or null  // best-guess company from the watchlist provided in the user message, or null",
   "is_new_prospect":  true | false,
   "reasoning":        "one short sentence explaining the call"
@@ -63,11 +62,6 @@ SIGNAL CATEGORIES
                         company's project, people or money. Do NOT use it as a
                         bucket for irrelevant items: an irrelevant job ad is
                         sector "other" with category "hiring_velocity".
-
-REVIEW CYCLES (how often Easy Skill should re-review this item)
-  weekly      - operational hiring; situation can change week-to-week
-  monthly     - leadership moves, project milestones, tenders; reassess monthly
-  quarterly   - structural / financial / market-intelligence shifts
 
 WATCHLIST_MATCH
   Choose the canonical watchlist company name (as given in the user message) if
@@ -132,6 +126,21 @@ BLOCKLIST_KEYWORDS: tuple[str, ...] = (
     "real estate",
     "travel consultant",
     "wedding planner",
+    # Added 5 Oct 2026 from production. Each of these appeared only in the
+    # titles of ads the classifier filed under "other" and in none of the 635
+    # it kept, across every job ad collected so far.
+    "lecturer",
+    "professor",
+    "marketing",
+    "sales representative",
+    "receptionist",
+    "counsellor",
+    "credit",
+    "lending",
+    "banking",
+    "midwife",
+    "pharmacist",
+    "dental",
 )
 
 MIN_CONTENT_LENGTH = 50

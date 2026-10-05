@@ -98,8 +98,12 @@ class Provider(Protocol):
         sends an administrator to type a key that was never the problem.
         """
 
-    def build(self, model: str) -> Caller:
-        """Return a callable for this model. Raises ProviderNotConfigured."""
+    def build(self, model: str, *, thinking_budget: int | None = None) -> Caller:
+        """Return a callable for this model. Raises ProviderNotConfigured.
+
+        `thinking_budget` caps the tokens a model may spend reasoning before it
+        answers, where the model has such a thing. None leaves the model's own
+        default alone."""
 
 
 # --------------------------------------------------------------------------
@@ -135,12 +139,13 @@ class GeminiProvider:
 
         return find_spec("google.genai") is not None
 
-    def build(self, model: str) -> Caller:
+    def build(self, model: str, *, thinking_budget: int | None = None) -> Caller:
         api_key = _key(self.name)
         if not api_key:
             raise ProviderNotConfigured(
                 "No Gemini API key. Add one under Admin › AI models."
             )
+        budget = gemini_thinking_budget(model, thinking_budget)
         # Imported here rather than at module scope: importing this package must
         # not require every provider's SDK to be installed.
         from google import genai
@@ -160,6 +165,8 @@ class GeminiProvider:
                 # repeatable without anything saying so.
                 temperature=GEMINI_TEMPERATURE,
                 max_output_tokens=GEMINI_MAX_OUTPUT_TOKENS,
+                **({} if budget is None
+                   else {"thinking_config": types.ThinkingConfig(thinking_budget=budget)}),
             )
             response = client.models.generate_content(
                 model=model, contents=user_prompt, config=config
@@ -219,7 +226,9 @@ class AnthropicProvider:
 
         return find_spec("anthropic") is not None
 
-    def build(self, model: str) -> Caller:
+    def build(self, model: str, *, thinking_budget: int | None = None) -> Caller:
+        # Extended thinking is opt-in on Claude and is never requested here, so
+        # there is nothing for a budget to limit.
         api_key = _key(self.name)
         if not api_key:
             raise ProviderNotConfigured(
@@ -311,8 +320,31 @@ def resolve(purpose: str, stored: dict[str, dict[str, Any]] | None = None) -> tu
     return _configured_route(purpose, stored)
 
 
-def caller_for(purpose: str) -> Caller:
+def gemini_thinking_budget(model: str, wanted: int | None) -> int | None:
+    """The thinking budget to send to a Gemini model, or None to send nothing.
+
+    The setting is one number; the models differ in what they accept, and a
+    value a model refuses fails the whole call:
+
+    * 2.5 Flash and Flash-Lite take 0 (off) or a budget;
+    * 2.5 Pro cannot have thinking switched off, and refuses less than 128;
+    * anything else is left alone. Older models have no thinking to configure,
+      and newer ones may configure it differently, so nothing is assumed.
+    """
+    if wanted is None:
+        return None
+    name = (model or "").lower()
+    if "2.5-flash" in name:
+        return max(0, int(wanted))
+    if "2.5-pro" in name:
+        return max(128, int(wanted))
+    return None
+
+
+def caller_for(purpose: str, *, thinking_budget: int | None = None) -> Caller:
     """A callable for this purpose, with usage accounted around it.
+
+    `thinking_budget` is passed to the provider; see `Provider.build`.
 
     Every call through here is counted, whether it succeeds or not. Google
     charges the allowance for a rejected request the same as a served one, so a
@@ -321,7 +353,10 @@ def caller_for(purpose: str) -> Caller:
     """
     provider_name, model = resolve(purpose)
     provider = _PROVIDERS[provider_name]
-    inner = provider.build(model)
+    # Passed only when a caller asked for one, so a provider that has no such
+    # thing is built exactly as before.
+    inner = (provider.build(model) if thinking_budget is None
+             else provider.build(model, thinking_budget=thinking_budget))
 
     def _counted(system_prompt: str, user_prompt: str, schema: Any = None) -> Any:
         from llm.usage import record

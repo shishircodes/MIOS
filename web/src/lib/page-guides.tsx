@@ -771,6 +771,7 @@ const sources: PageGuide = {
           <li><b>Characters kept per record</b>: the title, company and location come first, so a lower number mostly trims the body of the advert.</li>
           <li><b>AI calls per day</b>: shared by sorting and report writing. 20 is Gemini&rsquo;s free-tier limit; raise it on a paid plan.</li>
           <li><b>Seconds between AI calls</b>: keeps under the provider&rsquo;s per-minute limit. A paid plan usually allows this to be lower.</li>
+          <li><b>Reasoning tokens per AI call</b>: how much the model may reason to itself before it answers. It is 0, which is off: sorting is quicker and uses about a third of the tokens. If records start landing in the wrong sector, try 1,000 to 2,000 and compare.</li>
         </ul>
       ),
     },
