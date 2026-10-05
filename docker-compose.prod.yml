@@ -42,6 +42,16 @@ services:
       ADZUNA_COUNTRY: ${ADZUNA_COUNTRY:-au}
       ADZUNA_QUERIES: ${ADZUNA_QUERIES:-}
 
+      # The sources added with the catalogue. All optional: blank leaves the
+      # Apify boards "not configured", ASX on its built-in list of companies,
+      # and no custom feeds. Listed for the same reason as everything else
+      # here — a variable that never reaches the container cannot be set.
+      APIFY_TOKEN: ${APIFY_TOKEN:-}
+      APIFY_ACTORS: ${APIFY_ACTORS:-}
+      APIFY_INPUTS: ${APIFY_INPUTS:-}
+      ASX_TICKERS: ${ASX_TICKERS:-}
+      NEWS_FEEDS: ${NEWS_FEEDS:-}
+
       # Scrape targets. Defaulted in config/settings.py, listed here because a
       # source silently collecting nothing because the container never received
       # a URL is exactly the failure this file should make visible.

@@ -56,8 +56,8 @@ function SignalDetail({ s }: { s: Signal }) {
       <div className="row-2 drawer-facts">
         <div>
           <div className="drawer-fact-label">Source</div>
-          <div className="drawer-fact">{s.source}</div>
-          {s.publication && s.publication.toLowerCase() !== s.source.toLowerCase() && (
+          <div className="drawer-fact">{s.sourceLabel ?? s.source}</div>
+          {s.publication && s.publication.toLowerCase() !== (s.sourceLabel ?? s.source).toLowerCase() && (
             <div className="publication">{s.publication}</div>
           )}
         </div>

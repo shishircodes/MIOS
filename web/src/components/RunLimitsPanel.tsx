@@ -11,7 +11,7 @@ function when(iso: string | null): string {
 
 /** How many records each run takes from each source, and how those records
  *  are sent to the AI. Every number used to be a constant in the code. */
-export function RunLimitsPanel({ labels }: { labels: Record<string, string> }) {
+export function RunLimitsPanel({ active }: { active: string[] }) {
   const qc = useQueryClient()
   const { data, isPending, error } = useQuery(pipelineSettingsQueryOptions)
   const [draft, setDraft] = useState<Record<string, string>>({})
@@ -58,7 +58,12 @@ export function RunLimitsPanel({ labels }: { labels: Record<string, string> }) {
   // Recomputed from the form, so the effect of a change shows before saving.
   const num = (key: string) => Number(draft[key] ?? 0) || 0
   const perDay = num('classify.batch_size') * num('classify.daily_calls')
-  const scrapeTotal = data.sources.reduce((n, s) => n + num(s.key), 0)
+  // Only the sources the next run will use. A board waiting on an Apify actor
+  // keeps its limit, but a field for it here would be a number that does
+  // nothing, among thirty.
+  const shown = data.sources.filter((s) => active.includes(s.source))
+  const hidden = data.sources.length - shown.length
+  const scrapeTotal = shown.reduce((n, s) => n + num(s.key), 0)
 
   const field = (s: PipelineSetting, label: string) => (
     <div className="limit-field" key={s.key}>
@@ -104,10 +109,11 @@ export function RunLimitsPanel({ labels }: { labels: Record<string, string> }) {
         <div className="limits-block">
           <div className="llm-purpose">Records taken from each source per run</div>
           <p className="llm-needs">
-            Up to {scrapeTotal.toLocaleString()} records a run across all sources.
+            Up to {scrapeTotal.toLocaleString()} records a run across the {shown.length} sources
+            that are switched on{hidden > 0 && <>; the {hidden} that are off keep their limits</>}.
           </p>
           <div className="limit-grid">
-            {data.sources.map((s) => field(s, labels[s.source] ?? s.source))}
+            {shown.map((s) => field(s, s.label))}
           </div>
         </div>
 

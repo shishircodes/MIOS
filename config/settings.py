@@ -32,6 +32,13 @@ class Settings:
     database_url: str
     log_level: str
     apify_token: str
+    #: Which Apify actor reads which job board, as "source=actor" pairs
+    #: (APIFY_ACTORS="indeed=misceres/indeed-scraper,jora=..."). A board with no
+    #: actor named here is listed as not configured and never run.
+    apify_actors: dict[str, str]
+    #: ASX codes whose announcements are collected. Empty means the default
+    #: list in scraper/asx.py.
+    asx_tickers: tuple[str, ...]
     pngworkforce_base_url: str
     seek_base_url: str
     seek_paths: tuple[str, ...]
@@ -165,6 +172,8 @@ def load_settings() -> Settings:
         database_url=_get("DATABASE_URL"),
         log_level=_get("LOG_LEVEL", "INFO"),
         apify_token=_get("APIFY_TOKEN"),
+        apify_actors=_get_routing("APIFY_ACTORS"),
+        asx_tickers=tuple(t.upper() for t in _get_list("ASX_TICKERS")),
         # The listings page, not the homepage. The homepage carries no job
         # cards, so the default silently scraped nothing wherever
         # PNGWORKFORCE_BASE_URL was unset — which was every deployed

@@ -1,5 +1,8 @@
 """Scraper registry.
 
+What exists is decided by `scraper/catalog.py`, the one list of every source
+in the data-sources guide; this turns the collectable ones into callables.
+
 Each source module exposes an async `scrape_async(limit, base_url=None)` that
 never raises — on any failure it logs and returns []. `scrape_all` fans out over
 the registered sources so the pipeline stays source-agnostic; one dead source
@@ -26,24 +29,47 @@ class ScrapeFn(Protocol):
 
 
 def _registry() -> dict[str, ScrapeFn]:
+    """Every collectable source in the catalogue, by id.
+
+    Built from `scraper.catalog` rather than listed by hand: an RSS publication
+    is read by the shared feed reader, an Apify board by the shared actor
+    runner, and everything else by the module named after it.
+    """
     # Imported lazily so `import scraper` doesn't drag in bs4/crawlee.
+    from functools import partial
+
     from scraper import (
-        adzuna, austender, newsfeed, pngbusinessnews, pngworkforce, seek,
+        adzuna, apify, asx, austender, catalog, miningpeople, newsfeed,
+        pngbusinessnews, pngworkforce, seek, ted, worldbank,
     )
 
-    return {
-        "pngworkforce": pngworkforce.scrape_async,
-        "seek": seek.scrape_async,
-        "adzuna": adzuna.scrape_async,
-        "newsfeed": newsfeed.scrape_async,
-        "pngbusinessnews": pngbusinessnews.scrape_async,
-        "austender": austender.scrape_async,
+    modules = {
+        "pngworkforce": pngworkforce, "seek": seek, "adzuna": adzuna,
+        "newsfeed": newsfeed, "pngbusinessnews": pngbusinessnews,
+        "austender": austender, "asx": asx, "worldbank": worldbank, "ted": ted,
+        "miningpeople": miningpeople,
     }
+    feeds = {f.source: f for f in newsfeed.FEEDS}
+
+    registry: dict[str, ScrapeFn] = {}
+    for src in catalog.COLLECTED:
+        if src.collector == catalog.RSS:
+            registry[src.id] = partial(newsfeed.scrape_feed_async, feeds[src.id])
+        elif src.collector == catalog.APIFY:
+            registry[src.id] = partial(apify.scrape_async, src)
+        else:
+            registry[src.id] = modules[src.id].scrape_async
+    return registry
 
 
-SOURCE_NAMES: tuple[str, ...] = (
-    "pngworkforce", "seek", "adzuna", "newsfeed", "pngbusinessnews", "austender",
-)
+def _source_names() -> tuple[str, ...]:
+    from scraper import catalog
+
+    return tuple(src.id for src in catalog.COLLECTED)
+
+
+#: Every source MIOS can collect from, in catalogue order.
+SOURCE_NAMES: tuple[str, ...] = _source_names()
 
 
 def _resolve(sources: list[str] | None, base_url: str | None) -> list[str]:

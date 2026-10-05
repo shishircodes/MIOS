@@ -545,10 +545,10 @@ function SignalRow({ s, onOpen }: { s: Signal; onOpen: () => void }) {
       </div>
       <div className="meta-col">
         <div>conf {s.conf}</div>
-        <div style={{ color: 'var(--ink-3)' }}>{s.source}</div>
-        {/* Which publication, beneath the collector. "newsfeed" covers four
-            titles, and a consultant weighing a story needs to know which. */}
-        {s.publication && s.publication.toLowerCase() !== s.source.toLowerCase() && (
+        <div style={{ color: 'var(--ink-3)' }}>{s.sourceLabel ?? s.source}</div>
+        {/* The publication, only where it says more than the source's own
+            name does — a publication is its own source now, so usually not. */}
+        {s.publication && s.publication.toLowerCase() !== (s.sourceLabel ?? s.source).toLowerCase() && (
           <div className="publication">{s.publication}</div>
         )}
         <CapturedAt at={s.capturedAt} />

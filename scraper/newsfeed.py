@@ -11,8 +11,11 @@ boards, so `hiring_velocity` dominates and categories like `project`,
 `financial` and `competitive` are nearly empty — a contract award is news, not a
 vacancy. "Downer wins $340M rail contract" can only arrive this way.
 
-One module serves every feed rather than a file per publication, so adding the
-rest of the list later is a line in `FEEDS` or an entry in `NEWS_FEEDS`.
+One module serves every feed rather than a file per publication. The
+publications themselves are listed in `scraper/catalog.py`, each as a source of
+its own — with its own switch and its own per-run limit — so adding one is an
+entry there and nothing here. `NEWS_FEEDS` adds feeds without a code change;
+those are read together as the "Custom RSS feeds" source.
 
 Both RSS 2.0 (`<item>`) and Atom (`<entry>`) are handled: the AU mining titles
 publish RSS, some PNG outlets publish Atom, and which one a site emits is not
@@ -52,10 +55,13 @@ class Feed:
     name: str
     url: str
     geography: str
+    #: The source its records are stored under. A catalogued publication uses
+    #: its own id; a feed added through NEWS_FEEDS shares the custom source.
+    source: str = SOURCE_NAME
 
 
-#: The free RSS sources from the data-sources guide that actually serve a feed,
-#: one per market. Both were checked live before being made the default.
+#: Every catalogued publication that serves a feed. Each was checked live before
+#: being listed, and robots.txt was read for each.
 #:
 #: Australian Mining and Infrastructure Magazine were previously written off
 #: here as refusing every non-browser client "User-Agent or not". That was
@@ -73,24 +79,17 @@ class Feed:
 #: two feeds and broken a third, so the agent below is the one that satisfies
 #: all of them while still saying honestly what it is.
 #:
-#: robots.txt on both formerly-blocked sites is `User-agent: * / Disallow:` —
-#: they permit crawling; the 403 was a crude rule about agent strings, not a
-#: stated policy.
-#:
 #: PNG Business News serves no feed at all — /feed/, /rss and /rss.xml are all
 #: 404 — so it is scraped from its category pages instead. See
 #: `scraper/pngbusinessnews.py`.
-#:
-#: Mining Technology (https://www.mining-technology.com/feed/) does serve a
-#: feed, but its coverage is global; its headlines are as often about US or
-#: Canadian projects as Australian ones, which is noise for a business
-#: recruiting into AU and PNG. Add it via NEWS_FEEDS if that changes.
-FEEDS: tuple[Feed, ...] = (
-    Feed("Mining.com.au", "https://mining.com.au/feed/", "AU"),
-    Feed("Australian Mining", "https://www.australianmining.com.au/feed/", "AU"),
-    Feed("Infrastructure Magazine", "https://infrastructuremagazine.com.au/feed/", "AU"),
-    Feed("Business Advantage PNG", "https://www.businessadvantagepng.com/feed/", "PNG"),
-)
+def _catalogued() -> tuple[Feed, ...]:
+    from scraper import catalog
+
+    return tuple(Feed(src.label, src.feed_url or "", src.geography, src.id)
+                 for src in catalog.FEEDS)
+
+
+FEEDS: tuple[Feed, ...] = _catalogued()
 
 #: Headline words that suggest an article is lifestyle or leisure coverage
 #: rather than industry.
@@ -156,6 +155,18 @@ def is_off_topic(title: str) -> bool:
     """
     return _has_word(title, OFF_TOPIC_TITLE_WORDS) and not _has_word(
         title, INDUSTRIAL_TITLE_WORDS)
+
+#: Paths publishers use for paid placements. Mining Monthly's feed leads with
+#: its "partner content": supplier advertorials, which read like news and are
+#: not. Dropped by address, since the headline alone cannot tell them apart.
+SPONSORED_PATHS: tuple[str, ...] = ("/partner-content/", "/partners/", "/sponsored/",
+                                    "/sponsored-content/", "/advertorial/")
+
+
+def is_sponsored(link: str) -> bool:
+    lowered = (link or "").lower()
+    return any(part in lowered for part in SPONSORED_PATHS)
+
 
 #: Sent on every feed request. Honest about what it is — the name and a contact
 #: URL are both in there — while taking the shape publishers' filters expect.
@@ -239,6 +250,9 @@ def parse_feed(xml_text: str, feed: Feed) -> list[dict[str, Any]]:
         if len(summary) > MAX_SUMMARY_CHARS:
             summary = summary[:MAX_SUMMARY_CHARS].rsplit(" ", 1)[0] + "…"
         link = _link_of(entry)
+        if is_sponsored(link):
+            dropped.append(title)
+            continue
         posted = _text(_find(entry, "pubdate", "published", "updated")) or None
 
         # The publication name is part of the signal: "reported by Business
@@ -255,7 +269,7 @@ def parse_feed(xml_text: str, feed: Feed) -> list[dict[str, Any]]:
             "posted": posted,
             "title": title,
             "publication": feed.name,
-            "source_name": SOURCE_NAME,
+            "source_name": feed.source,
             "source_type": SOURCE_TYPE,
             "geography": feed.geography,
         })
@@ -271,13 +285,15 @@ def parse_feed(xml_text: str, feed: Feed) -> list[dict[str, Any]]:
     return out
 
 
-def _configured_feeds() -> tuple[Feed, ...]:
-    """`NEWS_FEEDS` overrides the defaults, as `name|url|geography` entries."""
-    raw = settings.news_feeds
-    if not raw:
-        return FEEDS
+def _custom_feeds() -> tuple[Feed, ...]:
+    """The feeds named in `NEWS_FEEDS`, as `name|url|geography` entries.
+
+    These are extra to the catalogued publications, not a replacement for them:
+    a catalogued feed is switched off from the Admin panel, not by overriding
+    the whole list from the environment.
+    """
     feeds: list[Feed] = []
-    for spec in raw:
+    for spec in settings.news_feeds:
         parts = [p.strip() for p in spec.split("|")]
         if len(parts) != 3 or not all(parts):
             log.warning(
@@ -287,7 +303,16 @@ def _configured_feeds() -> tuple[Feed, ...]:
             )
             continue
         feeds.append(Feed(parts[0], parts[1], parts[2].upper()))
-    return tuple(feeds) or FEEDS
+    return tuple(feeds)
+
+
+def _configured_feeds() -> tuple[Feed, ...]:
+    """Every feed MIOS reads: the catalogued publications, then any custom ones.
+
+    Used to name the publication behind a stored article, which has to cover
+    both.
+    """
+    return FEEDS + _custom_feeds()
 
 
 def _scrape_sync(limit: int, feeds: tuple[Feed, ...]) -> list[dict[str, Any]]:
@@ -335,15 +360,32 @@ def _scrape_sync(limit: int, feeds: tuple[Feed, ...]) -> list[dict[str, Any]]:
     return collected
 
 
+async def scrape_feed_async(feed: Feed, limit: int = 50,
+                            base_url: str | None = None) -> list[dict[str, Any]]:
+    """One catalogued publication, as a source of its own.
+
+    Never raises. `base_url` points the same source at a different feed
+    address, for the command line and for tests.
+    """
+    target = Feed(feed.name, base_url, feed.geography, feed.source) if base_url else feed
+    try:
+        return await asyncio.to_thread(_scrape_sync, limit, (target,))
+    except Exception as exc:  # noqa: BLE001
+        log.warning("newsfeed: %s scrape failed (%s) — returning []", feed.name, exc)
+        return []
+
+
 async def scrape_async(limit: int = 50, base_url: str | None = None) -> list[dict[str, Any]]:
-    """Never raises; returns [] on any failure, like the other sources.
+    """The custom feeds from `NEWS_FEEDS`, read together as one source.
+
+    Never raises; returns [] on any failure, like the other sources.
 
     `base_url` overrides the feed list with a single feed, which is what
     `--source newsfeed --base-url ...` means for this source.
     """
-    feeds = (Feed("Override", base_url, "AU"),) if base_url else _configured_feeds()
+    feeds = (Feed("Override", base_url, "AU"),) if base_url else _custom_feeds()
     if not feeds:
-        log.warning("newsfeed: no feeds configured — skipping")
+        log.info("newsfeed: no custom feeds in NEWS_FEEDS — nothing to read")
         return []
     try:
         return await asyncio.to_thread(_scrape_sync, limit, feeds)

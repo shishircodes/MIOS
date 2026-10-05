@@ -41,8 +41,14 @@ def _rows(db):
 
 def test_the_table_is_prefilled_with_the_values_the_code_used(db):
     rows = _rows(db)
+    from scraper import catalog
+
+    # Each source starts at the catalogue's number for it: 50 for the original
+    # six, lower for a feed that only ever carries a handful of articles.
     for name in SOURCE_NAMES:
-        assert rows[f"scrape_limit:{name}"]["value"] == 50
+        assert rows[f"scrape_limit:{name}"]["value"] == catalog.get(name).limit
+    for name in ("pngworkforce", "seek", "adzuna", "pngbusinessnews", "austender"):
+        assert rows[f"scrape_limit:{name}"]["value"] == 50, "the originals keep what they had"
     assert rows["classify.batch_size"]["value"] == 25
     assert rows["classify.max_chars"]["value"] == 3000
     assert rows["classify.daily_calls"]["value"] == 20
@@ -61,7 +67,9 @@ def test_without_the_table_every_value_is_its_default(tmp_path, monkeypatch):
     empty.touch()
     cfg = ps.classifier(empty)
     assert (cfg.batch_size, cfg.max_chars, cfg.daily_calls, cfg.min_seconds) == (25, 3000, 20, 13)
-    assert set(ps.scrape_limits(empty).values()) == {50}
+    from scraper import catalog
+
+    assert ps.scrape_limits(empty) == {n: catalog.get(n).limit for n in SOURCE_NAMES}
 
 
 # ---------- changing them ----------

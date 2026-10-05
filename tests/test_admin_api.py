@@ -57,6 +57,9 @@ def db(tmp_path, monkeypatch):
     # source from a test reached whatever DATABASE_URL names.
     monkeypatch.setattr("loader.source_settings.connect",
                         lambda t=None, **kw: connect(path, **kw))
+    # Whether Slack and HubSpot are connected is read from their own stores,
+    # which these tests are not about and must not go looking for.
+    monkeypatch.setattr(admin_api, "_integration_note", lambda src: ("connected", src.note))
     # init_db seeds the bootstrap admin; these tests build the exact access
     # situation under test, so they start from an empty list.
     with connect(path) as conn:
@@ -163,9 +166,15 @@ def test_missing_credentials_outrank_the_toggle(db, monkeypatch):
     """Ordered deliberately. A missing key persists past the toggle and has to
     be fixed before switching it on would achieve anything, so saying "off"
     would hide the thing that actually needs doing."""
-    monkeypatch.setattr(admin_api, "settings",
-                        type("S", (), {"adzuna_configured": False,
-                                       "allowed_google_domain": ""})())
+    # Patched where the check lives. A copy of the real settings with the keys
+    # blanked, not a stand-in object: the same check also reads the settings
+    # other sources need.
+    import dataclasses
+
+    import loader.source_settings as ss
+
+    monkeypatch.setattr(ss, "settings",
+                        dataclasses.replace(ss.settings, adzuna_app_id="", adzuna_app_key=""))
     from loader.source_settings import set_enabled
 
     set_enabled("adzuna", False, changed_by="admin@example.com")
@@ -176,9 +185,15 @@ def test_missing_credentials_outrank_the_toggle(db, monkeypatch):
 
 def test_a_source_missing_its_credentials_is_reported_as_unconfigured(db, monkeypatch):
     """Otherwise Adzuna shows zero records and looks broken rather than off."""
-    monkeypatch.setattr(admin_api, "settings",
-                        type("S", (), {"adzuna_configured": False,
-                                       "allowed_google_domain": ""})())
+    # Patched where the check lives. A copy of the real settings with the keys
+    # blanked, not a stand-in object: the same check also reads the settings
+    # other sources need.
+    import dataclasses
+
+    import loader.source_settings as ss
+
+    monkeypatch.setattr(ss, "settings",
+                        dataclasses.replace(ss.settings, adzuna_app_id="", adzuna_app_key=""))
     adzuna = _by_name(admin_api.source_health(user=ADMIN), "adzuna")
     assert adzuna["status"] == "not_configured"
     assert "ADZUNA" in adzuna["note"]
@@ -441,13 +456,21 @@ def test_seek_ships_switched_off_with_a_reason(db):
     assert "403" in (seek["offReason"] or "")
 
 
-def test_the_other_sources_are_unaffected(db):
+def test_a_source_explains_itself_exactly_when_it_ships_off(db):
+    """SEEK is no longer the only one: a global title, the Apify boards and the
+    custom feeds ship off too. The rule is the same for all of them — a reason
+    beside the switch when it ships off, and nothing to explain when it does not."""
     payload = admin_api.source_health(ADMIN)
+    shipped_off = 0
     for s in payload["sources"]:
-        if s["name"] in {"seek"} or s["status"] == "retired":
+        if not s["collectable"]:
             continue
-        assert s["defaultEnabled"] is True, s["name"]
-        assert s["offReason"] is None, s["name"]
+        if s["defaultEnabled"]:
+            assert s["offReason"] is None, s["name"]
+        else:
+            shipped_off += 1
+            assert s["offReason"], s["name"]
+    assert shipped_off >= 1
 
 
 def test_switching_seek_on_returns_the_reason_as_a_warning(db):

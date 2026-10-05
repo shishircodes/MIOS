@@ -52,11 +52,13 @@ from loader.schedule import (
 from loader.source_settings import (
     OFF_BY_DEFAULT_REASON,
     UnknownSource,
+    configured as source_configured,
     default_enabled,
     list_settings,
     set_enabled,
 )
-from scraper import SOURCE_NAMES
+from scraper import SOURCE_NAMES, catalog
+from scraper.publications import source_id_for
 
 log = logging.getLogger(__name__)
 
@@ -65,16 +67,24 @@ router = APIRouter(prefix="/api/admin", tags=["admin"])
 #: A weekly pipeline that has not run in this long is not merely idle.
 STALE_AFTER_DAYS = 8
 
-#: What each source needs before it can collect anything, so the page can say
-#: "not configured" rather than showing an unexplained zero.
-SOURCE_INFO: dict[str, dict[str, str]] = {
-    "pngworkforce": {"label": "PNGworkforce", "market": "PNG", "kind": "Job board"},
-    "seek": {"label": "SEEK", "market": "AU", "kind": "Job board"},
-    "adzuna": {"label": "Adzuna", "market": "AU", "kind": "JSON API"},
-    "newsfeed": {"label": "Industry news", "market": "AU + PNG", "kind": "RSS"},
-    "pngbusinessnews": {"label": "PNG Business News", "market": "PNG", "kind": "News site"},
-    "austender": {"label": "AusTender", "market": "AU", "kind": "Tenders"},
-}
+def _describe(src: catalog.Source) -> dict[str, Any]:
+    """The catalogue's facts about a source, as the page shows them."""
+    return {
+        "name": src.id,
+        "label": src.label,
+        "category": src.category,
+        "group": src.group,
+        "market": src.market,
+        "sectors": src.sectors,
+        "provides": src.provides,
+        #: How it is read. This was "kind" before the catalogue existed and the
+        #: page still reads it under that name.
+        "kind": src.access,
+        "cost": src.cost,
+        "priority": src.priority,
+        "url": src.url,
+        "collectable": src.collectable,
+    }
 
 
 # --------------------------------------------------------------------------
@@ -160,73 +170,128 @@ def revoke_access(
 # --------------------------------------------------------------------------
 
 
-def _configured(source: str) -> tuple[bool, str | None]:
-    """Whether a source can currently collect, and what is missing if not."""
-    if source == "adzuna" and not settings.adzuna_configured:
-        return False, "ADZUNA_APP_ID / ADZUNA_APP_KEY are not set, so this source is skipped."
-    return True, None
+def _collection_stats() -> dict[str, dict[str, Any]]:
+    """What each source has collected, keyed by catalogue id.
+
+    Measured from the signals themselves. There is no separate run log: every
+    row already carries `source_name` and `captured_at`, so the last run, its
+    size and the running totals are all derivable, and a table recording the
+    same facts a second time could disagree with them.
+
+    Rows stored under the old shared name "newsfeed" are counted towards the
+    publication they came from — see `scraper.publications.source_id_for`. That
+    needs the article address, so those rows are read one by one; every other
+    source is a single aggregate.
+    """
+    since = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat(timespec="seconds")
+    stats: dict[str, dict[str, Any]] = {}
+    days: dict[str, dict[str, int]] = {}
+
+    def add(name: str, day: str, captured: str, n: int, pending: int) -> None:
+        st = stats.setdefault(name, {"total": 0, "pending": 0, "last7": 0, "lastSeen": None})
+        st["total"] += n
+        st["pending"] += pending
+        if captured >= since:
+            st["last7"] += n
+        if not st["lastSeen"] or captured > st["lastSeen"]:
+            st["lastSeen"] = captured
+        by_day = days.setdefault(name, {})
+        by_day[day] = by_day.get(day, 0) + n
+
+    try:
+        with connect(readonly=True) as conn:
+            # One row per source per collection day, which is enough to derive
+            # every figure on the page.
+            for r in conn.execute(
+                "SELECT source_name, substr(captured_at, 1, 10) AS d, count(*) AS n, "
+                "max(captured_at) AS last_seen, "
+                "sum(CASE WHEN classified_at IS NULL THEN 1 ELSE 0 END) AS pending "
+                "FROM signals WHERE source_name <> 'newsfeed' "
+                "GROUP BY source_name, substr(captured_at, 1, 10)"
+            ).fetchall():
+                add(str(r["source_name"]), str(r["d"]), str(r["last_seen"] or ""),
+                    int(r["n"] or 0), int(r["pending"] or 0))
+            for r in conn.execute(
+                "SELECT source_url, captured_at, classified_at FROM signals "
+                "WHERE source_name = 'newsfeed'"
+            ).fetchall():
+                captured = str(r["captured_at"] or "")
+                add(source_id_for("newsfeed", r["source_url"]), captured[:10], captured,
+                    1, 0 if r["classified_at"] else 1)
+    except Exception as exc:  # noqa: BLE001 - an unreachable database is a status, not a crash
+        log.warning("admin: could not read source health (%s)", exc)
+
+    for name, by_day in days.items():
+        # Size of the most recent run, which is what tells you whether the
+        # per-source limit truncated it.
+        stats[name]["lastRunRecords"] = by_day[max(by_day)]
+        stats[name]["runDays"] = len(by_day)
+    return stats
+
+
+def _integration_note(src: catalog.Source) -> tuple[str, str | None]:
+    """Status and note for a source that is wired up under Integrations."""
+    try:
+        if src.id == "slack":
+            from delivery import slack_config
+
+            ok = bool(slack_config.webhook())
+            return ("connected" if ok else "not_configured",
+                    src.note if ok else "No Slack webhook has been added yet; see Integrations.")
+        if src.id == "hubspot":
+            from loader import hubspot_watchlist
+
+            ok = bool(hubspot_watchlist.api_key())
+            return ("connected" if ok else "not_configured",
+                    src.note if ok else "No HubSpot key has been added yet; see Integrations.")
+    except Exception as exc:  # noqa: BLE001 - a status line is not worth failing the page
+        log.debug("admin: could not read %s integration state (%s)", src.id, exc)
+    return "connected", src.note
 
 
 @router.get("/sources")
 def source_health(user: dict[str, Any] = Depends(require_admin)) -> dict[str, Any]:
-    """Per-source collection health, measured from the signals themselves.
+    """Every source in the catalogue: what it is, and how collection is going.
 
-    There is no separate run log: every row already carries `source_name` and
-    `captured_at`, so the last run, its size and the running totals are all
-    derivable. A table recording the same facts a second time could disagree
-    with them.
+    A collected source carries its health, measured from the signals. A source
+    that is not collected carries the reason instead, so the page can answer
+    "why are we not reading this?" as readily as "is this one working?".
     """
     now = datetime.now(timezone.utc)
-    since = (now - timedelta(days=7)).isoformat(timespec="seconds")
     limits = pipeline_settings.scrape_limits()
-
-    stats: dict[str, dict[str, Any]] = {}
-    try:
-        with connect(readonly=True) as conn:
-            rows = conn.execute(
-                "SELECT source_name, count(*) AS total, "
-                "max(captured_at) AS last_seen, "
-                "sum(CASE WHEN classified_at IS NULL THEN 1 ELSE 0 END) AS pending, "
-                "count(DISTINCT substr(captured_at, 1, 10)) AS run_days "
-                "FROM signals GROUP BY source_name"
-            ).fetchall()
-            for r in rows:
-                stats[str(r["source_name"])] = {
-                    "total": int(r["total"] or 0),
-                    "lastSeen": r["last_seen"],
-                    "pending": int(r["pending"] or 0),
-                    "runDays": int(r["run_days"] or 0),
-                }
-            recent = conn.execute(
-                "SELECT source_name, count(*) AS n FROM signals "
-                "WHERE captured_at >= ? GROUP BY source_name", (since,)
-            ).fetchall()
-            for r in recent:
-                stats.setdefault(str(r["source_name"]), {})["last7"] = int(r["n"] or 0)
-
-            # Size of each source's most recent run, which is what tells you
-            # whether the per-source limit truncated it.
-            last_run = conn.execute(
-                "SELECT source_name, substr(captured_at, 1, 10) AS d, count(*) AS n "
-                "FROM signals GROUP BY source_name, substr(captured_at, 1, 10)"
-            ).fetchall()
-            newest: dict[str, tuple[str, int]] = {}
-            for r in last_run:
-                name, day, n = str(r["source_name"]), str(r["d"]), int(r["n"] or 0)
-                if name not in newest or day > newest[name][0]:
-                    newest[name] = (day, n)
-            for name, (_day, n) in newest.items():
-                stats.setdefault(name, {})["lastRunRecords"] = n
-    except Exception as exc:  # noqa: BLE001 - an unreachable database is a status, not a crash
-        log.warning("admin: could not read source health (%s)", exc)
-
+    stats = _collection_stats()
     settings_by_source = list_settings()
 
     out: list[dict[str, Any]] = []
-    for name in SOURCE_NAMES:
-        info = SOURCE_INFO.get(name, {"label": name, "market": "—", "kind": "—"})
+    for src in catalog.SOURCES:
+        row = _describe(src)
+        if not src.collectable:
+            status, note = ((_integration_note(src)) if src.availability == catalog.CONNECTED
+                            else (src.availability or "planned", src.note))
+            out.append({
+                **row,
+                "status": status,
+                "statusLabel": catalog.AVAILABILITY_LABEL.get(status),
+                "note": note,
+                "lastSeen": None, "totalRecords": 0, "last7Days": 0, "lastRunRecords": 0,
+                "pending": 0, "runDays": 0,
+                "enabled": False, "changedBy": None, "changedAt": None,
+                "defaultEnabled": False, "offReason": None, "limit": None,
+            })
+            continue
+
+        name = src.id
         s = stats.get(name, {})
-        configured, missing = _configured(name)
+        configured, missing = source_configured(name)
+        if name == "newsfeed" and not configured and s.get("total"):
+            # No custom feeds, but records under the old shared name whose
+            # address matched no catalogued publication. Called what they are,
+            # rather than "Custom RSS feeds" holding rows nobody configured.
+            from scraper.publications import LEGACY_NEWSFEED_LABEL
+
+            row["label"] = LEGACY_NEWSFEED_LABEL
+            missing = ("Records from before each publication became a source of its own. "
+                       "Add feeds to NEWS_FEEDS to use this for custom feeds.")
         last_seen = s.get("lastSeen")
         limit = limits.get(name, pipeline_settings.DEFAULT_SCRAPE_LIMIT)
         chosen = settings_by_source.get(name, {"enabled": True})
@@ -255,11 +320,9 @@ def source_health(user: dict[str, Any] = Depends(require_admin)) -> dict[str, An
             status = "ok" if age <= STALE_AFTER_DAYS else "stale"
 
         out.append({
-            "name": name,
-            "label": info["label"],
-            "market": info["market"],
-            "kind": info["kind"],
+            **row,
             "status": status,
+            "statusLabel": None,
             "note": missing,
             "lastSeen": last_seen,
             "totalRecords": s.get("total", 0),
@@ -288,8 +351,10 @@ def source_health(user: dict[str, Any] = Depends(require_admin)) -> dict[str, An
     for name in sorted(set(stats) - set(SOURCE_NAMES)):
         s = stats[name]
         out.append({
-            "name": name, "label": name, "market": "—", "kind": "Retired",
-            "status": "retired",
+            "name": name, "label": name, "category": "retired", "group": "Retired",
+            "market": "—", "sectors": "—", "provides": "—", "kind": "Retired",
+            "cost": "—", "priority": None, "url": "", "collectable": False,
+            "status": "retired", "statusLabel": "Retired",
             "note": "This source is no longer registered, but its signals remain.",
             "lastSeen": s.get("lastSeen"), "totalRecords": s.get("total", 0),
             "last7Days": s.get("last7", 0), "lastRunRecords": s.get("lastRunRecords", 0),
@@ -299,12 +364,21 @@ def source_health(user: dict[str, Any] = Depends(require_admin)) -> dict[str, An
             "defaultEnabled": False, "offReason": None, "limit": None,
         })
 
+    categories = [{"key": key, "label": label} for key, label in catalog.CATEGORIES]
+    if any(r["category"] == "retired" for r in out):
+        categories.append({"key": "retired", "label": "Retired"})
+
     return {
         "sources": out,
+        #: The guide's sections, in the guide's order, for grouping the page.
+        "categories": categories,
         "staleAfterDays": STALE_AFTER_DAYS,
         #: The default. Each source's own limit is on its row.
         "perSourceLimit": pipeline_settings.DEFAULT_SCRAPE_LIMIT,
         "totalRecords": sum(s.get("total", 0) for s in stats.values()),
+        #: How many sources MIOS can collect from at all, as opposed to how many
+        #: the guide lists.
+        "collectableCount": len(SOURCE_NAMES),
         #: How many sources the next scrape will actually use. Zero is allowed
         #: — pausing collection is a legitimate thing to do — but the UI has to
         #: say so loudly, or an empty week looks like a broken pipeline.

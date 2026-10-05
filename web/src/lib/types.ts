@@ -47,6 +47,9 @@ export interface Signal {
   action: string | null
   sector: string
   source: string
+  /** The source's name as a reader knows it ("Mining People International"),
+   *  from the catalogue. `source` is the stored key the feed filters on. */
+  sourceLabel?: string
   /** The publication behind the collector ("Australian Mining" rather than
    *  "newsfeed"). Null where the collector's own name already says it. */
   publication: string | null
@@ -475,6 +478,8 @@ export interface FeedPayload {
   /** Every source the feed can be filtered to, read from the data. Drives the
    *  filter buttons so they cannot drift from what is actually collectable. */
   sources: string[]
+  /** What to call each of them on the filter. */
+  sourceLabels?: Record<string, string>
   limit: number
   offset: number
 }
@@ -556,6 +561,14 @@ export type SourceStatus =
    *  toggle and has to be fixed before turning it on would achieve anything. */
   | 'off'
   | 'retired'
+  // --- a source in the guide that MIOS does not collect from, and why ---
+  | 'subscription'
+  | 'needs_key'
+  | 'blocked'
+  | 'unreachable'
+  | 'manual'
+  | 'connected'
+  | 'planned'
 
 export interface SourceHealth {
   /** Whether this source ships switched on. A source that is off for a
@@ -568,8 +581,23 @@ export interface SourceHealth {
   limit: number | null
   name: string
   label: string
+  /** The guide section it belongs to; a key from `SourcesPayload.categories`. */
+  category: string
+  /** The sub-heading it sits under in that section ("Australia", "Oil & Gas"). */
+  group: string
   market: string
+  sectors: string
+  /** What it provides, in a phrase. */
+  provides: string
+  /** How it is read: "RSS", "JSON API", "Apify actor", "Subscription"… */
   kind: string
+  cost: string
+  /** The guide's Month 1 priority, where it gives one. */
+  priority: string | null
+  url: string
+  /** Whether MIOS can collect from it at all. False rows carry a reason in
+   *  `note` instead of collection figures. */
+  collectable: boolean
   status: SourceStatus
   note: string | null
   lastSeen: string | null
@@ -588,6 +616,10 @@ export interface SourceHealth {
 
 export interface SourcesPayload {
   sources: SourceHealth[]
+  /** The guide's sections, in the guide's order. */
+  categories: { key: string; label: string }[]
+  /** How many of the sources MIOS can collect from. */
+  collectableCount: number
   staleAfterDays: number
   perSourceLimit: number
   totalRecords: number
@@ -826,7 +858,7 @@ export interface DashboardPayload {
   /** Which collectors produced this week's signals. A source absent from this
    *  list contributed nothing, which is the quickest way to see a scraper that
    *  has quietly stopped working. */
-  sources: { name: string; kind: string; count: number; share: number }[]
+  sources: { name: string; label?: string; kind: string; count: number; share: number }[]
   /** The most active companies in the latest collection. */
   companies: {
     name: string

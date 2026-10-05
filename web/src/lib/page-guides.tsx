@@ -36,18 +36,22 @@ function SourceFigures({ children }: { children: (d: { limit: number; stale: num
 
 function OffByDefault() {
   const { data } = useQuery(sourceHealthQueryOptions)
-  const off = (data?.sources ?? []).filter((s) => !s.defaultEnabled && s.offReason)
+  const off = (data?.sources ?? []).filter((s) => s.collectable && !s.defaultEnabled && s.offReason)
   if (!data) return <p className="muted">Reading the source settings…</p>
   if (off.length === 0) return <p>Every source ships switched on.</p>
+  // Several sources can share one reason — every board waiting on an Apify
+  // actor does — so each reason is given once, with the sources it covers.
+  const byReason = new Map<string, string[]>()
+  for (const s of off) byReason.set(s.offReason!, [...(byReason.get(s.offReason!) ?? []), s.label])
   return (
     <>
       <p>
         Some sources ship switched off on purpose. They show <b>Off by default</b> in the table.
         Switching one on is allowed, but read the reason first:
       </p>
-      {off.map((s) => (
-        <div key={s.name} className="guide-callout">
-          <b>{s.label}.</b> {s.offReason}
+      {[...byReason].map(([reason, labels]) => (
+        <div key={reason} className="guide-callout">
+          <b>{labels.join(', ')}.</b> {reason}
         </div>
       ))}
     </>
@@ -611,14 +615,33 @@ const sources: PageGuide = {
   title: 'Data sources',
   summary: (
     <>
-      Where MIOS collects from, whether each source is healthy, and how much each run takes
-      from them.
+      Every source in Easy Skill&rsquo;s data-sources guide for Australia and Papua New Guinea:
+      which ones MIOS collects from, how each is doing, and for the rest, what stands in the way.
     </>
   ),
   sections: [
     {
+      id: 'layout',
+      heading: 'How the page is organised',
+      body: (
+        <>
+          <p>
+            Sources are grouped under the guide&rsquo;s own sections: job boards, LinkedIn,
+            project intelligence platforms, news and industry publications, financial and
+            regulatory, tenders, internal systems and AI tools. Within a section they sit under
+            the guide&rsquo;s sub-headings, such as Australia and Papua New Guinea.
+          </p>
+          <ul>
+            <li>Under each name are the <b>sectors</b> the source covers.</li>
+            <li><b>Access / market</b> says how it is read (RSS, a JSON API, an Apify actor, a subscription) and which market it covers. Hover it to see what the source provides.</li>
+            <li><b>Show</b> at the top narrows the page to the sources MIOS collects from, or to the ones it does not.</li>
+          </ul>
+        </>
+      ),
+    },
+    {
       id: 'collectors',
-      heading: 'Collectors',
+      heading: 'Sources MIOS collects from',
       body: (
         <SourceFigures>
           {({ limit, stale, pending }) => (
@@ -645,9 +668,47 @@ const sources: PageGuide = {
       ),
     },
     {
+      id: 'notcollected',
+      heading: 'Sources MIOS does not collect from',
+      body: (
+        <>
+          <p>
+            These are listed so the page matches the guide, and so &ldquo;why are we not reading
+            this?&rdquo; has an answer. Each row says what stands in the way:
+          </p>
+          <ul>
+            <li><b>Subscription</b>: a paid platform. Nothing can be read without a licence.</li>
+            <li><b>Needs a key</b>: needs an account or API key nobody has supplied yet.</li>
+            <li><b>Blocked</b>: the site forbids crawlers in its robots.txt, or refuses them. MIOS does not work around that.</li>
+            <li><b>Unreachable</b>: the site did not answer when it was checked.</li>
+            <li><b>Documents only</b>: published as reports or spreadsheets for a person to read, not as a feed.</li>
+            <li><b>Connected</b>: HubSpot and Slack, which are set up under Integrations.</li>
+            <li><b>Planned</b>: in the guide for a later phase.</li>
+          </ul>
+        </>
+      ),
+    },
+    {
       id: 'off',
       heading: 'Sources that ship switched off',
       body: <OffByDefault />,
+    },
+    {
+      id: 'keys',
+      heading: 'Switching on a source that needs a key',
+      body: (
+        <>
+          <p>
+            Two kinds of source wait on a setting in the server&rsquo;s environment. Once it is
+            there, the source switches itself on.
+          </p>
+          <ul>
+            <li><b>Boards read through Apify</b> (Indeed, Jora, Glassdoor, LinkedIn Jobs and others): set <code>APIFY_TOKEN</code>, and name an actor for each board in <code>APIFY_ACTORS</code>, for example <code>indeed=user/indeed-scraper</code>. Each actor&rsquo;s own input goes in <code>APIFY_INPUTS</code>, one JSON object keyed by board.</li>
+            <li><b>Custom RSS feeds</b>: list extra feeds in <code>NEWS_FEEDS</code> as <code>Name|https://site/feed|AU</code> entries.</li>
+            <li><b>ASX Announcements</b> follows a built-in list of miners, energy producers and contractors. <code>ASX_TICKERS</code> replaces that list.</li>
+          </ul>
+        </>
+      ),
     },
     {
       id: 'limits',
@@ -657,7 +718,8 @@ const sources: PageGuide = {
           <p>
             A run fetches up to each source&rsquo;s limit, stores what is new, then sends the new
             records to the AI in batches to be sorted. Changing these numbers never touches
-            records already collected.
+            records already collected. Only the sources that are switched on are listed; one
+            that is off keeps its limit for when it is turned back on.
           </p>
           <p>
             Raising a source&rsquo;s limit collects more per run, but repeats are never stored

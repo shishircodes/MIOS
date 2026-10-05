@@ -326,7 +326,18 @@ completes and always says what it managed to do.
 | PNGworkforce | `scraper/pngworkforce.py` | PNG | HTML listing pages |
 | SEEK | `scraper/seek.py` | AU | HTML cards, ~32 per category path |
 | Adzuna | `scraper/adzuna.py` | AU | **JSON API**, one search per watchlist company |
-| Industry news | `scraper/newsfeed.py` | AU + PNG | **RSS**, one entry per article |
+| Industry news (11 publications) | `scraper/newsfeed.py` | AU + PNG | **RSS**, one entry per article |
+| Mining People International | `scraper/miningpeople.py` | AU | HTML job cards |
+| ASX Announcements | `scraper/asx.py` | AU | **JSON API**, one request per listed company |
+| World Bank | `scraper/worldbank.py` | PNG | **JSON API**, procurement notices and projects |
+| EU tenders (TED) | `scraper/ted.py` | PNG | **JSON API** |
+| Indeed, Jora, Glassdoor, LinkedIn Jobs and others | `scraper/apify.py` | AU + PNG | **Apify actors**; off until `APIFY_TOKEN` and `APIFY_ACTORS` are set |
+
+**Every source lives in `scraper/catalog.py`.** That file lists all ~70 sources
+from the Easy Skill data-sources guide with their category, market, sectors,
+access method and cost. The collectable ones become the registry; the rest say
+why they are not collected (a subscription, a missing key, a robots.txt that
+forbids crawling) and appear on the Data sources page with that reason.
 
 **The news source is the only one that isn't a job board**, and that matters
 more than the effort saved building it. Job ads can only ever produce
@@ -336,7 +347,7 @@ work is news. Those categories were nearly empty before this source existed.
 RSS was chosen over everything else in the data-sources guide because it is a
 published format meant to be polled — no key, no HTML selectors, no terms-of-use
 tension — and the parser is standard library. Adding another publication is one
-line in `FEEDS` or one entry in `NEWS_FEEDS`, not a new module.
+entry in `scraper/catalog.py` or one entry in `NEWS_FEEDS`, not a new module.
 
 > Several publishers listed in that guide sit behind Cloudflare and answer 403
 > to any non-browser client regardless of User-Agent — Australian Mining, Energy

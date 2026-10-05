@@ -205,6 +205,11 @@ jobs:
             ADZUNA_APP_KEY=${{ secrets.ADZUNA_APP_KEY }}
             ADZUNA_COUNTRY=${{ vars.ADZUNA_COUNTRY || 'au' }}
             ADZUNA_QUERIES=${{ vars.ADZUNA_QUERIES }}
+            APIFY_TOKEN=${{ secrets.APIFY_TOKEN }}
+            APIFY_ACTORS=${{ vars.APIFY_ACTORS }}
+            APIFY_INPUTS=${{ vars.APIFY_INPUTS }}
+            ASX_TICKERS=${{ vars.ASX_TICKERS }}
+            NEWS_FEEDS=${{ vars.NEWS_FEEDS }}
             PNGWORKFORCE_BASE_URL=${{ vars.PNGWORKFORCE_BASE_URL }}
             SEEK_BASE_URL=${{ vars.SEEK_BASE_URL }}
             SEEK_PATHS=${{ vars.SEEK_PATHS }}

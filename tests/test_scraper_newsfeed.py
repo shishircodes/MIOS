@@ -16,6 +16,7 @@ from scraper.newsfeed import (
     USER_AGENT,
     Feed,
     _configured_feeds,
+    _custom_feeds,
     is_off_topic,
     parse_feed,
 )
@@ -163,17 +164,21 @@ def test_defaults_are_used_when_nothing_is_configured(monkeypatch):
     assert _configured_feeds() == nf.FEEDS
 
 
-def test_news_feeds_env_overrides_the_defaults(monkeypatch):
-    _with_feeds(monkeypatch, ("The National|https://thenational.com.pg/feed|png",))
-    feeds = _configured_feeds()
+def test_news_feeds_env_adds_custom_feeds(monkeypatch):
+    """NEWS_FEEDS adds to the catalogued publications; it no longer replaces
+    them. A catalogued feed is switched off from the Admin panel instead."""
+    nf = _with_feeds(monkeypatch, ("The National|https://thenational.com.pg/feed|png",))
+    feeds = _custom_feeds()
     assert len(feeds) == 1
     assert feeds[0].name == "The National"
     assert feeds[0].geography == "PNG", "geography is normalised to upper case"
+    assert feeds[0].source == "newsfeed", "custom feeds report as the custom source"
+    assert _configured_feeds() == nf.FEEDS + feeds
 
 
 def test_malformed_config_entries_are_skipped_not_fatal(monkeypatch):
     _with_feeds(monkeypatch, ("missing-the-other-fields", "Good|https://example.com/feed|AU"))
-    feeds = _configured_feeds()
+    feeds = _custom_feeds()
     assert len(feeds) == 1 and feeds[0].name == "Good"
 
 
