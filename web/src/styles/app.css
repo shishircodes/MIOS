@@ -2247,6 +2247,9 @@ html:has(dialog.guide[open]) { overflow: hidden; }
   font-family: var(--mono); font-size: 11px; font-weight: 600; vertical-align: 1px;
 }
 
+/* A dollar amount: a few digits, not a long key. */
+.key-input.cap-input { flex: 0 0 110px; min-width: 0; width: 110px; }
+
 /* Apify: one line per board, with its form opening underneath. */
 .apify-boards { margin-top: 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); }
 .apify-board { padding: 10px 12px; border-bottom: 1px solid var(--line); }

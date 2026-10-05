@@ -5,6 +5,7 @@ import { Section, SkeletonCard } from '~/components/ui'
 import {
   clearApifyToken,
   setApifyBoard,
+  setApifyRunCharge,
   setApifyToken,
   sourceConfigQueryOptions,
   sourceHealthQueryOptions,
@@ -43,6 +44,7 @@ function BoardRow({
           </div>
           <div className="llm-meta">
             {b.actor ? <span className="mono">{b.actor}</span> : 'Not read'}
+            {b.actor && <> · up to {b.limit} results a run</>}
             {b.actor && b.changedBy && <> · by {b.changedBy}</>}
           </div>
         </div>
@@ -104,6 +106,8 @@ export function ApifyPanel() {
   const { data, isPending, error } = useQuery(sourceConfigQueryOptions)
   const [open, setOpen] = useState(false)
   const [token, setToken] = useState('')
+  const [capOpen, setCapOpen] = useState(false)
+  const [cap, setCap] = useState('')
   const [problem, setProblem] = useState<string | null>(null)
   const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null)
 
@@ -124,6 +128,11 @@ export function ApifyPanel() {
   const remove = useMutation({ mutationFn: clearApifyToken, onSuccess: settle, onError })
   const test = useMutation({ mutationFn: testApifyToken, onSuccess: settle, onError })
   const board = useMutation({ mutationFn: setApifyBoard, onSuccess: settle, onError })
+  const charge = useMutation({
+    mutationFn: setApifyRunCharge,
+    onSuccess: (p) => { settle(p); setCapOpen(false) },
+    onError,
+  })
 
   if (isPending) return <SkeletonCard rows={4} />
   if (error || !data) {
@@ -136,6 +145,8 @@ export function ApifyPanel() {
 
   const a = data.apify
   const busy = save.isPending || remove.isPending || test.isPending || board.isPending
+    || charge.isPending
+  const usd = (n: number) => `$${n.toFixed(2)}`
   const hasToken = a.token.source === 'panel'
   const named = a.boards.filter((b) => b.actor).length
   const state = a.readyCount > 0
@@ -231,9 +242,62 @@ export function ApifyPanel() {
         </div>
       </div>
 
-      {/* Step 3: where the result shows up */}
+      {/* Step 3: what a run may cost */}
       <div className="key-row">
-        <div className="llm-purpose"><span className="step-no">3</span>Check the boards</div>
+        <div className="key-head">
+          <div>
+            <div className="llm-purpose"><span className="step-no">3</span>Spending limit</div>
+            <div className="llm-meta">
+              A run of an actor is charged at most <b>{usd(a.run.maxChargeUsd)}</b>
+              {a.run.custom
+                ? <> · set by {a.run.changedBy}</>
+                : ' · the default'}
+            </div>
+            <div className="llm-meta">
+              Apify is also told not to charge for more results than a board&rsquo;s limit, which
+              is set under <Link to="/sources">Data sources</Link> › Options &amp; limits.
+            </div>
+          </div>
+          <div className="key-actions">
+            {a.run.custom && (
+              <button className="btn sm ghost" disabled={busy} onClick={() => charge.mutate('')}>
+                Use default
+              </button>
+            )}
+            <button
+              className="btn sm"
+              disabled={busy}
+              onClick={() => { setCap(a.run.maxChargeUsd.toFixed(2)); setCapOpen((o) => !o) }}
+            >
+              {capOpen ? 'Cancel' : 'Change'}
+            </button>
+          </div>
+        </div>
+        {capOpen && (
+          <form
+            className="key-form"
+            onSubmit={(e) => {
+              e.preventDefault()
+              if (cap.trim()) charge.mutate(cap.trim())
+            }}
+          >
+            <label className="key-label" htmlFor="apify-cap">US dollars per run</label>
+            <input
+              id="apify-cap" type="number" inputMode="decimal" className="key-input cap-input"
+              value={cap} min={a.run.min} max={a.run.max} step="0.05"
+              onChange={(e) => setCap(e.target.value)}
+            />
+            <button className="btn sm" type="submit" disabled={busy || !cap.trim()}>
+              {charge.isPending ? 'Saving…' : 'Save'}
+            </button>
+            <span className="llm-meta">Between {usd(a.run.min)} and {usd(a.run.max)}.</span>
+          </form>
+        )}
+      </div>
+
+      {/* Step 4: where the result shows up */}
+      <div className="key-row">
+        <div className="llm-purpose"><span className="step-no">4</span>Check the boards</div>
         <div className="llm-meta">
           A ready board is read from the next run and appears under{' '}
           <Link to="/sources">Data sources</Link>, where it can be switched off and given a limit.

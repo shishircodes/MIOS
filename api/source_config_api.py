@@ -85,6 +85,20 @@ def put_board(source_id: str, payload: dict[str, Any] = Body(...),
                  "under Data sources.")
 
 
+@router.put("/apify/run")
+def put_run(payload: dict[str, Any] = Body(...),
+            user: dict[str, Any] = Depends(require_admin)) -> dict[str, Any]:
+    """The most one run of an actor may be charged. Empty returns to the default."""
+    raw = payload.get("maxChargeUsd")
+    try:
+        value = source_config.set_apify_max_charge(raw, changed_by=user["email"])
+    except source_config.SourceConfigError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if raw is None or not str(raw).strip():
+        return _with(f"Back to the default of ${value:.2f} a run.")
+    return _with(f"A run of an actor now stops being charged at ${value:.2f}.")
+
+
 # ---------- ASX companies ----------
 
 

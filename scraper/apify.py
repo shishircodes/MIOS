@@ -17,9 +17,21 @@ an account token and an actor named for it. Both are set under Admin ›
 Integrations (see `loader.source_config`), and nowhere else.
 
 An actor's own input (search terms, country, filters) differs per actor, so it
-is passed through untouched, as a JSON object entered beside the actor. The
-per-run limit from the Admin panel is sent as `maxItems` and as the dataset
-limit.
+is passed through untouched, as a JSON object entered beside the actor.
+
+**Every run is capped twice, by Apify, whatever the actor is.** An actor is
+somebody else's program on a metered account, so neither cap relies on it
+co-operating:
+
+* `maxItems` as a run option is the board's limit from the Admin panel. Apify
+  will not charge a pay-per-result actor for more results than that.
+* `maxTotalChargeUsd` is the administrator's ceiling on one run's cost, for
+  every pricing model.
+
+The limit is also put into the actor's input as `maxItems`, which the actors
+that use that name read as "stop here", and it is the dataset limit, so MIOS
+never keeps more than it either. An actor that names its count differently may
+still fetch more than MIOS keeps; the caps above bound what that can cost.
 
 **Field names differ between actors too**, so each record is read by trying
 the names actors commonly use for a title, an employer, a place and a link. A
@@ -140,7 +152,12 @@ def _scrape_sync(source_id: str, label: str, geography: str, limit: int) -> list
     res = requests.post(
         # Apify writes "user/actor" as "user~actor" in a path.
         RUN_URL.format(actor=str(actor).replace("/", "~")),
-        params={"limit": limit, "clean": "true"},
+        params={
+            "limit": limit, "clean": "true",
+            # Run options, enforced by Apify and not by the actor.
+            "maxItems": limit,
+            "maxTotalChargeUsd": source_config.apify_max_charge(),
+        },
         # The token goes in a header, never the URL, so it cannot end up in a log.
         headers={"Authorization": f"Bearer {source_config.apify_token()}"},
         json=_actor_input(source_id, limit),

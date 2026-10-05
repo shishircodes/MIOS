@@ -1,8 +1,8 @@
 """What the collectors need to be told, set from the Admin panel.
 
-Four things: the Apify token, which actor reads which job board, the ASX
-companies to follow, and any extra news feeds. All four are set from the panel
-and nowhere else.
+Five things: the Apify token, which actor reads which job board, the most one
+run of an actor may cost, the ASX companies to follow, and any extra news
+feeds. All five are set from the panel and nowhere else.
 
 Same rules as every other setting in the panel:
 
@@ -43,6 +43,14 @@ KEY_NAME = "apify"
 KV_KEY = "sources:config"
 
 CACHE_SECONDS = 15.0
+#: The most one run of one actor may be charged, in US dollars. Applied to every
+#: run whether or not anybody has set it: an actor is somebody else's program on
+#: a metered account, and "no limit" is not a safe thing to default to. A board's
+#: results at a couple of dollars per thousand cost cents, so a dollar is room
+#: to spare and still a ceiling.
+DEFAULT_RUN_CHARGE_USD = 1.00
+MIN_RUN_CHARGE_USD = 0.05
+MAX_RUN_CHARGE_USD = 50.00
 MAX_TICKERS = 60
 MAX_FEEDS = 20
 MARKETS = ("AU", "PNG")
@@ -149,6 +157,44 @@ def apify_input(source_id: str, target=None) -> dict[str, Any]:
     """The actor's own input for a board, as entered beside the actor."""
     stored = _board(source_id, target).get("input")
     return dict(stored) if isinstance(stored, dict) else {}
+
+
+def apify_max_charge(target=None) -> float:
+    """The most one run of an actor may be charged, in US dollars."""
+    stored = (_read(target)["blob"].get("apifyRun") or {}).get("maxChargeUsd")
+    try:
+        value = float(stored)
+    except (TypeError, ValueError):
+        return DEFAULT_RUN_CHARGE_USD
+    # A stored value outside the range can only be an old or hand-edited one.
+    return value if MIN_RUN_CHARGE_USD <= value <= MAX_RUN_CHARGE_USD else DEFAULT_RUN_CHARGE_USD
+
+
+def set_apify_max_charge(raw: Any, *, changed_by: str, target=None) -> float:
+    """Set the per-run ceiling. Empty returns to the default."""
+    text = "" if raw is None else str(raw).strip().lstrip("$").strip()
+
+    if not text:
+        def drop(blob: dict[str, Any]) -> None:
+            blob.pop("apifyRun", None)
+        _write(drop, target)
+        log.info("source_config: %s reset the Apify run ceiling", changed_by)
+        return DEFAULT_RUN_CHARGE_USD
+
+    try:
+        value = round(float(text), 2)
+    except ValueError as exc:
+        raise SourceConfigError(
+            f"'{raw}' is not an amount. Enter dollars, like 1.50.") from exc
+    if not MIN_RUN_CHARGE_USD <= value <= MAX_RUN_CHARGE_USD:
+        raise SourceConfigError(
+            f"The limit must be between ${MIN_RUN_CHARGE_USD:.2f} and ${MAX_RUN_CHARGE_USD:.2f} a run.")
+
+    def put(blob: dict[str, Any]) -> None:
+        blob["apifyRun"] = {"maxChargeUsd": value, "changedBy": changed_by, "changedAt": _now()}
+    _write(put, target)
+    log.info("source_config: %s set the Apify run ceiling to $%.2f", changed_by, value)
+    return value
 
 
 def set_apify_token(token: str, *, changed_by: str, target=None) -> None:
@@ -370,6 +416,19 @@ def status(target=None) -> dict[str, Any]:
     key = describe(KEY_NAME, target=target)
     has_token = bool(state["token"])
 
+    # Each board's results per run, which is set with the other limits. Shown
+    # here because it is the other half of what a run can cost.
+    try:
+        from loader import pipeline_settings
+
+        limits = pipeline_settings.scrape_limits(target)
+    except Exception as exc:  # noqa: BLE001 - the panel still renders without it
+        log.debug("source_config: could not read the run limits (%s)", exc)
+        limits = {}
+
+    run_stored = blob.get("apifyRun") or {}
+    custom_charge = "maxChargeUsd" in run_stored
+
     stored_boards = blob.get("apifyBoards") or {}
     boards = []
     for source_id, src in _boards().items():
@@ -381,6 +440,7 @@ def status(target=None) -> dict[str, Any]:
             "actor": actor,
             "input": json.dumps(actor_input, indent=2) if isinstance(actor_input, dict) and actor_input else "",
             "ready": bool(has_token and actor),
+            "limit": limits.get(source_id, src.limit),
             "changedBy": stored.get("changedBy"), "changedAt": stored.get("changedAt"),
         })
 
@@ -395,6 +455,15 @@ def status(target=None) -> dict[str, Any]:
             "canStoreKey": available(),
             "boards": boards,
             "readyCount": sum(1 for b in boards if b["ready"]),
+            "run": {
+                "maxChargeUsd": apify_max_charge(target),
+                "custom": custom_charge,
+                "default": DEFAULT_RUN_CHARGE_USD,
+                "min": MIN_RUN_CHARGE_USD,
+                "max": MAX_RUN_CHARGE_USD,
+                "changedBy": run_stored.get("changedBy") if custom_charge else None,
+                "changedAt": run_stored.get("changedAt") if custom_charge else None,
+            },
         },
         "asx": {
             #: The list in play, and whether it is the administrator's or the
@@ -417,7 +486,8 @@ def status(target=None) -> dict[str, Any]:
 
 
 __all__ = [
-    "SourceConfigError", "apify_actor", "apify_input", "apify_token", "asx_tickers",
-    "check_feed", "clear_apify_token", "custom_feeds", "forget", "set_apify_token",
-    "set_asx_tickers", "set_board", "set_custom_feeds", "status", "test_apify_token",
+    "SourceConfigError", "apify_actor", "apify_input", "apify_max_charge", "apify_token",
+    "asx_tickers", "check_feed", "clear_apify_token", "custom_feeds", "forget",
+    "set_apify_max_charge", "set_apify_token", "set_asx_tickers", "set_board",
+    "set_custom_feeds", "status", "test_apify_token",
 ]

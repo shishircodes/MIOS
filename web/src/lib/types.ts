@@ -242,6 +242,9 @@ export interface ApifyBoard {
   input: string
   /** True when there is both a token and an actor, so the board can be read. */
   ready: boolean
+  /** Results taken per run, set under Data sources › Options & limits. Apify
+   *  is told not to charge for more than this. */
+  limit: number
   changedBy: string | null
   changedAt: string | null
 }
@@ -258,6 +261,16 @@ export interface SourceConfigStatus {
     canStoreKey: boolean
     boards: ApifyBoard[]
     readyCount: number
+    /** The most one run of one actor may be charged, in US dollars. */
+    run: {
+      maxChargeUsd: number
+      custom: boolean
+      default: number
+      min: number
+      max: number
+      changedBy: string | null
+      changedAt: string | null
+    }
   }
   asx: {
     /** The list in play: the administrator's, or the built-in one. */

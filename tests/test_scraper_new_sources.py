@@ -363,3 +363,10 @@ def test_apify_sends_the_token_in_a_header_and_the_limit_as_max_items(panel, mon
     assert TOKEN not in seen["url"], "the token must never be in the address"
     assert seen["headers"]["Authorization"] == f"Bearer {TOKEN}"
     assert seen["json"] == {"position": "mining", "maxItems": 7}, "the run limit wins"
+    # Enforced by Apify, so they hold even for an actor that ignores its input.
+    assert seen["params"]["maxItems"] == 7 and seen["params"]["limit"] == 7
+    assert seen["params"]["maxTotalChargeUsd"] == panel.DEFAULT_RUN_CHARGE_USD
+
+    panel.set_apify_max_charge("0.40", changed_by="admin@example.com")
+    asyncio.run(apify.scrape_async(INDEED, limit=7))
+    assert seen["params"]["maxTotalChargeUsd"] == 0.40

@@ -878,7 +878,20 @@ const integrations: PageGuide = {
             <li>In <b>Search settings</b>, enter what that actor should search for, as JSON. Every actor has its own field names — they are listed on the actor&rsquo;s <b>Input</b> tab, which can also show the JSON to copy. Leave it empty to use the actor&rsquo;s defaults.</li>
             <li>Save. The board shows <b>Ready</b> once it has both a token and an actor.</li>
           </ol>
-          <p><b>Step 3 — check the result.</b></p>
+          <p><b>Step 3 — set the spending limit.</b></p>
+          <p>
+            Every run of an actor is capped twice, by Apify itself, so neither depends on the
+            actor behaving:
+          </p>
+          <ul>
+            <li><b>By cost.</b> A run is charged at most the spending limit, whatever the actor&rsquo;s pricing. It starts at $1.00; press <b>Change</b> to set another amount, or <b>Use default</b> to go back.</li>
+            <li><b>By results.</b> An actor that charges per result is not paid for more than the board&rsquo;s limit. That number is on each board&rsquo;s row here, and is changed under <b>Data sources › Options &amp; limits</b>.</li>
+          </ul>
+          <p>
+            A limit set too low can stop a run before it has collected anything. If a board shows
+            fewer records than expected, check the run in the Apify Console before raising it.
+          </p>
+          <p><b>Step 4 — check the result.</b></p>
           <ol>
             <li>A ready board is read from the next run. Under <b>Data sources</b> its row changes from <i>Not configured</i> to <i>No data yet</i>, then <i>Collecting</i>.</li>
             <li>To stop reading a board, switch it off there, or remove its actor here.</li>
@@ -887,8 +900,8 @@ const integrations: PageGuide = {
             Each run of an actor is charged to the Apify account, so name actors only for boards
             worth the cost. Some actors have their own setting for how many results to fetch
             (for example <span className="mono">maxResults</span>); set it in Search settings near
-            the board&rsquo;s limit, or the actor fetches, and charges for, more than MIOS keeps.
-            The token is stored encrypted and never shown again in full.
+            the board&rsquo;s limit, so the actor stops early instead of running until a cap stops
+            it. The token is stored encrypted and never shown again in full.
           </p>
         </>
       ),
