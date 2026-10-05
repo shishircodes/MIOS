@@ -17,7 +17,10 @@ an account token and an actor named for it. Both are set under Admin ›
 Integrations (see `loader.source_config`), and nowhere else.
 
 An actor's own input (search terms, country, filters) differs per actor, so it
-is passed through untouched, as a JSON object entered beside the actor.
+is passed through untouched, as a JSON object entered beside the actor. Where
+nothing was entered and MIOS knows the actor, it sends a default search limited
+to Easy Skill's sectors instead (see `scraper.apify_presets`): an actor left on
+its author's defaults returns every kind of job.
 
 **Every run is capped twice, by Apify, whatever the actor is.** An actor is
 somebody else's program on a metered account, so neither cap relies on it
@@ -52,6 +55,7 @@ from typing import Any
 import requests
 
 from loader import source_config
+from scraper import apify_presets
 
 log = logging.getLogger(__name__)
 
@@ -144,6 +148,11 @@ def _actor_input(source_id: str, limit: int) -> dict[str, Any]:
     # The run limit wins over whatever the stored input says, so the Admin
     # panel's number is the one that applies.
     body["maxItems"] = limit
+    # A known actor's own name for the same thing, so it stops there instead of
+    # fetching its default (300 for one SEEK actor) and running to a cap.
+    preset = apify_presets.preset_for(actor_for(source_id) or "")
+    if preset and preset.count_field:
+        body[preset.count_field] = min(limit, preset.max_count) if preset.max_count else limit
     return body
 
 

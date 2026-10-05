@@ -13,27 +13,50 @@ import {
 } from '~/lib/api'
 import type { ApifyBoard, SourceConfigStatus } from '~/lib/types'
 
-/** One board: the actor that reads it, and that actor's own search settings. */
+type Preset = SourceConfigStatus['apify']['presets'][number]
+
+/** Apify reads names case-insensitively and writes them with "~" in addresses. */
+const actorKey = (name: string) => name.trim().toLowerCase().replace('~', '/')
+
+/** One board: the actor that reads it, and what that actor searches for. */
 function BoardRow({
   b,
+  presets,
   hasToken,
   busy,
   onSave,
 }: {
   b: ApifyBoard
+  presets: Preset[]
   hasToken: boolean
   busy: boolean
   onSave: (v: { id: string; actor: string; input: string }, done: () => void) => void
 }) {
   const [open, setOpen] = useState(false)
   const [actor, setActor] = useState(b.actor)
-  const [input, setInput] = useState(b.input)
+  const [input, setInput] = useState(b.input || b.defaultInput)
+
+  const presetFor = (name: string) => presets.find((p) => p.actor === actorKey(name))
+  // The actors MIOS has a default search for, on this board.
+  const known = presets.filter((p) => p.board === b.id)
+  const preset = presetFor(actor)
+  const onDefault = !!preset && input.trim() === preset.input.trim()
 
   const state = b.ready
     ? { cls: 'ok', label: 'Ready' }
     : b.actor
       ? { cls: 'warn', label: 'Needs the token' }
       : { cls: 'off', label: 'No actor' }
+
+  // What the board searches for, said in a word: it is the difference between
+  // a week of mining jobs and a week of every job in the country.
+  const search = !b.actor
+    ? null
+    : b.usingDefault
+      ? { text: 'default search', warn: false }
+      : b.input
+        ? { text: 'your search', warn: false }
+        : { text: 'no search set, so every kind of job', warn: true }
 
   return (
     <div className="apify-board">
@@ -45,7 +68,7 @@ function BoardRow({
           <div className="llm-meta">
             {b.actor ? <span className="mono">{b.actor}</span> : 'Not read'}
             {b.actor && <> · up to {b.limit} results a run</>}
-            {b.actor && b.changedBy && <> · by {b.changedBy}</>}
+            {search && <> · <span className={search.warn ? 'llm-warn' : undefined}>{search.text}</span></>}
           </div>
         </div>
         <span className={`status-chip ${state.cls}`}>{state.label}</span>
@@ -56,7 +79,7 @@ function BoardRow({
           onClick={() => {
             // Reopen on what is stored, not on an edit that was abandoned.
             setActor(b.actor)
-            setInput(b.input)
+            setInput(b.input || b.defaultInput)
             setOpen((o) => !o)
           }}
         >
@@ -73,18 +96,68 @@ function BoardRow({
           }}
         >
           <label className="key-label" htmlFor={`actor-${b.id}`}>Actor</label>
-          <input
-            id={`actor-${b.id}`} className="key-input" value={actor}
-            autoComplete="off" spellCheck={false} placeholder="username/actor-name"
-            onChange={(e) => setActor(e.target.value)}
-          />
+          <div className="apify-field">
+            <input
+              id={`actor-${b.id}`} className="key-input" value={actor}
+              autoComplete="off" spellCheck={false} placeholder="username/actor-name"
+              onChange={(e) => {
+                const next = e.target.value
+                // Naming an actor MIOS knows fills in its default search, unless
+                // something has been typed there that is not the last default.
+                const before = presetFor(actor)?.input ?? ''
+                if (input.trim() === '' || input.trim() === before.trim()) {
+                  setInput(presetFor(next)?.input ?? '')
+                }
+                setActor(next)
+              }}
+            />
+            {known.length > 0 && !preset && (
+              <div className="llm-meta">
+                A default search is built in for{' '}
+                {known.map((p, i) => (
+                  <span key={p.actor}>
+                    {i > 0 && ', '}
+                    <button
+                      type="button" className="link-btn mono"
+                      onClick={() => { setActor(p.actor); setInput(p.input) }}
+                    >
+                      {p.actor}
+                    </button>
+                  </span>
+                ))}
+                .
+              </div>
+            )}
+          </div>
+
           <label className="key-label" htmlFor={`input-${b.id}`}>Search settings</label>
-          <textarea
-            id={`input-${b.id}`} className="key-input apify-json" value={input} rows={4}
-            spellCheck={false}
-            placeholder={'{\n  "position": "mining",\n  "country": "AU"\n}'}
-            onChange={(e) => setInput(e.target.value)}
-          />
+          <div className="apify-field">
+            <textarea
+              id={`input-${b.id}`} className="key-input apify-json" value={input}
+              rows={preset ? 8 : 4} spellCheck={false}
+              placeholder={'{\n  "keyword": "mining"\n}'}
+              onChange={(e) => setInput(e.target.value)}
+            />
+            <div className="llm-meta">
+              {preset
+                ? onDefault
+                  ? 'The default search for this actor: Easy Skill’s sectors, the last week. Edit it to search for something else.'
+                  : <>
+                      Your own search.{' '}
+                      <button type="button" className="link-btn" onClick={() => setInput(preset.input)}>
+                        Put the default back
+                      </button>
+                    </>
+                : (
+                  <span className={input.trim() ? undefined : 'llm-warn'}>
+                    MIOS has no default search for this actor. Left empty, it uses its own
+                    defaults, which is every kind of job. Its field names are on the actor’s
+                    Input tab in the Apify Store.
+                  </span>
+                )}
+            </div>
+          </div>
+
           <div className="apify-form-actions">
             <button className="btn sm" type="submit" disabled={busy || (!actor.trim() && !b.actor)}>
               {!actor.trim() && b.actor ? 'Remove actor' : 'Save'}
@@ -234,6 +307,7 @@ export function ApifyPanel() {
             <BoardRow
               key={b.id}
               b={b}
+              presets={a.presets}
               hasToken={hasToken}
               busy={busy}
               onSave={(v, done) => board.mutate(v, { onSuccess: done })}

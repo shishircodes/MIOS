@@ -238,8 +238,13 @@ export interface ApifyBoard {
   url: string
   /** `username/actor-name`, or '' when none has been named. */
   actor: string
-  /** The actor's own input, as JSON text. '' when there is none. */
+  /** What the administrator entered for the actor, as JSON text. '' when
+   *  nothing was entered. */
   input: string
+  /** MIOS's default search for this actor, as JSON text. '' when it has none. */
+  defaultInput: string
+  /** True when the board is running on that default. */
+  usingDefault: boolean
   /** True when there is both a token and an actor, so the board can be read. */
   ready: boolean
   /** Results taken per run, set under Data sources › Options & limits. Apify
@@ -261,6 +266,8 @@ export interface SourceConfigStatus {
     canStoreKey: boolean
     boards: ApifyBoard[]
     readyCount: number
+    /** The actors MIOS has a default search for. `actor` is lower-case. */
+    presets: { actor: string; board: string; input: string }[]
     /** The most one run of one actor may be charged, in US dollars. */
     run: {
       maxChargeUsd: number

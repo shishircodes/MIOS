@@ -154,9 +154,20 @@ def apify_actor(source_id: str, target=None) -> str:
 
 
 def apify_input(source_id: str, target=None) -> dict[str, Any]:
-    """The actor's own input for a board, as entered beside the actor."""
-    stored = _board(source_id, target).get("input")
-    return dict(stored) if isinstance(stored, dict) else {}
+    """What a board's actor is asked to search for.
+
+    What the administrator entered beside the actor, or, while they have
+    entered nothing, MIOS's default search for that actor: Easy Skill's sectors
+    (see `scraper.apify_presets`). An actor MIOS has no default for gets {},
+    which is the actor's own defaults.
+    """
+    board = _board(source_id, target)
+    stored = board.get("input")
+    if isinstance(stored, dict) and stored:
+        return dict(stored)
+    from scraper import apify_presets
+
+    return apify_presets.default_input(str(board.get("actor") or ""))
 
 
 def apify_max_charge(target=None) -> float:
@@ -250,6 +261,13 @@ def set_board(source_id: str, actor: str, input_text: str | None, *,
             raise SourceConfigError(
                 'The search settings must be a JSON object, like {"position": "mining"}.')
         actor_input = parsed
+
+    from scraper import apify_presets
+
+    # The default, saved back unchanged, is still the default: storing nothing
+    # keeps the board on it, so a later correction to the default reaches it.
+    if actor_input == apify_presets.default_input(actor):
+        actor_input = {}
 
     def put(blob: dict[str, Any]) -> None:
         boards = dict(blob.get("apifyBoards") or {})
@@ -429,16 +447,23 @@ def status(target=None) -> dict[str, Any]:
     run_stored = blob.get("apifyRun") or {}
     custom_charge = "maxChargeUsd" in run_stored
 
+    from scraper import apify_presets
+
     stored_boards = blob.get("apifyBoards") or {}
     boards = []
     for source_id, src in _boards().items():
         stored = stored_boards.get(source_id) or {}
         actor = str(stored.get("actor") or "")
         actor_input = stored.get("input")
+        has_input = isinstance(actor_input, dict) and bool(actor_input)
+        default = apify_presets.default_input(actor)
         boards.append({
             "id": source_id, "label": src.label, "market": src.market, "url": src.url,
             "actor": actor,
-            "input": json.dumps(actor_input, indent=2) if isinstance(actor_input, dict) and actor_input else "",
+            "input": json.dumps(actor_input, indent=2) if has_input else "",
+            #: MIOS's own search for this actor, shown when nothing was entered.
+            "defaultInput": json.dumps(default, indent=2) if default else "",
+            "usingDefault": bool(actor and default and not has_input),
             "ready": bool(has_token and actor),
             "limit": limits.get(source_id, src.limit),
             "changedBy": stored.get("changedBy"), "changedAt": stored.get("changedAt"),
@@ -455,6 +480,11 @@ def status(target=None) -> dict[str, Any]:
             "canStoreKey": available(),
             "boards": boards,
             "readyCount": sum(1 for b in boards if b["ready"]),
+            #: The actors MIOS has a default search for, so the form can fill
+            #: it in as soon as one is named.
+            "presets": [{"actor": name, "board": p.board,
+                         "input": json.dumps(p.input, indent=2)}
+                        for name, p in apify_presets.PRESETS.items()],
             "run": {
                 "maxChargeUsd": apify_max_charge(target),
                 "custom": custom_charge,

@@ -875,7 +875,8 @@ const integrations: PageGuide = {
             <li>In the <b>Apify Store</b>, search for the board (for example &ldquo;SEEK scraper&rdquo;) and open an actor. Check its price and reviews first.</li>
             <li>Copy its name from the page address: <span className="mono">apify.com/<b>username/actor-name</b></span>.</li>
             <li>Here, press <b>Set actor</b> beside the board and paste the name.</li>
-            <li>In <b>Search settings</b>, enter what that actor should search for, as JSON. Every actor has its own field names — they are listed on the actor&rsquo;s <b>Input</b> tab, which can also show the JSON to copy. Leave it empty to use the actor&rsquo;s defaults.</li>
+            <li><b>Search settings</b> say what the actor should look for, as JSON. For an actor MIOS knows, a default search is filled in for you: Easy Skill&rsquo;s sectors (mining, oil and gas, energy, construction, defence) from the last week. Edit it to search for something else; <b>Put the default back</b> undoes that.</li>
+            <li>For any other actor there is no default, because every actor has its own field names. Copy them from the actor&rsquo;s <b>Input</b> tab in the Apify Store. Left empty, the actor uses its own defaults, which is every kind of job, and the board&rsquo;s row says so.</li>
             <li>Save. The board shows <b>Ready</b> once it has both a token and an actor.</li>
           </ol>
           <p><b>Step 3 — set the spending limit.</b></p>

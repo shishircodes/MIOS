@@ -329,7 +329,9 @@ def caller_for(purpose: str) -> Caller:
         try:
             result = inner(system_prompt, user_prompt, schema)
         except Exception as exc:  # noqa: BLE001 - recorded, then re-raised
-            record(purpose, provider_name, model, ok=False, note=type(exc).__name__)
+            # The provider's own words as well as the error's class: "ServerError"
+            # alone cannot tell an overloaded model from a broken one.
+            record(purpose, provider_name, model, ok=False, note=_failure_note(exc))
             message = str(exc).lower()
             if any(w in message for w in ("quota", "429", "resource_exhausted", "rate")):
                 raise QuotaExhausted(str(exc)) from exc
@@ -420,7 +422,7 @@ def verify(provider_name: str, model: str = "") -> tuple[bool, str]:
         # the provider charges for a rejected request exactly as for a served
         # one, so a test button that only counted successes would let somebody
         # exhaust a free tier by pressing it.
-        record("verify", provider_name, model, ok=False, note=type(exc).__name__)
+        record("verify", provider_name, model, ok=False, note=_failure_note(exc))
         message = str(exc).lower()
         if any(w in message for w in ("quota", "429", "resource_exhausted", "rate")):
             # The key is valid — this is what an exhausted allowance looks like,
@@ -433,6 +435,13 @@ def verify(provider_name: str, model: str = "") -> tuple[bool, str]:
     log.info("llm: verified %s/%s", provider_name, model)
     return True, (f"{provider.label} answered on {model}."
                   if result else f"{provider.label} answered on {model} (empty reply).")
+
+
+def _failure_note(exc: BaseException) -> str:
+    """A failed call, for the call log: the error's class and what it said."""
+    said = " ".join(str(exc).split())
+    name = type(exc).__name__
+    return f"{name}: {said[:240]}" if said and said != name else name
 
 
 def describe_routing() -> list[dict[str, Any]]:
