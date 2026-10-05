@@ -11,15 +11,14 @@ scraper added later is collected from without a migration or a seed. The table
 answers "what did somebody change?", not "what sources exist?" —
 `scraper.SOURCE_NAMES` is the authority on that.
 
-**A source may default to off, and must then say why.** Most default to on. SEEK
-does not: it answers 403 to the deployed server at their edge, so leaving it on
-meant every run spent time on a source that could not return anything while the
-digest quietly under-collected. An administrator can still switch it on — the
-block is a property of where MIOS runs, not a permanent fact — but they are
-told what they are turning on first.
+**A source may default to off, and must then say why.** Most default to on. A
+few do not: a title whose coverage is global, and the sources that wait on
+something being entered (an Apify board with no actor, the custom feeds with no
+feed). An administrator can still switch one on, but they are told what they
+are turning on first.
 
 **Every change records who and when.** The question this table exists to answer
-is "why did we collect nothing from SEEK last week?", and a bare boolean cannot
+is "why did we collect nothing from this source last week?", and a bare boolean cannot
 answer it.
 
 This lives in `loader` rather than `api` because the pipeline reads it and the

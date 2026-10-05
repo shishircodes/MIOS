@@ -709,7 +709,7 @@ const sources: PageGuide = {
             run has collected from it.
           </p>
           <ul>
-            <li><b>Boards read through Apify</b> (Indeed, Jora, Glassdoor, LinkedIn Jobs and others) need a token and an actor. <b>Set up</b> opens <b>Integrations › Apify job boards</b>, and its guide has the steps.</li>
+            <li><b>Boards read through Apify</b> (SEEK, Indeed, Jora, Glassdoor, LinkedIn Jobs and others) need a token and an actor. <b>Set up</b> opens <b>Integrations › Apify job boards</b>, and its guide has the steps.</li>
             <li><b>Custom RSS feeds</b> needs at least one feed. <b>Add a feed</b> opens the <b>Options &amp; limits</b> tab.</li>
           </ul>
         </>
@@ -872,7 +872,7 @@ const integrations: PageGuide = {
           </ol>
           <p><b>Step 2 — name an actor for each board you want.</b></p>
           <ol>
-            <li>In the <b>Apify Store</b>, search for the board (for example &ldquo;Indeed scraper&rdquo;) and open an actor. Check its price and reviews first.</li>
+            <li>In the <b>Apify Store</b>, search for the board (for example &ldquo;SEEK scraper&rdquo;) and open an actor. Check its price and reviews first.</li>
             <li>Copy its name from the page address: <span className="mono">apify.com/<b>username/actor-name</b></span>.</li>
             <li>Here, press <b>Set actor</b> beside the board and paste the name.</li>
             <li>In <b>Search settings</b>, enter what that actor should search for, as JSON. Every actor has its own field names — they are listed on the actor&rsquo;s <b>Input</b> tab, which can also show the JSON to copy. Leave it empty to use the actor&rsquo;s defaults.</li>
@@ -885,7 +885,10 @@ const integrations: PageGuide = {
           </ol>
           <p>
             Each run of an actor is charged to the Apify account, so name actors only for boards
-            worth the cost. The token is stored encrypted and never shown again in full.
+            worth the cost. Some actors have their own setting for how many results to fetch
+            (for example <span className="mono">maxResults</span>); set it in Search settings near
+            the board&rsquo;s limit, or the actor fetches, and charges for, more than MIOS keeps.
+            The token is stored encrypted and never shown again in full.
           </p>
         </>
       ),

@@ -133,7 +133,7 @@ def test_a_board_setting_that_is_wrong_fails_when_saved(panel, actor, text, mess
 
 def test_only_boards_read_through_apify_can_be_given_an_actor(panel):
     with pytest.raises(panel.SourceConfigError, match="not a board"):
-        panel.set_board("seek", "someone/reader", "", changed_by=ADMIN)
+        panel.set_board("pngworkforce", "someone/reader", "", changed_by=ADMIN)
 
 
 def test_testing_the_token_reports_apifys_own_answer(panel):
@@ -304,7 +304,7 @@ def test_the_panel_flow(panel, monkeypatch):
 
     assert admin.put(f"{base}/apify/boards/{BOARD}",
                      json={"actor": "nonsense"}).status_code == 400
-    assert admin.put(f"{base}/apify/boards/seek", json={"actor": "a/b"}).status_code == 400
+    assert admin.put(f"{base}/apify/boards/pngworkforce", json={"actor": "a/b"}).status_code == 400
     assert admin.put(f"{base}/apify/token", json={"token": "x"}).status_code == 400
 
     r = admin.put(f"{base}/asx", json={"tickers": "bhp rio"})

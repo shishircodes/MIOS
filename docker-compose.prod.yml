@@ -48,8 +48,6 @@ services:
       # source silently collecting nothing because the container never received
       # a URL is exactly the failure this file should make visible.
       PNGWORKFORCE_BASE_URL: ${PNGWORKFORCE_BASE_URL:-}
-      SEEK_BASE_URL: ${SEEK_BASE_URL:-}
-      SEEK_PATHS: ${SEEK_PATHS:-}
 
       # Whether this process runs the weekly pipeline by itself. Deliberately
       # an environment variable and not a database setting: it answers "is this

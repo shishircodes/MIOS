@@ -32,8 +32,6 @@ class Settings:
     database_url: str
     log_level: str
     pngworkforce_base_url: str
-    seek_base_url: str
-    seek_paths: tuple[str, ...]
     adzuna_app_id: str
     adzuna_app_key: str
     adzuna_country: str
@@ -161,8 +159,6 @@ def load_settings() -> Settings:
         # container, while every developer had it in their .env.
         pngworkforce_base_url=_get("PNGWORKFORCE_BASE_URL",
                                    "https://www.pngworkforce.com/jobs/view-latest-jobs"),
-        seek_base_url=_get("SEEK_BASE_URL", "https://au.seek.com"),
-        seek_paths=_get_list("SEEK_PATHS"),
         adzuna_app_id=_get("ADZUNA_APP_ID"),
         adzuna_app_key=_get("ADZUNA_APP_KEY"),
         adzuna_country=_get("ADZUNA_COUNTRY", "au"),

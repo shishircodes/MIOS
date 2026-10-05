@@ -331,14 +331,13 @@ completes and always says what it managed to do.
 | Source | Module | Market | Method |
 |---|---|---|---|
 | PNGworkforce | `scraper/pngworkforce.py` | PNG | HTML listing pages |
-| SEEK | `scraper/seek.py` | AU | HTML cards, ~32 per category path |
 | Adzuna | `scraper/adzuna.py` | AU | **JSON API**, one search per watchlist company |
 | Industry news (11 publications) | `scraper/newsfeed.py` | AU + PNG | **RSS**, one entry per article |
 | Mining People International | `scraper/miningpeople.py` | AU | HTML job cards |
 | ASX Announcements | `scraper/asx.py` | AU | **JSON API**, one request per listed company |
 | World Bank | `scraper/worldbank.py` | PNG | **JSON API**, procurement notices and projects |
 | EU tenders (TED) | `scraper/ted.py` | PNG | **JSON API** |
-| Indeed, Jora, Glassdoor, LinkedIn Jobs and others | `scraper/apify.py` | AU + PNG | **Apify actors**; off until a token and an actor are added under Admin › Integrations |
+| SEEK, Indeed, Jora, Glassdoor, LinkedIn Jobs and others | `scraper/apify.py` | AU + PNG | **Apify actors**; off until a token and an actor are added under Admin › Integrations |
 
 **Every source lives in `scraper/catalog.py`.** That file lists all ~70 sources
 from the Easy Skill data-sources guide with their category, market, sectors,
@@ -381,30 +380,23 @@ they appear. Get a key at
 Adzuna labels some salaries as predicted rather than advertised. Those are shown
 as *(estimated)* rather than presented as a real figure.
 
-### SEEK and robots.txt
+### SEEK
 
-`au.seek.com/robots.txt` disallows two things that shape the scraper entirely:
+SEEK is read through an Apify actor, like Indeed and the other large boards. It
+is off until an Apify token and an actor for it are added under **Admin ›
+Integrations**.
 
-```
-Disallow: */job/      # job DETAIL pages
-Disallow: *?          # ANY url with a query string
-```
+MIOS used to read SEEK itself, from query-free category pages only, because
+`au.seek.com/robots.txt` disallows job detail pages (`*/job/`) and any address
+with a query string (`*?`). That scraper worked from a developer's machine and
+collected nothing in production: SEEK answers 403 to the deployed server's
+address before a request reaches the site. It has been removed.
 
-So the scraper only fetches query-free category landing paths such as
-`/jobs-in-mining-resources-energy`. Everything needed — title, company,
-location, salary, teaser, posted date — is server-rendered on the listing card,
-so detail pages are never opened. Card links to `/job/<id>` are stored as
-`source_url` for stable deduplication, but never fetched.
-
-Because SEEK paginates with `?page=2`, which is disallowed, each path yields only
-its first page. **Breadth comes from adding category paths, not from paging** —
-edit `DEFAULT_PATHS` in `scraper/seek.py` or set `SEEK_PATHS`.
-`_assert_allowed()` rejects disallowed URLs at runtime, so a future path cannot
-quietly break the rule.
-
-> robots.txt is the machine-readable permission this honours. SEEK's website
-> Terms of Use separately restrict automated collection, so this source is
-> scoped to non-commercial academic use.
+> An actor is a third party's reader and does not keep to those limits: the
+> SEEK actors on the Apify Store read search results and job detail pages.
+> SEEK's website Terms of Use also restrict automated collection. Whether to
+> name an actor for SEEK is therefore a decision for whoever runs the
+> deployment, not something MIOS settles by itself.
 
 ---
 
@@ -844,7 +836,6 @@ containers work before pushing.
 ├── scraper/
 │   ├── __init__.py           ← source registry + shared-event-loop fan-out
 │   ├── pngworkforce.py       ← crawlee scraper (PNG)
-│   ├── seek.py               ← au.seek.com, robots.txt-constrained (AU)
 │   └── adzuna.py             ← Adzuna JSON API, one query per client (AU)
 ├── loader/
 │   ├── db.py                 ← Neon PostgreSQL / SQLite adapter
