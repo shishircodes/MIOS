@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import type { ReactNode } from 'react'
 import { ScoringGuide } from '~/components/ScoringGuide'
 import {
+  digestRankingQueryOptions,
   llmUsageQueryOptions,
   scheduleQueryOptions,
   sourceHealthQueryOptions,
@@ -32,6 +33,64 @@ function SourceFigures({ children }: { children: (d: { limit: number; stale: num
   if (!data) return <p className="muted">Reading the source settings…</p>
   const pending = data.sources.reduce((n, s) => n + s.pending, 0)
   return <>{children({ limit: data.perSourceLimit, stale: data.staleAfterDays, pending })}</>
+}
+
+function Points({ rows }: { rows: { label: string; points: number }[] }) {
+  return (
+    <table className="guide-points">
+      <tbody>
+        {rows.map((r) => (
+          <tr key={r.label}>
+            <td>{r.label}</td>
+            <td>{r.points > 0 ? `+${r.points}` : '0'}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  )
+}
+
+/** How the digest ranks, with the numbers read from the server that does it. */
+function DigestRanking() {
+  const { data } = useQuery(digestRankingQueryOptions)
+  if (!data) return <p className="muted">Reading the scoring rules…</p>
+  return (
+    <>
+      <p>
+        The digest shows the {data.limit} strongest lines from a run. It gets there in three
+        steps, the same way every time. No AI is involved in the ranking.
+      </p>
+      <p><b>1. Job ads are folded.</b></p>
+      <p>
+        All of one company&rsquo;s job ads in a market become a single line, such as
+        &ldquo;12 roles advertised&rdquo;. Click it to see each role. News stories and tenders
+        are never folded: each one stays its own line.
+      </p>
+      <p><b>2. Every line gets a score out of {data.max}.</b></p>
+      <p>It is three numbers added together.</p>
+      <p><i>Who it is about</i>, which counts most:</p>
+      <Points rows={data.who} />
+      <p><i>What kind of signal it is:</i></p>
+      <Points rows={data.what} />
+      <p><i>How much else this run collected about the same company</i> (one signal on its own adds nothing):</p>
+      <Points rows={data.more} />
+      <p>
+        So a Tier A client with a leadership change and ten or more signals scores {data.max},
+        and a single job ad from a company nobody knows scores far lower.
+      </p>
+      <p><b>3. The strongest lines are chosen.</b></p>
+      <ul>
+        <li>Lines are taken from the highest score down.</li>
+        <li>One company gets at most {data.perCompany} lines, so a busy company cannot fill the page.</li>
+        <li>Each market ({data.regions.join(' and ')}) is guaranteed {data.regionShare}% of the lines when it has that many, so a busy week in one does not hide the other.</li>
+        <li>When two lines score the same, the one collected more recently comes first.</li>
+      </ul>
+      <p>
+        The <b>score</b> on each row is this number. Hover it, or open the row, to see the three
+        parts. It measures how the line ranks, not how sure anyone is that it is true.
+      </p>
+    </>
+  )
 }
 
 function OffByDefault() {
@@ -304,12 +363,21 @@ const digest: PageGuide = {
             <li><b>Tier</b> (A, B or C) if the company is on the watchlist, or <b>New</b> if it is not.</li>
             <li>The <b>sector</b>, and the <b>review cycle</b> — how often it is worth checking again: weekly for ordinary hiring, monthly for leadership moves, projects and tenders, quarterly for bigger financial or market shifts.</li>
             <li>The <b>→ line</b>: the AI&rsquo;s one-sentence reason for how it read the item.</li>
-            <li><b>conf</b>: how sure the AI was, out of 100.</li>
+            <li><b>score</b>: how strongly the digest ranked the line, out of 100. See &ldquo;How signals are ranked&rdquo; below.</li>
             <li>The source and the date it was collected.</li>
           </ul>
-          <p>Click a signal to open its details, with links to the original advert or article.</p>
+          <p>
+            A line reading &ldquo;12 roles advertised&rdquo; is one company&rsquo;s job ads folded
+            together. Click any signal to open its details: the original text, how it scored,
+            and links to the advert or article.
+          </p>
         </>
       ),
+    },
+    {
+      id: 'ranking',
+      heading: 'How signals are ranked',
+      body: <DigestRanking />,
     },
     {
       id: 'velocity',
@@ -373,9 +441,9 @@ const feed: PageGuide = {
       body: (
         <p>
           Each row shows the watchlist tier (or <b>New</b>), the sector, the date, the review
-          cycle and the market, then the headline and the AI&rsquo;s one-line reason. <b>conf</b> is
-          how sure the AI was, out of 100. Click a row for the full details and links to the
-          source.
+          cycle and the market, then the headline and the AI&rsquo;s one-line reason. The feed is
+          everything in the order it was collected, so nothing here is ranked or scored; the
+          Weekly digest does that. Click a row for the original text and links to the source.
         </p>
       ),
     },

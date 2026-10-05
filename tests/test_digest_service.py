@@ -58,6 +58,12 @@ def _add(db, signal_id: str, *, days_ago: float | None = None, company="BHP", ti
         )
 
 
+def _signals_in(payload) -> int:
+    """How many signals a payload's rows stand for: a company's job ads are
+    folded into one row that says how many there are."""
+    return sum(s.get("count", 1) for s in payload["signals"])
+
+
 # ---------- outcome 1: signals inside the window ----------
 
 
@@ -69,7 +75,7 @@ def test_recent_signals_are_reported_as_in_window(db):
     assert p["sourceMode"] == "live"
     assert p["windowEmpty"] is False
     assert p["windowDays"] == 7
-    assert len(p["signals"]) == 2
+    assert _signals_in(p) == 2
 
 
 def test_signals_outside_the_window_are_excluded(db):
@@ -112,12 +118,13 @@ def test_empty_window_falls_back_to_latest_and_flags_it(db):
     p = build_digest_payload(db, days=7)
     assert p["sourceMode"] == "live"
     assert p["windowEmpty"] is True, "must flag that these are not this week's signals"
-    assert len(p["signals"]) == 2, "still shows data rather than blanking the dashboard"
+    assert _signals_in(p) == 2, "still shows data rather than blanking the dashboard"
 
 
 def test_fallback_orders_newest_first(db):
-    _add(db, "older", days_ago=60)
-    _add(db, "newer", days_ago=40)
+    # Two companies of equal standing, so nothing but the date separates them.
+    _add(db, "older", days_ago=60, company="BHP")
+    _add(db, "newer", days_ago=40, company="Rio Tinto")
 
     p = build_digest_payload(db, days=7)
     assert [s["id"] for s in p["signals"]] == ["newer", "older"]
@@ -247,8 +254,12 @@ def test_generated_at_is_still_now(db):
 # ---------- region balance under the display cap ----------
 
 
-def _add_region(db, signal_id, *, region, days_ago=1, category="hiring_velocity"):
-    """PNG geography is inferred from raw_content keywords, not a column."""
+def _add_region(db, signal_id, *, region, days_ago=1, category="hiring_velocity", company=None):
+    """PNG geography is inferred from raw_content keywords, not a column.
+
+    Each row is a different employer unless a test says otherwise, so each is a
+    line of its own: one company's job ads would be folded into a single row."""
+    company = company or f"Employer {signal_id}"
     captured = (datetime.now(timezone.utc) - timedelta(days=days_ago)).isoformat(timespec="seconds")
     raw = ("Process Operator at Lihir gold mine, Papua New Guinea" if region == "PNG"
            else "Maintenance Planner at BHP Newman WA Australia")
@@ -259,7 +270,7 @@ def _add_region(db, signal_id, *, region, days_ago=1, category="hiring_velocity"
             "signal_category, review_cycle, raw_content, analysis_notes, "
             "is_new_prospect, classified_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (signal_id, "job_board", "seek", f"https://x/{signal_id}", captured, region,
-             "mining", "BHP", "A", category, "weekly", raw, "note", 0, captured),
+             "mining", company, "A", category, "weekly", raw, "note", 0, captured),
         )
 
 
@@ -277,8 +288,11 @@ def test_display_cap_never_drops_a_whole_region(db):
     regions = {s["region"] for s in p["signals"]}
     assert regions == {"AU", "PNG"}, f"a region was dropped by the cap: {regions}"
 
+    # Each market is guaranteed a share. Beyond that the rows go to the
+    # strongest, and with nothing else to separate them, the most recent: here
+    # that is Australia's, which is why PNG holds exactly its share.
     counts = Counter(s["region"] for s in p["signals"])
-    assert counts["AU"] == counts["PNG"] == 20, counts
+    assert counts["PNG"] == 12 and counts["AU"] == 28, counts
 
 
 def test_stronger_categories_are_shown_first(db):
@@ -291,7 +305,7 @@ def test_stronger_categories_are_shown_first(db):
 
 
 def test_a_region_with_fewer_signals_still_gets_all_of_them(db):
-    """Round-robin must not cap the smaller region at half the quota."""
+    """A market's guaranteed share is a floor, not a quota it must fill."""
     for i in range(30):
         _add_region(db, f"au-{i}", region="AU")
     for i in range(3):
@@ -314,7 +328,7 @@ def test_display_numbers_follow_the_shown_order(db):
 
 
 def _add_full(db, signal_id, *, source, geography, raw, days_ago=1,
-              category="hiring_velocity", tier=None):
+              category="hiring_velocity", tier=None, company="Acme"):
     captured = (datetime.now(timezone.utc) - timedelta(days=days_ago)).isoformat(timespec="seconds")
     with connect(db) as conn:
         conn.execute(
@@ -323,7 +337,7 @@ def _add_full(db, signal_id, *, source, geography, raw, days_ago=1,
             "signal_category, review_cycle, raw_content, analysis_notes, "
             "is_new_prospect, classified_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (signal_id, "job_board", source, f"https://x/{signal_id}", captured, geography,
-             "mining", "Acme", tier, category, "weekly", raw, "note", 0, captured),
+             "mining", company, tier, category, "weekly", raw, "note", 0, captured),
         )
 
 
@@ -357,26 +371,29 @@ def test_au_rows_stay_au(db):
 def test_verbose_source_cannot_monopolise_a_region(db):
     """Regression: the sort tiebreak was content length, so Adzuna's ~610-char
     records displaced every SEEK record at ~245 and SEEK vanished from the
-    Australia section despite having the most AU signals."""
+    Australia section despite having the most AU signals.
+
+    The length of an advert now plays no part in the ranking at all, so sixty
+    employers of equal standing cannot be sorted by how much each one wrote.
+    """
     for i in range(30):
-        _add_full(db, f"adz-{i}", source="adzuna", geography="AU",
-                  raw="Engineer at Acme in Perth. " + ("detail " * 90))
+        _add_full(db, f"adz-{i}", source="adzuna", geography="AU", company=f"Wordy {i}",
+                  raw="Engineer at a mine in Perth. " + ("detail " * 90))
     for i in range(30):
-        _add_full(db, f"seek-{i}", source="seek", geography="AU",
-                  raw="Engineer at Acme in Perth. short")
+        _add_full(db, f"seek-{i}", source="seek", geography="AU", company=f"Terse {i}",
+                  raw="Engineer at a mine in Perth. short")
 
     p = build_digest_payload(db, days=7)
     sources = Counter(s["source"] for s in p["signals"])
     assert sources["seek"] > 0, f"the terser source was squeezed out: {sources}"
     assert sources["adzuna"] > 0
-    # Round-robin, so the split is even.
-    assert abs(sources["adzuna"] - sources["seek"]) <= 1, sources
+    assert len({s["score"] for s in p["signals"]}) == 1, "equal standing, equal score"
 
 
 def test_watchlist_tier_outranks_a_longer_advert(db):
-    _add_full(db, "wordy", source="seek", geography="AU", tier=None,
-              raw="Engineer at Acme. " + ("padding " * 60))
-    _add_full(db, "tier-a", source="seek", geography="AU", tier="A",
+    _add_full(db, "wordy", source="seek", geography="AU", tier=None, company="Longwinded Ltd",
+              raw="Engineer at a mine. " + ("padding " * 60))
+    _add_full(db, "tier-a", source="seek", geography="AU", tier="A", company="Acme",
               raw="Engineer at Acme. short")
 
     p = build_digest_payload(db, days=7)

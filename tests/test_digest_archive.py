@@ -55,6 +55,12 @@ def add_signal(db, *, run_id: str | None, sid: str, captured: str, company: str 
         )
 
 
+def signals_in(payload) -> int:
+    """How many signals a payload's rows stand for. A company's job ads are
+    folded into one row that says how many there are."""
+    return sum(s.get("count", 1) for s in payload["signals"])
+
+
 def iso(days_ago: float) -> str:
     return (datetime.now(timezone.utc) - timedelta(days=days_ago)).isoformat(timespec="seconds")
 
@@ -71,8 +77,8 @@ def test_a_run_scoped_payload_holds_only_that_runs_signals(db):
     for i in range(2):
         add_signal(db, run_id="run-b", sid=f"b{i}", captured=iso(0))
 
-    assert len(build_digest_payload(db, run_id="run-a")["signals"]) == 3
-    assert len(build_digest_payload(db, run_id="run-b")["signals"]) == 2
+    assert signals_in(build_digest_payload(db, run_id="run-a")) == 3
+    assert signals_in(build_digest_payload(db, run_id="run-b")) == 2
 
 
 def test_without_a_run_the_window_still_spans_runs(db):
@@ -81,7 +87,7 @@ def test_without_a_run_the_window_still_spans_runs(db):
     add_signal(db, run_id="run-a", sid="a0", captured=iso(2))
     add_signal(db, run_id="run-b", sid="b0", captured=iso(0))
 
-    assert len(build_digest_payload(db)["signals"]) == 2
+    assert signals_in(build_digest_payload(db)) == 2
 
 
 def test_signals_from_no_run_are_not_attributed_to_one(db):

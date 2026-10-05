@@ -234,6 +234,20 @@ def digest_archive(
     return {"digests": entries}
 
 
+@app.get("/api/digest/ranking")
+def digest_ranking(user: dict[str, Any] = Depends(require_user)) -> dict:
+    """How a digest's signals are scored and chosen, as the page guide prints it.
+
+    Read from the code that does the ranking, so the explanation cannot say one
+    thing while the page does another. Declared before `/api/digest/{run_id}`:
+    after it, "ranking" would be taken for a run's id.
+    """
+    from api.digest_service import MAX_SIGNALS_SHOWN
+    from delivery import ranking
+
+    return {**ranking.rules(), "limit": MAX_SIGNALS_SHOWN}
+
+
 @app.get("/api/digest/{run_id}")
 def digest_by_run(
     run_id: str,

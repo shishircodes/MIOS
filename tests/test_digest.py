@@ -38,7 +38,8 @@ def db(tmp_path: Path, watchlist_file: Path) -> Path:
 def _insert_classified(db: Path, *, sid: str, company: str | None, tier: str | None,
                        sector: str, category: str, cycle: str = "weekly",
                        new_prospect: bool = False, raw: str = "x" * 80,
-                       captured_at: str | None = None, notes: str = "auto") -> None:
+                       captured_at: str | None = None, notes: str = "auto",
+                       geography: str = "PNG") -> None:
     captured_at = captured_at or datetime.now(timezone.utc).isoformat(timespec="seconds")
     classified_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
     with sqlite3.connect(db) as c:
@@ -47,8 +48,8 @@ def _insert_classified(db: Path, *, sid: str, company: str | None, tier: str | N
                 signal_id, source_type, source_name, source_url, captured_at, geography,
                 sector, company_name, watchlist_tier, signal_category, review_cycle,
                 raw_content, analysis_notes, is_new_prospect, classified_at
-            ) VALUES (?, 'job_board', 'syn', ?, ?, 'PNG', ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (sid, f"u/{sid}", captured_at, sector, company, tier, category, cycle,
+            ) VALUES (?, 'job_board', 'syn', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (sid, f"u/{sid}", captured_at, geography, sector, company, tier, category, cycle,
              raw, notes, int(new_prospect), classified_at),
         )
         c.commit()
@@ -100,8 +101,10 @@ def test_build_digest_includes_every_computed_section(db):
 
 
 def test_build_digest_groups_by_geography(db):
+    # The market is the collector's own, as the digest page reads it; the
+    # Slack digest used to guess it from the text alone and could disagree.
     _insert_classified(db, sid="au1", company="BHP", tier="A", sector="mining",
-                       category="hiring_velocity",
+                       category="hiring_velocity", geography="AU",
                        raw="Maintenance role BHP Newman Pilbara WA, FIFO ex-Perth.")
     _insert_classified(db, sid="png1", company="Newmont", tier="A", sector="mining",
                        category="hiring_velocity",

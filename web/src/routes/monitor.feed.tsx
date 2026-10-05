@@ -216,7 +216,6 @@ function SignalFeed() {
                 {s.action && <div className="action">→ {s.action}</div>}
               </div>
               <div className="meta-col">
-                <div>conf {s.conf}</div>
                 <div style={{ color: 'var(--ink-3)' }}>{s.sourceLabel ?? s.source}</div>
                 {s.publication && s.publication.toLowerCase() !== (s.sourceLabel ?? s.source).toLowerCase() && (
                   <div className="publication">{s.publication}</div>

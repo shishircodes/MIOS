@@ -230,9 +230,12 @@ def test_rows_have_the_same_shape_the_digest_produces(db):
     _add(db, "s1")
     s = build_feed_payload(db)["signals"][0]
     for key in ("id", "n", "region", "tier", "company", "title", "desc",
-                "sector", "source", "category", "cycle", "conf"):
+                "sector", "source", "category", "cycle"):
         assert key in s, f"the feed renders {key}"
-    assert "_rank" not in s, "internal sort key must not reach the browser"
+    assert not [k for k in s if k.startswith("_")], "internal keys must not reach the browser"
+    # The feed is everything in collection order; nothing there is ranked, so
+    # no row carries a score, and the made-up "conf" number is gone.
+    assert "conf" not in s and "score" not in s
 
 
 def test_missing_database_returns_an_empty_page_rather_than_failing(tmp_path):

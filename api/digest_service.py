@@ -18,7 +18,8 @@ from pathlib import Path
 from typing import Any
 
 from config.settings import settings
-from delivery.digest import infer_geography, interleave, interleave_regions, rank_signal
+from delivery import ranking
+from delivery.digest import infer_geography
 from delivery.pulse import load_pulse
 from scraper.publications import label_for as source_label, publication_for
 from loader.db import connect, is_postgres, resolve_target
@@ -46,14 +47,6 @@ def _title_and_desc(raw: str) -> tuple[str, str]:
     title = first[:90]
     desc = raw if len(raw) <= 240 else raw[:237] + "…"
     return title or "Signal", desc
-
-
-def _confidence(row_index: int, tier: str | None, is_new: bool) -> int:
-    # Deterministic pseudo-confidence so the UI has a stable number to show.
-    base = 90 if tier == "A" else 84 if tier == "B" else 78 if tier else 66
-    if is_new:
-        base -= 6
-    return max(55, min(97, base - (row_index % 5)))
 
 
 # --------------------------------------------------------------------------
@@ -389,12 +382,35 @@ def shape_signal(r: dict[str, Any], index: int) -> dict[str, Any]:
         "sourceUrl": source_url,
         "category": r.get("signal_category") or "hiring_velocity",
         "cycle": (r.get("review_cycle") or "weekly").upper(),
-        "conf": _confidence(index, tier, is_new),
         #: When the scraper collected this, so a reader can tell a posting found
         #: today from one carried over from an earlier run in the same window.
         "capturedAt": r.get("captured_at"),
-        "_rank": rank_signal(r.get("signal_category"), len(raw), tier),
+        # For the digest's ranking, and removed before anything is returned.
+        "_isNew": is_new,
     }
+
+
+#: What a folded line keeps of each job ad inside it.
+_ROLE_FIELDS = ("id", "title", "desc", "action", "source", "sourceLabel", "sourceUrl", "capturedAt")
+
+
+def _digest_row(line: ranking.Line) -> dict[str, Any]:
+    """One ranked line as the row the page draws.
+
+    A single signal is itself plus its score. A company's folded job ads become
+    one row headed by the newest ad, saying how many there are and listing them,
+    so the panel that opens can show each role and link to it.
+    """
+    row = dict(line.lead.ref)
+    row["score"] = line.score
+    row["scoreParts"] = [{"label": label, "points": points} for label, points in line.parts]
+    if line.folded:
+        row["count"] = line.count
+        row["title"] = f"{line.count} roles advertised"
+        row["action"] = ranking.roles_summary(line)
+        row["roles"] = [{k: item.ref.get(k) for k in _ROLE_FIELDS}
+                        for item in line.items[:ranking.MAX_ROLES_LISTED]]
+    return row
 
 
 def build_digest_payload(
@@ -522,7 +538,7 @@ def build_digest_payload(
         ):
             new_names[company] = {
                 "co": company,
-                "signal": desc[:120],
+                "signal": signal["title"],
                 "sector": sector,
                 "region": region,
                 "reco": f"Add to Tier {('B' if tier is None else tier)}",
@@ -562,35 +578,28 @@ def build_digest_payload(
             "tier": velocity_meta[co]["tier"],
         })
 
-    # Pick the 40 shown rows the same way the Slack digest picks its 10: strongest
-    # signals first, balanced across regions.
-    #
-    # Previously this was `signals[:40]` over a captured_at DESC list. The two
-    # scrapers finish a second apart, so every SEEK row sorted ahead of every
-    # PNGworkforce row and the cut landed inside SEEK — the entire Papua New
-    # Guinea section disappeared despite having 50 signals.
-    by_region: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    for s in signals:
-        # Within a region, round-robin the sources too. Ranking alone gave every
-        # Australian slot to Adzuna, whose ~610-character records always beat
-        # SEEK's ~245 on the length tiebreak — SEEK disappeared from the section
-        # despite having the most AU signals.
-        by_region[s["region"]].append(s)
-
-    ordered_by_region: dict[str, list[dict[str, Any]]] = {}
-    for region, rows_in_region in by_region.items():
-        by_source: dict[str, list[dict[str, Any]]] = defaultdict(list)
-        for s in rows_in_region:
-            by_source[s["source"]].append(s)
-        for src in by_source:
-            by_source[src].sort(key=lambda s: s["_rank"])
-        ordered_by_region[region] = interleave(by_source, len(rows_in_region))
-
-    shown = interleave_regions(ordered_by_region, MAX_SIGNALS_SHOWN)
+    # The rows shown, chosen the same way the Slack digest chooses its ten: a
+    # company's job ads folded into one line, every line scored, and the
+    # strongest taken with a limit per company and a share kept for each
+    # market. See `delivery.ranking`, which explains what this replaced.
+    items = [
+        ranking.Item(
+            key=str(s["id"]),
+            company="" if s["company"] == "Unknown" else s["company"],
+            region=s["region"],
+            category=s["category"],
+            kind=s["sourceType"],
+            tier=s["tier"],
+            is_new=bool(s.pop("_isNew", False)),
+            captured_at=s.get("capturedAt") or "",
+            title=s["title"],
+            ref=s,
+        )
+        for s in signals
+    ]
+    shown = [_digest_row(line) for line in ranking.rank(items, MAX_SIGNALS_SHOWN)]
     for i, s in enumerate(shown):
         s["n"] = f"{i + 1:02d}"
-    for s in signals:
-        s.pop("_rank", None)
 
     classified = len(signals)
     geos = Counter(s["region"] for s in signals)
@@ -828,7 +837,7 @@ def build_feed_payload(
 
     page = [shape_signal(dict(r), i) for i, r in enumerate(rows)]
     for s in page:
-        s.pop("_rank", None)
+        s.pop("_isNew", None)
     # Numbering is absolute, so row 51 reads "51" on page two rather than "01".
     for i, s in enumerate(page):
         s["n"] = f"{offset + i + 1:02d}"

@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from delivery import ranking
 from loader.db import connect
 
 # Geography inference keywords (raw_content substring match, case-insensitive).
@@ -40,100 +41,67 @@ def _header(week_of: datetime) -> str:
     return f":large_blue_circle: *MIOS Weekly Intelligence — Week of {week_of.strftime('%-d %B %Y') if hasattr(week_of, 'strftime') else week_of}*"
 
 
-#: Signal categories, most newsworthy first. A leadership change says more about
-#: an employer's direction than another routine vacancy, so it earns a slot first.
-SIGNAL_RANK = {
-    "leadership": 0, "project": 1, "financial": 2,
-    "competitive": 3, "hiring_velocity": 4, "market_intel": 5,
-}
-
-#: Region display order. Anything outside this list is appended after these.
-REGION_ORDER = ("AU", "PNG")
+def _field(row: Any, key: str) -> Any:
+    """A column that may not have been selected, from a row of either engine."""
+    try:
+        return row[key]
+    except (KeyError, IndexError):
+        return None
 
 
-#: Watchlist tiers, most important first. Untiered companies sort last.
-TIER_RANK = {"A": 0, "B": 1, "C": 2}
+def _region(row: Any) -> str:
+    """The market a signal belongs to, resolved the way the digest page does:
+    what was stored at ingest, else the collector's own market corrected by the
+    PNG keywords."""
+    return _field(row, "region") or infer_geography(
+        row["raw_content"], default=(_field(row, "geography") or "AU"))
 
 
-def rank_signal(category: str | None, weight: int, tier: str | None = None) -> tuple[int, int, int]:
-    """Sort key: category, then watchlist tier, then content length.
-
-    Length used to be the only tiebreak, which quietly ranked sources by how
-    verbose their listings are — Adzuna's ~610-character records displaced every
-    SEEK record at ~245, so an entire source vanished from the digest. Tier is
-    the honest second key: a Tier A employer hiring is a stronger signal than a
-    longer advertisement.
-    """
-    return (
-        SIGNAL_RANK.get(category or "hiring_velocity", 9),
-        TIER_RANK.get((tier or "").upper(), 9),
-        -weight,
-    )
-
-
-def interleave(buckets: dict[str, list], limit: int, order: tuple[str, ...] = ()) -> list:
-    """Take up to `limit` items round-robin across buckets.
-
-    Used twice: across regions, and across sources within a region. Both exist to
-    stop one bucket consuming the whole quota — "fill from AU, then PNG with
-    what's left" hid Papua New Guinea entirely on a busy AU week, and sorting by
-    content length handed every Australian slot to whichever source writes the
-    longest blurbs. Round-robin guarantees each bucket with data is represented,
-    and since buckets are pre-sorted, the items taken are still its strongest.
-
-    `order` fixes the leading keys; anything else follows in dict order.
-    """
-    keys = [k for k in order if buckets.get(k)]
-    keys += [k for k in buckets if k not in order and buckets[k]]
-
-    out: list = []
-    cursor = {k: 0 for k in keys}
-    while len(out) < limit and any(cursor[k] < len(buckets[k]) for k in keys):
-        for key in keys:
-            if len(out) >= limit:
-                break
-            i = cursor[key]
-            if i < len(buckets[key]):
-                out.append(buckets[key][i])
-                cursor[key] = i + 1
-    return out
-
-
-def interleave_regions(buckets: dict[str, list], limit: int) -> list:
-    """Round-robin across geographies, AU then PNG first."""
-    return interleave(buckets, limit, REGION_ORDER)
+def _title(raw_content: str) -> str:
+    raw = (raw_content or "").strip()
+    return (raw.split("|", 1)[0].strip() if "|" in raw else raw[:80])[:90]
 
 
 def _key_signals_section(signals: list[Any], max_items: int = 10) -> str:
-    """The strongest classified signals, balanced across geographies."""
-    by_geo: dict[str, list] = defaultdict(list)
-    for r in signals:
-        by_geo[infer_geography(r["raw_content"])].append(r)
+    """The strongest signals, ranked the way the digest page ranks them.
 
-    for region in by_geo:
-        by_geo[region].sort(
-            key=lambda r: rank_signal(
-                r["signal_category"], len(r["raw_content"] or ""), r["watchlist_tier"]
-            )
+    See `delivery.ranking`: a company's job ads are one line, every line is
+    scored, and the strongest are taken with a limit per company and a share
+    kept for each market.
+    """
+    items = [
+        ranking.Item(
+            key=str(_field(r, "signal_id") or i),
+            company=(r["company_name"] or "").strip(),
+            region=_region(r),
+            category=r["signal_category"] or "hiring_velocity",
+            kind=_field(r, "source_type") or "job_board",
+            tier=r["watchlist_tier"],
+            is_new=bool(r["is_new_prospect"]),
+            captured_at=str(_field(r, "captured_at") or ""),
+            title=_title(r["raw_content"]),
+            ref=r,
         )
+        for i, r in enumerate(signals)
+    ]
+    chosen = ranking.rank(items, max_items)
 
-    chosen = interleave_regions(by_geo, max_items)
-
-    # Selection is balanced; presentation is still grouped by region.
-    grouped: dict[str, list] = defaultdict(list)
-    for r in chosen:
-        grouped[infer_geography(r["raw_content"])].append(r)
-
+    # Chosen by score across both markets; presented grouped by market.
     lines = [":red_circle: *Key Signals This Week*"]
     for geo_label, geo_key in (("AUSTRALIA", "AU"), ("PAPUA NEW GUINEA", "PNG")):
-        bucket = grouped.get(geo_key)
+        bucket = [ln for ln in chosen if ln.lead.region == geo_key]
         if not bucket:
             continue
         lines.append(f"*{geo_label}*")
-        for r in bucket:
+        for ln in bucket:
+            r = ln.lead.ref
             company = r["company_name"] or "Unknown"
-            cat = (r["signal_category"] or "signal").replace("_", " ")
             tier = f" _(Tier {r['watchlist_tier']})_" if r["watchlist_tier"] else ""
+            if ln.folded:
+                lines.append(f"• *{company}*{tier} — {ln.count} roles advertised: "
+                             f"{ranking.roles_summary(ln)}")
+                continue
+            cat = (r["signal_category"] or "signal").replace("_", " ")
             note = (r["analysis_notes"] or "").strip()
             lines.append(f"• *{company}*{tier} — {cat}. {note}")
     if not chosen:
@@ -249,7 +217,10 @@ def build_digest(
     since_iso = since.isoformat(timespec="seconds")
 
     COLUMNS = ("SELECT signal_id, company_name, sector, signal_category, review_cycle, "
-               "watchlist_tier, is_new_prospect, raw_content, analysis_notes, captured_at "
+               "watchlist_tier, is_new_prospect, raw_content, analysis_notes, captured_at, "
+               # What the ranking needs beyond the text: the kind of item, so
+               # only job ads are folded, and its market as stored at ingest.
+               "source_type, geography, region "
                "FROM signals WHERE classified_at IS NOT NULL "
                # Outside the five sectors: never a key signal, a velocity row or
                # a new name, the same as the digest page.
