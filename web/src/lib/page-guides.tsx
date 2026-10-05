@@ -626,22 +626,25 @@ const sources: PageGuide = {
       body: (
         <>
           <p>
-            Sources are grouped under the guide&rsquo;s own sections: job boards, LinkedIn,
-            project intelligence platforms, news and industry publications, financial and
-            regulatory, tenders, internal systems and AI tools. Within a section they sit under
-            the guide&rsquo;s sub-headings, such as Australia and Papua New Guinea.
+            The page has two tabs. <b>Sources</b> lists every source; <b>Options &amp; limits</b>
+            holds the settings that go with them. On the Sources tab a source is in exactly one
+            of three lists:
           </p>
           <ul>
-            <li>Under each name are the <b>sectors</b> the source covers.</li>
-            <li><b>Access / market</b> says how it is read (RSS, a JSON API, an Apify actor, a subscription) and which market it covers. Hover it to see what the source provides.</li>
-            <li><b>Show</b> at the top narrows the page to the sources MIOS collects from, or to the ones it does not.</li>
+            <li><b>Sources</b>: everything that is set up, in one table, each with its switch. The buttons above the table narrow it to one category.</li>
+            <li><b>Needs setup</b>: sources that can be collected but are waiting on a setting. The row says what, and its button goes to where it is entered. Once it is saved the source moves into the table above, switched on.</li>
+            <li><b>Not collected</b>: the rest of the guide. Closed by default; <b>Show all</b> opens it.</li>
           </ul>
+          <p>
+            Under each name are the <b>sectors</b> the source covers. Hover a name to see what
+            the source provides and how it is read.
+          </p>
         </>
       ),
     },
     {
       id: 'collectors',
-      heading: 'Sources MIOS collects from',
+      heading: 'The Sources table',
       body: (
         <SourceFigures>
           {({ limit, stale, pending }) => (
@@ -673,8 +676,9 @@ const sources: PageGuide = {
       body: (
         <>
           <p>
-            These are listed so the page matches the guide, and so &ldquo;why are we not reading
-            this?&rdquo; has an answer. Each row says what stands in the way:
+            These are kept so the page matches the guide, and so &ldquo;why are we not reading
+            this?&rdquo; has an answer. The list is closed until you press <b>Show all</b>. Each
+            row says what stands in the way:
           </p>
           <ul>
             <li><b>Subscription</b>: a paid platform. Nothing can be read without a licence.</li>
@@ -695,17 +699,18 @@ const sources: PageGuide = {
     },
     {
       id: 'keys',
-      heading: 'Sources marked Not configured',
+      heading: 'Needs setup',
       body: (
         <>
           <p>
             Two kinds of source wait for something to be entered. Until then they are skipped,
-            and everything else runs as normal. Once it is entered, the source switches itself
-            on for the next run.
+            and everything else runs as normal. Once it is entered, the source moves into the
+            Sources table, switched on for the next run. It shows <b>No data yet</b> until that
+            run has collected from it.
           </p>
           <ul>
-            <li><b>Boards read through Apify</b> (Indeed, Jora, Glassdoor, LinkedIn Jobs and others) need a token and an actor. Both are set under <b>Integrations › Apify job boards</b>, and its guide has the steps.</li>
-            <li><b>Custom RSS feeds</b> needs at least one feed, added under <b>Source options</b> on this page.</li>
+            <li><b>Boards read through Apify</b> (SEEK, Indeed, Jora, Glassdoor, LinkedIn Jobs and others) need a token and an actor. <b>Set up</b> opens <b>Integrations › Apify job boards</b>, and its guide has the steps.</li>
+            <li><b>Custom RSS feeds</b> needs at least one feed. <b>Add a feed</b> opens the <b>Options &amp; limits</b> tab.</li>
           </ul>
         </>
       ),
@@ -715,7 +720,10 @@ const sources: PageGuide = {
       heading: 'Source options',
       body: (
         <>
-          <p>Both are optional. Nothing here needs filling in for a run to work.</p>
+          <p>
+            On the <b>Options &amp; limits</b> tab. Both are optional: nothing here needs filling
+            in for a run to work.
+          </p>
           <p><b>ASX companies to follow.</b> ASX Announcements reads the market announcements of a list of companies. It starts on a built-in list of miners, energy producers and contractors.</p>
           <ol>
             <li>Press <b>Edit list</b>.</li>
@@ -723,7 +731,7 @@ const sources: PageGuide = {
             <li>Press <b>Save list</b>. The next run follows the new list.</li>
           </ol>
           <p><b>Use built-in list</b> goes back to the original companies. Each company is one request per run, which is why the list stops at 60.</p>
-          <p><b>Custom RSS feeds.</b> A publication that is not in the list above can be added if it has an RSS feed.</p>
+          <p><b>Custom RSS feeds.</b> A publication that has no row of its own can be added if it has an RSS feed.</p>
           <ol>
             <li>Find the feed address on the publication&rsquo;s site. It often ends in <span className="mono">/feed</span> or <span className="mono">/rss</span>.</li>
             <li>Press <b>Add feed</b>, then enter the publication&rsquo;s name, the feed address and its market.</li>
@@ -864,20 +872,36 @@ const integrations: PageGuide = {
           </ol>
           <p><b>Step 2 — name an actor for each board you want.</b></p>
           <ol>
-            <li>In the <b>Apify Store</b>, search for the board (for example &ldquo;Indeed scraper&rdquo;) and open an actor. Check its price and reviews first.</li>
+            <li>In the <b>Apify Store</b>, search for the board (for example &ldquo;SEEK scraper&rdquo;) and open an actor. Check its price and reviews first.</li>
             <li>Copy its name from the page address: <span className="mono">apify.com/<b>username/actor-name</b></span>.</li>
             <li>Here, press <b>Set actor</b> beside the board and paste the name.</li>
             <li>In <b>Search settings</b>, enter what that actor should search for, as JSON. Every actor has its own field names — they are listed on the actor&rsquo;s <b>Input</b> tab, which can also show the JSON to copy. Leave it empty to use the actor&rsquo;s defaults.</li>
             <li>Save. The board shows <b>Ready</b> once it has both a token and an actor.</li>
           </ol>
-          <p><b>Step 3 — check the result.</b></p>
+          <p><b>Step 3 — set the spending limit.</b></p>
+          <p>
+            Every run of an actor is capped twice, by Apify itself, so neither depends on the
+            actor behaving:
+          </p>
+          <ul>
+            <li><b>By cost.</b> A run is charged at most the spending limit, whatever the actor&rsquo;s pricing. It starts at $1.00; press <b>Change</b> to set another amount, or <b>Use default</b> to go back.</li>
+            <li><b>By results.</b> An actor that charges per result is not paid for more than the board&rsquo;s limit. That number is on each board&rsquo;s row here, and is changed under <b>Data sources › Options &amp; limits</b>.</li>
+          </ul>
+          <p>
+            A limit set too low can stop a run before it has collected anything. If a board shows
+            fewer records than expected, check the run in the Apify Console before raising it.
+          </p>
+          <p><b>Step 4 — check the result.</b></p>
           <ol>
             <li>A ready board is read from the next run. Under <b>Data sources</b> its row changes from <i>Not configured</i> to <i>No data yet</i>, then <i>Collecting</i>.</li>
             <li>To stop reading a board, switch it off there, or remove its actor here.</li>
           </ol>
           <p>
             Each run of an actor is charged to the Apify account, so name actors only for boards
-            worth the cost. The token is stored encrypted and never shown again in full.
+            worth the cost. Some actors have their own setting for how many results to fetch
+            (for example <span className="mono">maxResults</span>); set it in Search settings near
+            the board&rsquo;s limit, so the actor stops early instead of running until a cap stops
+            it. The token is stored encrypted and never shown again in full.
           </p>
         </>
       ),

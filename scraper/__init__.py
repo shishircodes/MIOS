@@ -40,11 +40,11 @@ def _registry() -> dict[str, ScrapeFn]:
 
     from scraper import (
         adzuna, apify, asx, austender, catalog, miningpeople, newsfeed,
-        pngbusinessnews, pngworkforce, seek, ted, worldbank,
+        pngbusinessnews, pngworkforce, ted, worldbank,
     )
 
     modules = {
-        "pngworkforce": pngworkforce, "seek": seek, "adzuna": adzuna,
+        "pngworkforce": pngworkforce, "adzuna": adzuna,
         "newsfeed": newsfeed, "pngbusinessnews": pngbusinessnews,
         "austender": austender, "asx": asx, "worldbank": worldbank, "ted": ted,
         "miningpeople": miningpeople,

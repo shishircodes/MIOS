@@ -4,8 +4,8 @@ The design rests on two decisions, and the tests are mostly about those:
 
 * **A source with no row sits at its default.** Only deviations are stored, so a
   scraper added later is collected from without a migration or a seed. Most
-  sources default to on; SEEK defaults to off, because it refuses the deployed
-  server's IP outright.
+  sources default to on; a few default to off, such as a board that is still
+  waiting on an Apify actor.
 * **An empty selection means "none", never "all".** `scrape_all` reads an empty
   list as falsy and falls back to every source, so switching everything off has
   to be handled before it gets that far — otherwise pausing collection would
@@ -45,9 +45,9 @@ def db(tmp_path):
 def _on_by_default() -> list[str]:
     """The sources that collect when nobody has chosen otherwise, in registry order.
 
-    Asked of the code rather than listed: SEEK ships off, and so do a global
-    title, the boards waiting on an Apify actor and the custom feeds. Which of
-    those are on also depends on what this machine has configured.
+    Asked of the code rather than listed: SEEK and the other boards waiting on
+    an Apify actor ship off, and so do a global title and the custom feeds.
+    Which of those are on also depends on what this machine has configured.
     """
     from loader.source_settings import default_enabled
 
@@ -55,8 +55,7 @@ def _on_by_default() -> list[str]:
 
 
 def test_sources_start_at_their_default(db):
-    """Every source that works is on; SEEK is not, because it cannot collect
-    from where MIOS is deployed."""
+    """Every source that works is on; SEEK is not, until it has an actor."""
     assert enabled_sources(db) == _on_by_default()
     assert "seek" not in enabled_sources(db)
 
@@ -72,12 +71,12 @@ def test_a_source_nobody_has_touched_still_appears_in_the_listing(db):
 def test_a_source_that_ships_off_explains_itself(db):
     """A default nobody can explain is one the next person quietly reverts,
     waits a week, and then re-diagnoses from scratch."""
-    row = list_settings(db)["seek"]
+    row = list_settings(db)["miningtechnology"]
 
     assert row["enabled"] is False
     assert row["defaultEnabled"] is False
-    assert row["offReason"], "SEEK is off with no stated reason"
-    assert "403" in row["offReason"], "the reason should name the observed cause"
+    assert row["offReason"], "it is off with no stated reason"
+    assert "global" in row["offReason"], "the reason should name the observed cause"
 
 
 def test_a_working_source_carries_no_reason(db):

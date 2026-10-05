@@ -133,7 +133,7 @@ def test_a_board_setting_that_is_wrong_fails_when_saved(panel, actor, text, mess
 
 def test_only_boards_read_through_apify_can_be_given_an_actor(panel):
     with pytest.raises(panel.SourceConfigError, match="not a board"):
-        panel.set_board("seek", "someone/reader", "", changed_by=ADMIN)
+        panel.set_board("pngworkforce", "someone/reader", "", changed_by=ADMIN)
 
 
 def test_testing_the_token_reports_apifys_own_answer(panel):
@@ -156,6 +156,41 @@ def test_testing_the_token_reports_apifys_own_answer(panel):
     with patch("requests.get", side_effect=ConnectionError("down")):
         result = panel.test_apify_token()
     assert result["ok"] is False and "could not be reached" in result["detail"]
+
+
+def test_a_run_is_capped_by_cost_whether_or_not_anyone_set_it(panel):
+    """No limit is not a safe default for somebody else's program on a metered
+    account, so there is always one."""
+    assert panel.apify_max_charge() == panel.DEFAULT_RUN_CHARGE_USD
+    run = panel.status()["apify"]["run"]
+    assert run["custom"] is False and run["changedBy"] is None
+    assert run["maxChargeUsd"] == run["default"] == panel.DEFAULT_RUN_CHARGE_USD
+
+    assert panel.set_apify_max_charge(" $2.5 ", changed_by=ADMIN) == 2.5
+    assert panel.apify_max_charge() == 2.5
+    run = panel.status()["apify"]["run"]
+    assert run["custom"] is True and run["changedBy"] == ADMIN and run["maxChargeUsd"] == 2.5
+
+    assert panel.set_apify_max_charge("", changed_by=ADMIN) == panel.DEFAULT_RUN_CHARGE_USD
+    assert panel.status()["apify"]["run"]["custom"] is False
+
+
+@pytest.mark.parametrize("bad,message", [
+    ("a lot", "not an amount"),
+    ("0", "must be between"),
+    ("0.01", "must be between"),
+    ("500", "must be between"),
+    ("-1", "must be between"),
+])
+def test_a_spending_limit_that_is_wrong_is_refused(panel, bad, message):
+    with pytest.raises(panel.SourceConfigError, match=message):
+        panel.set_apify_max_charge(bad, changed_by=ADMIN)
+    assert panel.apify_max_charge() == panel.DEFAULT_RUN_CHARGE_USD
+
+
+def test_each_board_shows_the_results_it_takes_per_run(panel):
+    boards = {b["id"]: b for b in panel.status()["apify"]["boards"]}
+    assert boards["seek"]["limit"] == 50 and boards["indeed"]["limit"] == 30
 
 
 # ---------- ASX ----------
@@ -266,6 +301,7 @@ def _client(monkeypatch, *, auth_disabled: bool) -> TestClient:
     ("delete", "/api/admin/source-config/apify/token"),
     ("post", "/api/admin/source-config/apify/test"),
     ("put", f"/api/admin/source-config/apify/boards/{BOARD}"),
+    ("put", "/api/admin/source-config/apify/run"),
     ("put", "/api/admin/source-config/asx"),
     ("put", "/api/admin/source-config/feeds"),
     ("post", "/api/admin/source-config/feeds/check"),
@@ -304,8 +340,15 @@ def test_the_panel_flow(panel, monkeypatch):
 
     assert admin.put(f"{base}/apify/boards/{BOARD}",
                      json={"actor": "nonsense"}).status_code == 400
-    assert admin.put(f"{base}/apify/boards/seek", json={"actor": "a/b"}).status_code == 400
+    assert admin.put(f"{base}/apify/boards/pngworkforce", json={"actor": "a/b"}).status_code == 400
     assert admin.put(f"{base}/apify/token", json={"token": "x"}).status_code == 400
+
+    r = admin.put(f"{base}/apify/run", json={"maxChargeUsd": "0.75"})
+    assert r.status_code == 200 and r.json()["apify"]["run"]["maxChargeUsd"] == 0.75
+    assert "$0.75" in r.json()["note"]
+    assert admin.put(f"{base}/apify/run", json={"maxChargeUsd": "999"}).status_code == 400
+    r = admin.put(f"{base}/apify/run", json={"maxChargeUsd": ""})
+    assert r.json()["apify"]["run"]["custom"] is False and "default" in r.json()["note"]
 
     r = admin.put(f"{base}/asx", json={"tickers": "bhp rio"})
     assert r.json()["asx"]["tickers"] == ["BHP", "RIO"] and "2 companies" in r.json()["note"]
@@ -338,8 +381,12 @@ def test_the_source_list_follows_the_panel(panel, monkeypatch):
 
     before = row(BOARD)
     assert before["status"] == "not_configured" and "Integrations" in before["note"]
+    assert before["setup"] == "apify", "the page links to where it is set up"
+    assert row("newsfeed")["setup"] == "feeds"
+    assert row("pngworkforce")["setup"] is None, "a source that is set up needs no link"
 
     panel.set_apify_token(TOKEN, changed_by=ADMIN)
     panel.set_board(BOARD, "someone/reader", "", changed_by=ADMIN)
     after = row(BOARD)
     assert after["status"] != "not_configured" and after["enabled"] is True
+    assert after["setup"] is None, "set up, so it sits in the main table"

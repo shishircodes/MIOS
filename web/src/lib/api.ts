@@ -218,6 +218,11 @@ export async function setApifyBoard(v: { id: string; actor: string; input: strin
   )
 }
 
+/** The most one run of an actor may be charged, in dollars. '' returns to the default. */
+export async function setApifyRunCharge(maxChargeUsd: string): Promise<SourceConfigStatus> {
+  return postOrExplain<SourceConfigStatus>('/api/admin/source-config/apify/run', putJson({ maxChargeUsd }))
+}
+
 /** Replace the ASX companies followed. An empty list returns to the built-in one. */
 export async function setAsxTickers(tickers: string): Promise<SourceConfigStatus> {
   return postOrExplain<SourceConfigStatus>('/api/admin/source-config/asx', putJson({ tickers }))

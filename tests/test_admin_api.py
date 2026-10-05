@@ -18,6 +18,8 @@ from loader.db import connect
 from loader.ingest import init_db
 
 ADMIN = {"email": "boss@easyskill.com", "role": "admin"}
+#: A source that is set up and ships switched off, for a stated reason.
+SHIPS_OFF = "miningtechnology"
 
 
 def _iso(days_ago: float) -> str:
@@ -89,9 +91,8 @@ def _by_name(payload: dict, name: str) -> dict:
 
 
 # These three derive a status from how recently a source collected, so they use
-# a source that ships switched on. SEEK does not — it is off by default because
-# the host's IP is blocked — and a switched-off source now reports "off"
-# whatever its records look like, which would shadow the property under test.
+# a source that ships switched on. One that ships off reports "off" whatever
+# its records look like, which would shadow the property under test.
 
 
 def test_a_source_that_ran_this_week_is_collecting(db):
@@ -121,18 +122,18 @@ def test_a_source_with_no_records_says_so_rather_than_showing_a_bare_zero(db):
 
 
 def test_a_switched_off_source_does_not_report_collecting(db):
-    """SEEK held records from within the week and was switched off, so the row
-    read "Collecting" beside a toggle reading Off. The chip was the wrong half:
-    a source that is excluded from the next scrape is not collecting, however
-    fresh what it already gathered happens to be.
+    """A source held records from within the week and was switched off, so the
+    row read "Collecting" beside a toggle reading Off. The chip was the wrong
+    half: a source that is excluded from the next scrape is not collecting,
+    however fresh what it already gathered happens to be.
     """
     for i in range(3):
-        _add_signal(db, source="seek", captured=_iso(1 + i * 0.01))
+        _add_signal(db, source=SHIPS_OFF, captured=_iso(1 + i * 0.01))
 
-    seek = _by_name(admin_api.source_health(user=ADMIN), "seek")
+    row = _by_name(admin_api.source_health(user=ADMIN), SHIPS_OFF)
 
-    assert seek["enabled"] is False
-    assert seek["status"] == "off"
+    assert row["enabled"] is False
+    assert row["status"] == "off"
 
 
 def test_a_switched_off_source_still_reports_what_it_collected(db):
@@ -153,13 +154,13 @@ def test_switching_a_source_on_returns_it_to_a_measured_status(db):
     from loader.source_settings import set_enabled
 
     for i in range(3):
-        _add_signal(db, source="seek", captured=_iso(1 + i * 0.01))
-    set_enabled("seek", True, changed_by="admin@example.com")
+        _add_signal(db, source=SHIPS_OFF, captured=_iso(1 + i * 0.01))
+    set_enabled(SHIPS_OFF, True, changed_by="admin@example.com")
 
-    seek = _by_name(admin_api.source_health(user=ADMIN), "seek")
+    row = _by_name(admin_api.source_health(user=ADMIN), SHIPS_OFF)
 
-    assert seek["enabled"] is True
-    assert seek["status"] == "ok"
+    assert row["enabled"] is True
+    assert row["status"] == "ok"
 
 
 def test_missing_credentials_outrank_the_toggle(db, monkeypatch):
@@ -441,24 +442,35 @@ def test_run_now_outside_the_catch_up_window_owes_nothing(db, monkeypatch):
 
 # ---------- a source that ships switched off ----------
 #
-# SEEK returns 403 to the deployed server's IP, so it defaults to off. The risk
-# is not the default — it is somebody seeing an off toggle, assuming it was a
-# mistake, switching it on, and collecting nothing for a week with no way to
-# connect the two. So switching it on has to say what it is.
+# Mining Technology is set up and ships off: its coverage is global, which is
+# noise here. The risk is not the default — it is somebody seeing an off toggle,
+# assuming it was a mistake, and switching it on with no idea why it was off.
+# So switching it on has to say what it is.
 
 
-def test_seek_ships_switched_off_with_a_reason(db):
+def test_a_source_ships_switched_off_with_a_reason(db):
     payload = admin_api.source_health(ADMIN)
-    seek = next(s for s in payload["sources"] if s["name"] == "seek")
+    row = next(s for s in payload["sources"] if s["name"] == SHIPS_OFF)
 
+    assert row["enabled"] is False
+    assert row["defaultEnabled"] is False
+    assert "global" in (row["offReason"] or "")
+
+
+def test_seek_waits_on_an_actor_like_the_other_large_boards(db):
+    """SEEK used to be read directly and shipped off because the server was
+    refused. It is an Apify board now: not configured until it has a token and
+    an actor, with its records and its place in the list unchanged."""
+    _add_signal(db, source="seek", captured=_iso(1))
+    seek = _by_name(admin_api.source_health(user=ADMIN), "seek")
+
+    assert seek["status"] == "not_configured" and seek["setup"] == "apify"
     assert seek["enabled"] is False
-    assert seek["defaultEnabled"] is False
-    assert "403" in (seek["offReason"] or "")
+    assert seek["totalRecords"] == 1, "what it collected before is still counted"
 
 
 def test_a_source_explains_itself_exactly_when_it_ships_off(db):
-    """SEEK is no longer the only one: a global title, the Apify boards and the
-    custom feeds ship off too. The rule is the same for all of them — a reason
+    """Several do: a global title, the Apify boards and the custom feeds. The rule is the same for all of them — a reason
     beside the switch when it ships off, and nothing to explain when it does not."""
     payload = admin_api.source_health(ADMIN)
     shipped_off = 0
@@ -473,18 +485,18 @@ def test_a_source_explains_itself_exactly_when_it_ships_off(db):
     assert shipped_off >= 1
 
 
-def test_switching_seek_on_returns_the_reason_as_a_warning(db):
-    result = admin_api.set_source_enabled("seek", {"enabled": True}, ADMIN)
+def test_switching_it_on_returns_the_reason_as_a_warning(db):
+    result = admin_api.set_source_enabled(SHIPS_OFF, {"enabled": True}, ADMIN)
 
     assert result["warning"], "turning on a source that ships off said nothing"
-    assert "403" in result["warning"]
-    seek = next(s for s in result["sources"] if s["name"] == "seek")
-    assert seek["enabled"] is True, "the request should still succeed"
+    assert "global" in result["warning"]
+    row = next(s for s in result["sources"] if s["name"] == SHIPS_OFF)
+    assert row["enabled"] is True, "the request should still succeed"
 
 
-def test_switching_seek_off_again_carries_no_warning(db):
-    admin_api.set_source_enabled("seek", {"enabled": True}, ADMIN)
-    result = admin_api.set_source_enabled("seek", {"enabled": False}, ADMIN)
+def test_switching_it_off_again_carries_no_warning(db):
+    admin_api.set_source_enabled(SHIPS_OFF, {"enabled": True}, ADMIN)
+    result = admin_api.set_source_enabled(SHIPS_OFF, {"enabled": False}, ADMIN)
 
     assert not result.get("warning")
 

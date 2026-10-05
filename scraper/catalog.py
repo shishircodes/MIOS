@@ -127,12 +127,12 @@ _APIFY_OFF = (
 
 
 def _apify(id: str, label: str, group: str, market: str, sectors: str, provides: str,
-           url: str, *, geography: str, priority: str | None = None) -> Source:
+           url: str, *, geography: str, priority: str | None = None, limit: int = 30) -> Source:
     return Source(
         id=id, label=label, category="jobs", group=group, market=market, sectors=sectors,
         provides=provides, access="Apify actor", cost="$ (Apify usage)", priority=priority,
         url=url, collector=APIFY, geography=geography, source_type="job_board",
-        default_enabled=False, off_reason=_APIFY_OFF, limit=30,
+        default_enabled=False, off_reason=_APIFY_OFF, limit=limit,
     )
 
 
@@ -155,25 +155,14 @@ def _feed(id: str, label: str, group: str, market: str, sectors: str, feed_url: 
 
 SOURCES: tuple[Source, ...] = (
     # ===================== 1. Job boards =====================
-    Source(
-        id="seek", label="SEEK", category="jobs", group="Australia", market="AU",
-        sectors="All sectors", provides="Job postings, company names, role titles, locations",
-        access="HTML scrape", priority="Must-have", url="https://www.seek.com.au",
-        collector=MODULE, geography="AU", source_type="job_board", default_enabled=False,
-        off_reason=(
-            "SEEK returns HTTP 403 to this server's IP address, at their edge, "
-            "before the request reaches the site. Every request fails within "
-            "milliseconds however it is disguised - plain requests, browser "
-            "headers, and both Chrome and Firefox impersonation were all refused "
-            "identically - so this is a block on where MIOS is hosted, not on how "
-            "it asks. It is not a robots.txt matter: the category pages this "
-            "scraper reads are permitted, and the paths robots.txt disallows are "
-            "already refused by the scraper itself. Adzuna covers the same "
-            "Australian market through a licensed API and is unaffected. Turning "
-            "SEEK on only helps if MIOS has moved to a network SEEK does not "
-            "block; otherwise it collects nothing and only makes each run slower."
-        ),
-    ),
+    # SEEK answers 403 to the deployed server's address, at its edge, however
+    # the request is made, so the scraper MIOS used to have for it collected
+    # nothing in production. It is read through an actor like the other large
+    # boards. It keeps the id and the limit it has always had, so the records
+    # already stored under "seek" and any limit an administrator set still apply.
+    _apify("seek", "SEEK", "Australia", "AU", "All sectors",
+           "Job postings, company names, role titles, locations", "https://www.seek.com.au",
+           geography="AU", priority="Must-have", limit=50),
     Source(
         id="adzuna", label="Adzuna", category="jobs", group="Australia", market="AU",
         sectors="All sectors", provides="Job postings aggregated across Australian boards",
@@ -457,8 +446,8 @@ SOURCES: tuple[Source, ...] = (
         provides="Any extra feeds an administrator adds", access="RSS",
         collector=MODULE, geography="AU", source_type="news", default_enabled=False,
         off_reason=(
-            "Reads only the extra feeds an administrator adds under Source options "
-            "on this page. With none added it has nothing to read."
+            "Reads only the extra feeds an administrator adds under Options & limits "
+            "on the Data sources page. With none added it has nothing to read."
         ),
     ),
 

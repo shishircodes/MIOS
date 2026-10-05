@@ -217,8 +217,6 @@ jobs:
             ADZUNA_COUNTRY=${{ vars.ADZUNA_COUNTRY || 'au' }}
             ADZUNA_QUERIES=${{ vars.ADZUNA_QUERIES }}
             PNGWORKFORCE_BASE_URL=${{ vars.PNGWORKFORCE_BASE_URL }}
-            SEEK_BASE_URL=${{ vars.SEEK_BASE_URL }}
-            SEEK_PATHS=${{ vars.SEEK_PATHS }}
             GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }}
             GOOGLE_CLIENT_SECRET=${{ secrets.GOOGLE_CLIENT_SECRET }}
             SESSION_SECRET=${{ secrets.SESSION_SECRET }}

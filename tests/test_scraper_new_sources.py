@@ -279,6 +279,31 @@ def test_apify_reads_the_field_names_actors_commonly_use():
     assert all(r["source_name"] == "indeed" and r["source_type"] == "job_board" for r in records)
 
 
+def test_seek_is_read_through_an_actor_under_the_name_it_always_had():
+    seek = catalog.get("seek")
+    assert seek.collector == catalog.APIFY and seek in catalog.APIFY_BOARDS
+    assert seek.limit == 50, "the limit it had as a scraper of its own"
+
+
+def test_apify_reads_what_the_seek_actors_return():
+    """The field names two SEEK actors on the Apify Store document."""
+    items = [
+        {"title": "Senior Mining Engineer", "company": "Fortescue", "location": "Pilbara WA",
+         "salary": "$180k", "postedDate": "2026-09-30", "description": "Open pit, 8/6 FIFO.",
+         "url": "https://www.seek.com.au/job/11111111"},
+        {"jobId": "22222222", "title": "HSE Advisor", "company": "Santos",
+         "location": "Darwin NT", "jobUrl": "https://www.seek.com.au/job/22222222",
+         "postedDate": "2026-10-01T00:00:00.000Z", "workType": "Full Time"},
+    ]
+    records = apify.parse_items(items, source_id="seek", label="SEEK", geography="AU")
+    _shape_ok(records)
+    assert [r["source_url"] for r in records] == [
+        "https://www.seek.com.au/job/11111111", "https://www.seek.com.au/job/22222222"]
+    assert [r["company"] for r in records] == ["Fortescue", "Santos"]
+    assert records[0]["posted"] == "2026-09-30"
+    assert all(r["source_name"] == "seek" and r["geography"] == "AU" for r in records)
+
+
 def test_apify_skips_listings_it_cannot_address_or_name():
     items = [{"title": "No link"}, {"url": "https://x.example/1"}, "not a dict",
              {"title": "Relative link", "url": "/jobs/1"}]
@@ -338,3 +363,10 @@ def test_apify_sends_the_token_in_a_header_and_the_limit_as_max_items(panel, mon
     assert TOKEN not in seen["url"], "the token must never be in the address"
     assert seen["headers"]["Authorization"] == f"Bearer {TOKEN}"
     assert seen["json"] == {"position": "mining", "maxItems": 7}, "the run limit wins"
+    # Enforced by Apify, so they hold even for an actor that ignores its input.
+    assert seen["params"]["maxItems"] == 7 and seen["params"]["limit"] == 7
+    assert seen["params"]["maxTotalChargeUsd"] == panel.DEFAULT_RUN_CHARGE_USD
+
+    panel.set_apify_max_charge("0.40", changed_by="admin@example.com")
+    asyncio.run(apify.scrape_async(INDEED, limit=7))
+    assert seen["params"]["maxTotalChargeUsd"] == 0.40

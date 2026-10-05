@@ -76,14 +76,6 @@ def test_an_empty_scraper_url_falls_back_to_the_listings_page(monkeypatch, value
     assert load_settings().pngworkforce_base_url == PNG_DEFAULT
 
 
-def test_an_empty_seek_url_falls_back_too(monkeypatch):
-    """SEEK carries the identical exposure and has only been spared by being
-    switched off. Turning it on must not reintroduce the same silent zero."""
-    monkeypatch.setenv("SEEK_BASE_URL", "")
-
-    assert load_settings().seek_base_url == "https://au.seek.com"
-
-
 def test_the_deployment_shape_is_what_gets_tested():
     """The failing case reproduced end to end, in a fresh interpreter.
 
@@ -110,5 +102,5 @@ def test_the_deployment_shape_is_what_gets_tested():
 def test_an_empty_list_variable_means_use_the_code_default(monkeypatch):
     """`_get_list` has always treated empty as "unset". The scalar version is now
     consistent with it; this pins that they agree."""
-    monkeypatch.setenv("SEEK_PATHS", "")
-    assert _get_list("SEEK_PATHS") == ()
+    monkeypatch.setenv("ADZUNA_QUERIES", "")
+    assert _get_list("ADZUNA_QUERIES") == ()

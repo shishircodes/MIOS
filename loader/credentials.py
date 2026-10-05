@@ -173,7 +173,7 @@ def stored_rows(target: str | Path | None = None) -> dict[str, dict[str, Any]]:
                 "SELECT provider, secret, hint, changed_by, changed_at "
                 "FROM llm_credentials").fetchall()
     except Exception as exc:  # noqa: BLE001 - table may not exist yet
-        log.warning("credentials: could not read (%s) — using environment keys", exc)
+        log.warning("credentials: could not read (%s) — treating every key as not set", exc)
         return {}
     return {str(r["provider"]): dict(r) for r in rows}
 
