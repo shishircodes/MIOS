@@ -109,9 +109,16 @@ def _source_names() -> list[str]:
 
 def _specs() -> dict[str, Spec]:
     specs = {s.key: s for s in CLASSIFIER_SPECS}
+    from scraper import catalog
+
     for name in _source_names():
         key = SCRAPE_PREFIX + name
-        specs[key] = Spec(key, name, DEFAULT_SCRAPE_LIMIT, SCRAPE_LOW, SCRAPE_HIGH, "records",
+        src = catalog.get(name)
+        # The catalogue's own starting point for the source, and its name as a
+        # reader knows it. A name the catalogue has lost falls back to the key.
+        specs[key] = Spec(key, src.label if src else name,
+                          src.limit if src else DEFAULT_SCRAPE_LIMIT,
+                          SCRAPE_LOW, SCRAPE_HIGH, "records",
                           "Records taken from this source each run.")
     return specs
 

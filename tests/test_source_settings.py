@@ -42,10 +42,22 @@ def db(tmp_path):
 # ---------- the default is on ----------
 
 
+def _on_by_default() -> list[str]:
+    """The sources that collect when nobody has chosen otherwise, in registry order.
+
+    Asked of the code rather than listed: SEEK ships off, and so do a global
+    title, the boards waiting on an Apify actor and the custom feeds. Which of
+    those are on also depends on what this machine has configured.
+    """
+    from loader.source_settings import default_enabled
+
+    return [n for n in SOURCE_NAMES if default_enabled(n)]
+
+
 def test_sources_start_at_their_default(db):
     """Every source that works is on; SEEK is not, because it cannot collect
     from where MIOS is deployed."""
-    assert enabled_sources(db) == [n for n in SOURCE_NAMES if n != "seek"]
+    assert enabled_sources(db) == _on_by_default()
     assert "seek" not in enabled_sources(db)
 
 
@@ -54,7 +66,7 @@ def test_a_source_nobody_has_touched_still_appears_in_the_listing(db):
     source would be invisible in the panel until somebody toggled it."""
     settings = list_settings(db)
     assert set(settings) == set(SOURCE_NAMES)
-    assert all(v["enabled"] for k, v in settings.items() if k != "seek")
+    assert [k for k, v in settings.items() if v["enabled"]] == _on_by_default()
 
 
 def test_a_source_that_ships_off_explains_itself(db):
@@ -129,7 +141,7 @@ def test_the_selection_keeps_registry_order(db):
     be in the settings table."""
     set_enabled("seek", True, changed_by="admin", target=db)
     set_enabled("adzuna", False, changed_by="admin", target=db)
-    assert enabled_sources(db) == [n for n in SOURCE_NAMES if n != "adzuna"]
+    assert enabled_sources(db) == [n for n in SOURCE_NAMES if n != "adzuna" and (n == "seek" or n in _on_by_default())]
 
 
 def test_who_switched_it_off_is_recorded(db):
@@ -234,7 +246,7 @@ def test_only_the_enabled_sources_are_scraped(db, monkeypatch):
     # Derived, not listed: this test is about the two that were switched off,
     # and hardcoding the survivors makes every new source look like a failure.
     from scraper import SOURCE_NAMES
-    expected = [n for n in SOURCE_NAMES if n not in ("seek", "adzuna")]
+    expected = [n for n in _on_by_default() if n != "adzuna"]
     assert seen == [expected]
 
 
@@ -250,4 +262,4 @@ def test_an_unreadable_table_leaves_every_source_enabled(db, monkeypatch):
         raise RuntimeError("connection refused")
 
     monkeypatch.setattr(ss, "connect", _broken)
-    assert enabled_sources(db) == [n for n in SOURCE_NAMES if n != "seek"]
+    assert enabled_sources(db) == _on_by_default()

@@ -1,9 +1,10 @@
 import { useQuery } from '@tanstack/react-query'
 import { prefetch } from '~/lib/query-client'
-import { slackStatusQueryOptions, googleDocsStatusQueryOptions } from '~/lib/api'
+import { slackStatusQueryOptions, googleDocsStatusQueryOptions, sourceConfigQueryOptions } from '~/lib/api'
 import { Link, createFileRoute } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
 import { AdminOnly } from '~/components/AdminOnly'
+import { ApifyPanel } from '~/components/ApifyPanel'
 import { GoogleDocsPanel } from '~/components/GoogleDocsPanel'
 import { HubSpotPanel } from '~/components/HubSpotPanel'
 import { SlackPanel } from '~/components/SlackPanel'
@@ -12,7 +13,8 @@ import { hubspotStatusQueryOptions } from '~/lib/api'
 
 export const Route = createFileRoute('/integrations')({
   head: () => ({ meta: [{ title: 'Integrations · MIOS' }] }),
-  loader: prefetch(slackStatusQueryOptions, hubspotStatusQueryOptions, googleDocsStatusQueryOptions),
+  loader: prefetch(slackStatusQueryOptions, hubspotStatusQueryOptions, googleDocsStatusQueryOptions,
+                   sourceConfigQueryOptions),
   component: () => (
     <AdminOnly>
       <IntegrationsScreen />
@@ -36,9 +38,9 @@ function useGoogleDocsFlash() {
   return flash
 }
 
-/** Systems MIOS connects to besides the collectors, in the order of the
- *  sidebar: Slack receives the weekly digest, HubSpot supplies the watchlist,
- *  Google Docs receives the quarterly reports. */
+/** Systems MIOS connects to, in the order of the sidebar: Slack receives the
+ *  weekly digest, HubSpot supplies the watchlist, Google Docs receives the
+ *  quarterly reports, and Apify reads the job boards that have no feed. */
 function IntegrationsScreen() {
   const { isPending } = useQuery(hubspotStatusQueryOptions)
   const flash = useGoogleDocsFlash()
@@ -59,12 +61,16 @@ function IntegrationsScreen() {
           <div>The digest is posted when a run finishes — see <Link to="/schedule">Schedule &amp; runs</Link></div>
           <div>The synced companies appear under <Link to="/watchlist">Watchlist</Link></div>
           <div>Reports are sent from <Link to="/publish">Quarterly reports</Link></div>
+          <div>Apify boards are listed under <Link to="/sources">Data sources</Link></div>
         </div>
       </div>
       <SlackPanel />
       {isPending ? <SkeletonCard rows={4} /> : <HubSpotPanel />}
       <div id="google-docs">
         <GoogleDocsPanel flash={flash} />
+      </div>
+      <div id="apify">
+        <ApifyPanel />
       </div>
     </div>
   )

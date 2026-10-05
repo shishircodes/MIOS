@@ -12,7 +12,6 @@ import type { SlackStatus } from '~/lib/types'
 
 const SOURCE: Record<string, string> = {
   panel: 'Entered here',
-  environment: 'Set on the server',
   none: 'No webhook',
 }
 
@@ -111,7 +110,6 @@ export function SlackPanel() {
             <div className="llm-meta">
               {SOURCE[data.webhook.source] ?? data.webhook.source}
               {data.webhook.hint && <> · ends <span className="mono">…{data.webhook.hint}</span></>}
-              {data.webhook.shadowsEnvironment && <> · replaces {data.keyEnv} while set</>}
             </div>
             {data.webhook.unreadable && (
               <div className="llm-meta llm-warn">
@@ -121,8 +119,7 @@ export function SlackPanel() {
             )}
             {!data.canStoreKey && data.webhook.source !== 'panel' && (
               <div className="llm-meta llm-warn">
-                A webhook cannot be stored here until the server has MIOS_CREDENTIAL_KEY. Setting{' '}
-                {data.keyEnv} on the server works too.
+                A webhook cannot be stored until the server has MIOS_CREDENTIAL_KEY.
               </div>
             )}
             <div className="llm-meta">

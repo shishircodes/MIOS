@@ -47,6 +47,9 @@ export interface Signal {
   action: string | null
   sector: string
   source: string
+  /** The source's name as a reader knows it ("Mining People International"),
+   *  from the catalogue. `source` is the stored key the feed filters on. */
+  sourceLabel?: string
   /** The publication behind the collector ("Australian Mining" rather than
    *  "newsfeed"). Null where the collector's own name already says it. */
   publication: string | null
@@ -173,9 +176,8 @@ export interface HubSpotSyncSummary {
 }
 
 export interface HubSpotStatus {
-  key: { source: 'panel' | 'environment' | 'none'; hint: string | null; shadowsEnvironment: boolean; unreadable: boolean }
+  key: { source: 'panel' | 'none'; hint: string | null; unreadable: boolean }
   canStoreKey: boolean
-  keyEnv: string
   mapping: HubSpotMapping
   lastSync: HubSpotSyncSummary | null
   watchlist: { fromHubspot: number; fromSeed: number }
@@ -215,9 +217,8 @@ export interface PipelineSettings {
 // ---------- Slack digest (api/slack_api.py) ----------
 
 export interface SlackStatus {
-  webhook: { source: 'panel' | 'environment' | 'none'; hint: string | null; shadowsEnvironment: boolean; unreadable: boolean }
+  webhook: { source: 'panel' | 'none'; hint: string | null; unreadable: boolean }
   canStoreKey: boolean
-  keyEnv: string
   /** Whether runs post the digest. The webhook is kept either way. */
   enabled: boolean
   changedBy: string | null
@@ -227,13 +228,63 @@ export interface SlackStatus {
   testOk?: boolean
 }
 
+// ---------- Collector settings (api/source_config_api.py) ----------
+
+export interface ApifyBoard {
+  /** The source's id, as on the Data sources page. */
+  id: string
+  label: string
+  market: string
+  url: string
+  /** `username/actor-name`, or '' when none has been named. */
+  actor: string
+  /** The actor's own input, as JSON text. '' when there is none. */
+  input: string
+  /** True when there is both a token and an actor, so the board can be read. */
+  ready: boolean
+  changedBy: string | null
+  changedAt: string | null
+}
+
+export interface CustomFeed {
+  name: string
+  url: string
+  market: string
+}
+
+export interface SourceConfigStatus {
+  apify: {
+    token: { source: 'panel' | 'none'; hint: string | null; unreadable: boolean }
+    canStoreKey: boolean
+    boards: ApifyBoard[]
+    readyCount: number
+  }
+  asx: {
+    /** The list in play: the administrator's, or the built-in one. */
+    tickers: string[]
+    custom: boolean
+    defaults: string[]
+    max: number
+    changedBy: string | null
+    changedAt: string | null
+  }
+  feeds: {
+    feeds: CustomFeed[]
+    max: number
+    markets: string[]
+    changedBy: string | null
+    changedAt: string | null
+  }
+  note?: string
+  testOk?: boolean
+}
+
 // ---------- Google Docs (api/google_docs_api.py) ----------
 
 export interface GoogleDocsStatus {
-  /** Where the OAuth client comes from: typed in here, server env, or the sign-in client. */
-  client: { source: 'panel' | 'environment' | 'sign-in' | 'none'; id: string | null }
+  /** Where the OAuth client comes from: typed in here, or the sign-in client. */
+  client: { source: 'panel' | 'sign-in' | 'none'; id: string | null }
   canStoreKey: boolean
-  clientEnv: string[]
   /** Must be listed as an authorised redirect URI on the Google OAuth client. */
   redirectUri: string
   scopes: string[]
@@ -475,6 +526,8 @@ export interface FeedPayload {
   /** Every source the feed can be filtered to, read from the data. Drives the
    *  filter buttons so they cannot drift from what is actually collectable. */
   sources: string[]
+  /** What to call each of them on the filter. */
+  sourceLabels?: Record<string, string>
   limit: number
   offset: number
 }
@@ -556,6 +609,14 @@ export type SourceStatus =
    *  toggle and has to be fixed before turning it on would achieve anything. */
   | 'off'
   | 'retired'
+  // --- a source in the guide that MIOS does not collect from, and why ---
+  | 'subscription'
+  | 'needs_key'
+  | 'blocked'
+  | 'unreachable'
+  | 'manual'
+  | 'connected'
+  | 'planned'
 
 export interface SourceHealth {
   /** Whether this source ships switched on. A source that is off for a
@@ -568,8 +629,23 @@ export interface SourceHealth {
   limit: number | null
   name: string
   label: string
+  /** The guide section it belongs to; a key from `SourcesPayload.categories`. */
+  category: string
+  /** The sub-heading it sits under in that section ("Australia", "Oil & Gas"). */
+  group: string
   market: string
+  sectors: string
+  /** What it provides, in a phrase. */
+  provides: string
+  /** How it is read: "RSS", "JSON API", "Apify actor", "Subscription"… */
   kind: string
+  cost: string
+  /** The guide's Month 1 priority, where it gives one. */
+  priority: string | null
+  url: string
+  /** Whether MIOS can collect from it at all. False rows carry a reason in
+   *  `note` instead of collection figures. */
+  collectable: boolean
   status: SourceStatus
   note: string | null
   lastSeen: string | null
@@ -588,6 +664,10 @@ export interface SourceHealth {
 
 export interface SourcesPayload {
   sources: SourceHealth[]
+  /** The guide's sections, in the guide's order. */
+  categories: { key: string; label: string }[]
+  /** How many of the sources MIOS can collect from. */
+  collectableCount: number
   staleAfterDays: number
   perSourceLimit: number
   totalRecords: number
@@ -650,12 +730,10 @@ export interface LlmRoute {
   model: string
   /** False when the chosen provider has no API key. */
   configured: boolean
-  /** Where this choice came from: 'admin', 'environment' or 'default'. */
+  /** Where this choice came from: 'admin' or 'default'. */
   source: string
   changedBy: string | null
   changedAt: string | null
-  /** Set when an admin choice is overriding a value pinned on the server. */
-  overriddenEnv: string | null
 }
 
 /** Where a provider's API key comes from, and never the key itself.
@@ -665,13 +743,10 @@ export interface LlmRoute {
  *  show it to them. */
 export interface LlmKeyStatus {
   provider: string
-  /** 'panel' (entered here), 'environment' (set on the server), or 'none'. */
+  /** 'panel' (entered here) or 'none'. Keys are set here and nowhere else. */
   source: string
-  /** Last four characters of whichever key is in play. Null when there is none. */
+  /** Last four characters of the stored key. Null when there is none. */
   hint: string | null
-  /** A key entered here is overriding one set on the server. Shown so an
-   *  environment variable that appears to do nothing is explainable. */
-  shadowsEnvironment: boolean
   /** A stored key that will not decrypt — almost always because the server's
    *  MIOS_CREDENTIAL_KEY changed. Looks identical to "no key" and needs a
    *  completely different fix, so it is reported separately. */
@@ -826,7 +901,7 @@ export interface DashboardPayload {
   /** Which collectors produced this week's signals. A source absent from this
    *  list contributed nothing, which is the quickest way to see a scraper that
    *  has quietly stopped working. */
-  sources: { name: string; kind: string; count: number; share: number }[]
+  sources: { name: string; label?: string; kind: string; count: number; share: number }[]
   /** The most active companies in the latest collection. */
   companies: {
     name: string

@@ -106,8 +106,7 @@ def db(tmp_path, monkeypatch):
                                   web_app_url="https://app.example.com")
     monkeypatch.setattr("loader.db.settings", patched)
     monkeypatch.setattr("config.settings.settings", patched)
-    for env in (gd.CLIENT_ID_ENV, gd.CLIENT_SECRET_ENV, gd.REDIRECT_ENV):
-        monkeypatch.delenv(env, raising=False)
+    monkeypatch.delenv(gd.REDIRECT_ENV, raising=False)
     monkeypatch.setenv(credentials.KEY_ENV, "test-only-bootstrap-passphrase")
     credentials._fernet_for.cache_clear()
     return path
@@ -146,17 +145,17 @@ def test_the_sign_in_client_is_reused_when_nothing_else_is_set(db, monkeypatch):
     assert gd.client() == {"id": "sign-in-id", "secret": "sign-in-secret", "source": "sign-in"}
 
 
-def test_the_environment_beats_the_sign_in_client(db, monkeypatch):
-    monkeypatch.setattr("config.settings.settings", dataclasses.replace(
-        real_settings, google_client_id="sign-in-id", google_client_secret="sign-in-secret"))
-    monkeypatch.setenv(gd.CLIENT_ID_ENV, "env-id")
-    monkeypatch.setenv(gd.CLIENT_SECRET_ENV, "env-secret")
-    assert gd.client()["source"] == "environment"
+def test_environment_variables_are_not_a_client(db, monkeypatch):
+    """GOOGLE_DOCS_CLIENT_ID / _SECRET used to be a third place a client could
+    come from. A deployment that still sets them gets no client from them."""
+    monkeypatch.setenv("GOOGLE_DOCS_CLIENT_ID", "env-id")
+    monkeypatch.setenv("GOOGLE_DOCS_CLIENT_SECRET", "env-secret")
+    assert gd.client()["source"] == "none"
 
 
 def test_a_client_entered_in_the_panel_wins_and_its_secret_is_encrypted(db, monkeypatch):
-    monkeypatch.setenv(gd.CLIENT_ID_ENV, "env-id")
-    monkeypatch.setenv(gd.CLIENT_SECRET_ENV, "env-secret")
+    monkeypatch.setattr("config.settings.settings", dataclasses.replace(
+        real_settings, google_client_id="sign-in-id", google_client_secret="sign-in-secret"))
     gd.set_client(CLIENT_ID, SECRET, changed_by="admin@easyskill.com")
     assert gd.client() == {"id": CLIENT_ID, "secret": SECRET, "source": "panel"}
     with connect(db, readonly=True) as conn:
@@ -164,12 +163,12 @@ def test_a_client_entered_in_the_panel_wins_and_its_secret_is_encrypted(db, monk
     assert SECRET not in dump
 
 
-def test_removing_the_panel_client_falls_back_to_the_environment(db, monkeypatch):
-    monkeypatch.setenv(gd.CLIENT_ID_ENV, "env-id")
-    monkeypatch.setenv(gd.CLIENT_SECRET_ENV, "env-secret")
+def test_removing_the_panel_client_returns_to_the_sign_in_client(db, monkeypatch):
+    monkeypatch.setattr("config.settings.settings", dataclasses.replace(
+        real_settings, google_client_id="sign-in-id", google_client_secret="sign-in-secret"))
     gd.set_client(CLIENT_ID, SECRET, changed_by="admin@easyskill.com")
     assert gd.clear_client()
-    assert gd.client()["source"] == "environment"
+    assert gd.client()["source"] == "sign-in"
 
 
 def test_the_redirect_uri_sits_beside_the_sign_in_callback(db, monkeypatch):

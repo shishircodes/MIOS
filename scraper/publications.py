@@ -21,6 +21,9 @@ from urllib.parse import urlparse
 SINGLE_PUBLICATION: dict[str, str] = {
     "pngbusinessnews": "PNG Business News",
     "austender": "AusTender",
+    "asx": "ASX Announcements",
+    "worldbank": "World Bank",
+    "ted": "TED",
 }
 
 
@@ -33,7 +36,7 @@ def _feed_hosts() -> dict[str, str]:
     """Host -> publication name, from the feeds the collector is configured with.
 
     Read from the live configuration rather than a copy of the feed list, so a
-    publication added through NEWS_FEEDS is named correctly without anyone
+    publication an administrator adds is named correctly without anyone
     remembering to update a second table here.
     """
     try:
@@ -57,4 +60,64 @@ def publication_for(source_name: str | None, source_url: str | None) -> str | No
         return SINGLE_PUBLICATION[name]
     if name == "newsfeed":
         return _feed_hosts().get(_host(source_url))
+    # A catalogued publication is stored under its own id, and its label is its
+    # name. Job boards are left out for the reason given above.
+    from scraper import catalog
+
+    src = catalog.get(name)
+    if src is not None and src.collector == catalog.RSS:
+        return src.label
     return None
+
+
+def source_id_for(source_name: str | None, source_url: str | None) -> str:
+    """The catalogue source a stored signal belongs to.
+
+    Every publication used to be collected under the single name "newsfeed".
+    Each now has a source of its own, but the rows already in the database keep
+    the old name — rewriting them would be a migration of every article ever
+    collected, for the sake of a label.
+
+    So the old rows are attributed here instead, by the article's own address:
+    a "newsfeed" row from australianmining.com.au counts towards Australian
+    Mining. A "newsfeed" row from a domain no catalogued publication uses stays
+    "newsfeed", which is where the custom feeds still report.
+    """
+    name = (source_name or "").lower()
+    if name != "newsfeed":
+        return name
+    from scraper import catalog
+
+    host = _host(source_url)
+    if not host:
+        return name
+    for src in catalog.FEEDS:
+        if _host(src.feed_url) == host or _host(src.url) == host:
+            return src.id
+    return name
+
+
+#: What a row stored under the old shared name is called when its address
+#: matches no catalogued publication, or when there is no address to go by.
+LEGACY_NEWSFEED_LABEL = "Industry news (older runs)"
+
+
+def label_for(source_name: str | None, source_url: str | None = None) -> str:
+    """The name a reader sees for a stored source.
+
+    The catalogue's label for whichever source the row belongs to — so an
+    article reads "Australian Mining" whether it was stored under the old
+    shared name or under its own. A stored name the catalogue does not know (a
+    retired scraper) is shown as it is.
+    """
+    from scraper import catalog
+
+    source_id = source_id_for(source_name, source_url)
+    if source_id == "newsfeed":
+        from loader import source_config
+
+        # With custom feeds configured this name is live; without them, every
+        # row under it is from before the publications were split out.
+        return (catalog.label_for("newsfeed") if source_config.custom_feeds()
+                else LEGACY_NEWSFEED_LABEL)
+    return catalog.label_for(source_id)

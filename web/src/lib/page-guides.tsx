@@ -36,18 +36,22 @@ function SourceFigures({ children }: { children: (d: { limit: number; stale: num
 
 function OffByDefault() {
   const { data } = useQuery(sourceHealthQueryOptions)
-  const off = (data?.sources ?? []).filter((s) => !s.defaultEnabled && s.offReason)
+  const off = (data?.sources ?? []).filter((s) => s.collectable && !s.defaultEnabled && s.offReason)
   if (!data) return <p className="muted">Reading the source settings…</p>
   if (off.length === 0) return <p>Every source ships switched on.</p>
+  // Several sources can share one reason — every board waiting on an Apify
+  // actor does — so each reason is given once, with the sources it covers.
+  const byReason = new Map<string, string[]>()
+  for (const s of off) byReason.set(s.offReason!, [...(byReason.get(s.offReason!) ?? []), s.label])
   return (
     <>
       <p>
         Some sources ship switched off on purpose. They show <b>Off by default</b> in the table.
         Switching one on is allowed, but read the reason first:
       </p>
-      {off.map((s) => (
-        <div key={s.name} className="guide-callout">
-          <b>{s.label}.</b> {s.offReason}
+      {[...byReason].map(([reason, labels]) => (
+        <div key={reason} className="guide-callout">
+          <b>{labels.join(', ')}.</b> {reason}
         </div>
       ))}
     </>
@@ -611,14 +615,33 @@ const sources: PageGuide = {
   title: 'Data sources',
   summary: (
     <>
-      Where MIOS collects from, whether each source is healthy, and how much each run takes
-      from them.
+      Every source in Easy Skill&rsquo;s data-sources guide for Australia and Papua New Guinea:
+      which ones MIOS collects from, how each is doing, and for the rest, what stands in the way.
     </>
   ),
   sections: [
     {
+      id: 'layout',
+      heading: 'How the page is organised',
+      body: (
+        <>
+          <p>
+            Sources are grouped under the guide&rsquo;s own sections: job boards, LinkedIn,
+            project intelligence platforms, news and industry publications, financial and
+            regulatory, tenders, internal systems and AI tools. Within a section they sit under
+            the guide&rsquo;s sub-headings, such as Australia and Papua New Guinea.
+          </p>
+          <ul>
+            <li>Under each name are the <b>sectors</b> the source covers.</li>
+            <li><b>Access / market</b> says how it is read (RSS, a JSON API, an Apify actor, a subscription) and which market it covers. Hover it to see what the source provides.</li>
+            <li><b>Show</b> at the top narrows the page to the sources MIOS collects from, or to the ones it does not.</li>
+          </ul>
+        </>
+      ),
+    },
+    {
       id: 'collectors',
-      heading: 'Collectors',
+      heading: 'Sources MIOS collects from',
       body: (
         <SourceFigures>
           {({ limit, stale, pending }) => (
@@ -645,9 +668,71 @@ const sources: PageGuide = {
       ),
     },
     {
+      id: 'notcollected',
+      heading: 'Sources MIOS does not collect from',
+      body: (
+        <>
+          <p>
+            These are listed so the page matches the guide, and so &ldquo;why are we not reading
+            this?&rdquo; has an answer. Each row says what stands in the way:
+          </p>
+          <ul>
+            <li><b>Subscription</b>: a paid platform. Nothing can be read without a licence.</li>
+            <li><b>Needs a key</b>: needs an account or API key nobody has supplied yet.</li>
+            <li><b>Blocked</b>: the site forbids crawlers in its robots.txt, or refuses them. MIOS does not work around that.</li>
+            <li><b>Unreachable</b>: the site did not answer when it was checked.</li>
+            <li><b>Documents only</b>: published as reports or spreadsheets for a person to read, not as a feed.</li>
+            <li><b>Connected</b>: HubSpot and Slack, which are set up under Integrations.</li>
+            <li><b>Planned</b>: in the guide for a later phase.</li>
+          </ul>
+        </>
+      ),
+    },
+    {
       id: 'off',
       heading: 'Sources that ship switched off',
       body: <OffByDefault />,
+    },
+    {
+      id: 'keys',
+      heading: 'Sources marked Not configured',
+      body: (
+        <>
+          <p>
+            Two kinds of source wait for something to be entered. Until then they are skipped,
+            and everything else runs as normal. Once it is entered, the source switches itself
+            on for the next run.
+          </p>
+          <ul>
+            <li><b>Boards read through Apify</b> (Indeed, Jora, Glassdoor, LinkedIn Jobs and others) need a token and an actor. Both are set under <b>Integrations › Apify job boards</b>, and its guide has the steps.</li>
+            <li><b>Custom RSS feeds</b> needs at least one feed, added under <b>Source options</b> on this page.</li>
+          </ul>
+        </>
+      ),
+    },
+    {
+      id: 'options',
+      heading: 'Source options',
+      body: (
+        <>
+          <p>Both are optional. Nothing here needs filling in for a run to work.</p>
+          <p><b>ASX companies to follow.</b> ASX Announcements reads the market announcements of a list of companies. It starts on a built-in list of miners, energy producers and contractors.</p>
+          <ol>
+            <li>Press <b>Edit list</b>.</li>
+            <li>Type the ASX codes you want, separated by spaces or commas — for example <span className="mono">BHP RIO FMG</span>. This replaces the list, so keep the codes you still want.</li>
+            <li>Press <b>Save list</b>. The next run follows the new list.</li>
+          </ol>
+          <p><b>Use built-in list</b> goes back to the original companies. Each company is one request per run, which is why the list stops at 60.</p>
+          <p><b>Custom RSS feeds.</b> A publication that is not in the list above can be added if it has an RSS feed.</p>
+          <ol>
+            <li>Find the feed address on the publication&rsquo;s site. It often ends in <span className="mono">/feed</span> or <span className="mono">/rss</span>.</li>
+            <li>Press <b>Add feed</b>, then enter the publication&rsquo;s name, the feed address and its market.</li>
+            <li>Press <b>Check address</b>. It fetches the feed once and says how many articles it found, or why it cannot be read.</li>
+            <li>Press <b>Add feed</b> to save. Its articles are collected from the next run as <b>Custom RSS feeds</b>.</li>
+          </ol>
+          <p>A publication that already has its own row cannot be added again — switch that row on instead.</p>
+        </>
+      ),
     },
     {
       id: 'limits',
@@ -657,7 +742,8 @@ const sources: PageGuide = {
           <p>
             A run fetches up to each source&rsquo;s limit, stores what is new, then sends the new
             records to the AI in batches to be sorted. Changing these numbers never touches
-            records already collected.
+            records already collected. Only the sources that are switched on are listed; one
+            that is off keeps its limit for when it is turned back on.
           </p>
           <p>
             Raising a source&rsquo;s limit collects more per run, but repeats are never stored
@@ -685,7 +771,7 @@ const sources: PageGuide = {
 
 const integrations: PageGuide = {
   title: 'Integrations',
-  summary: <>The outside systems MIOS talks to: Slack, HubSpot and Google Docs.</>,
+  summary: <>The outside systems MIOS talks to: Slack, HubSpot, Google Docs and Apify.</>,
   sections: [
     {
       id: 'slack',
@@ -759,6 +845,43 @@ const integrations: PageGuide = {
         </>
       ),
     },
+    {
+      id: 'apify',
+      heading: 'Apify job boards',
+      body: (
+        <>
+          <p>
+            Some job boards publish no feed and refuse ordinary readers. Apify is a paid service
+            that runs ready-made readers, called <b>actors</b>, for those boards. This is
+            optional: leave it empty and those boards are simply not read.
+          </p>
+          <p><b>Step 1 — add the token.</b></p>
+          <ol>
+            <li>Sign in at <span className="mono">console.apify.com</span>, or create an account. The free plan includes a small monthly credit.</li>
+            <li>Open <b>Settings › API &amp; Integrations</b> and copy the <b>Personal API token</b>.</li>
+            <li>Here, press <b>Add token</b>, paste it and save.</li>
+            <li>Press <b>Test token</b>. It asks Apify whose token it is — no actor runs and nothing is charged.</li>
+          </ol>
+          <p><b>Step 2 — name an actor for each board you want.</b></p>
+          <ol>
+            <li>In the <b>Apify Store</b>, search for the board (for example &ldquo;Indeed scraper&rdquo;) and open an actor. Check its price and reviews first.</li>
+            <li>Copy its name from the page address: <span className="mono">apify.com/<b>username/actor-name</b></span>.</li>
+            <li>Here, press <b>Set actor</b> beside the board and paste the name.</li>
+            <li>In <b>Search settings</b>, enter what that actor should search for, as JSON. Every actor has its own field names — they are listed on the actor&rsquo;s <b>Input</b> tab, which can also show the JSON to copy. Leave it empty to use the actor&rsquo;s defaults.</li>
+            <li>Save. The board shows <b>Ready</b> once it has both a token and an actor.</li>
+          </ol>
+          <p><b>Step 3 — check the result.</b></p>
+          <ol>
+            <li>A ready board is read from the next run. Under <b>Data sources</b> its row changes from <i>Not configured</i> to <i>No data yet</i>, then <i>Collecting</i>.</li>
+            <li>To stop reading a board, switch it off there, or remove its actor here.</li>
+          </ol>
+          <p>
+            Each run of an actor is charged to the Apify account, so name actors only for boards
+            worth the cost. The token is stored encrypted and never shown again in full.
+          </p>
+        </>
+      ),
+    },
   ],
 }
 
@@ -781,8 +904,8 @@ const models: PageGuide = {
             back to this page; the last four characters are shown so you can tell which is loaded.
           </p>
           <p>
-            A key added here wins over the same provider&rsquo;s key in the server settings, and
-            the row says when that is happening. Remove it to go back to the server&rsquo;s key.
+            Keys are entered here and nowhere else. With no key the app still runs: records are
+            still collected and stored, and the jobs that need a model wait until one is added.
           </p>
           <p>
             <b>Test</b> makes one real call. A saved key is not always a working key — it can be

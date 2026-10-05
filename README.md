@@ -52,11 +52,18 @@ npm install --prefix web
 cp .env.example .env
 ```
 
-The only value you need to start is `GEMINI_API_KEY`, from
-[aistudio.google.com](https://aistudio.google.com) — free, no card. Everything
-else has a working default: leave `DATABASE_URL` blank and it uses a local
-SQLite file, leave the Slack and Adzuna keys blank and those features skip
-themselves.
+Nothing in `.env` is needed to start: leave `DATABASE_URL` blank and it uses a
+local SQLite file, and leave the Adzuna keys blank and that source skips itself.
+
+**Model keys are not in `.env`.** A Gemini key (from
+[aistudio.google.com](https://aistudio.google.com) — free, no card) is entered
+under **Admin › AI models** once the app is running, as is everything else an
+administrator can set: the Slack webhook, the HubSpot key, the Apify token and
+actors, the ASX company list and custom news feeds. Those are stored in the
+database, encrypted where they are secrets, and have no environment fallback.
+Storing a key needs `MIOS_CREDENTIAL_KEY` set — generate one with the command
+in `.env.example`. Until a key is entered the app runs normally and the model
+features report themselves as not configured.
 
 To browse the dashboard without setting up Google OAuth, add:
 
@@ -326,7 +333,18 @@ completes and always says what it managed to do.
 | PNGworkforce | `scraper/pngworkforce.py` | PNG | HTML listing pages |
 | SEEK | `scraper/seek.py` | AU | HTML cards, ~32 per category path |
 | Adzuna | `scraper/adzuna.py` | AU | **JSON API**, one search per watchlist company |
-| Industry news | `scraper/newsfeed.py` | AU + PNG | **RSS**, one entry per article |
+| Industry news (11 publications) | `scraper/newsfeed.py` | AU + PNG | **RSS**, one entry per article |
+| Mining People International | `scraper/miningpeople.py` | AU | HTML job cards |
+| ASX Announcements | `scraper/asx.py` | AU | **JSON API**, one request per listed company |
+| World Bank | `scraper/worldbank.py` | PNG | **JSON API**, procurement notices and projects |
+| EU tenders (TED) | `scraper/ted.py` | PNG | **JSON API** |
+| Indeed, Jora, Glassdoor, LinkedIn Jobs and others | `scraper/apify.py` | AU + PNG | **Apify actors**; off until a token and an actor are added under Admin › Integrations |
+
+**Every source lives in `scraper/catalog.py`.** That file lists all ~70 sources
+from the Easy Skill data-sources guide with their category, market, sectors,
+access method and cost. The collectable ones become the registry; the rest say
+why they are not collected (a subscription, a missing key, a robots.txt that
+forbids crawling) and appear on the Data sources page with that reason.
 
 **The news source is the only one that isn't a job board**, and that matters
 more than the effort saved building it. Job ads can only ever produce
@@ -336,7 +354,7 @@ work is news. Those categories were nearly empty before this source existed.
 RSS was chosen over everything else in the data-sources guide because it is a
 published format meant to be polled — no key, no HTML selectors, no terms-of-use
 tension — and the parser is standard library. Adding another publication is one
-line in `FEEDS` or one entry in `NEWS_FEEDS`, not a new module.
+entry in `scraper/catalog.py`, or a feed added under Admin › Data sources, not a new module.
 
 > Several publishers listed in that guide sit behind Cloudflare and answer 403
 > to any non-browser client regardless of User-Agent — Australian Mining, Energy
@@ -706,7 +724,7 @@ Variables:
 | `PROD_HOST` | VPS IP | production deploys |
 | `PROD_WEB_URL` / `PROD_API_URL` | `https://mios.example.com` | production |
 | `DEPLOY_USER` | `deploy` (default) | both |
-| `ALLOWED_GOOGLE_DOMAIN` / `ALLOWED_EMAILS` | `easyskill.com` | production sign-in |
+| `ALLOWED_EMAILS` | comma-separated addresses, or empty | production sign-in |
 
 Secrets:
 
@@ -717,7 +735,8 @@ Secrets:
 | `PROD_DATABASE_URL` | Neon pooled connection string |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Cloud Console |
 | `SESSION_SECRET` | `python -c "import secrets;print(secrets.token_urlsafe(48))"` |
-| `GEMINI_API_KEY`, `SLACK_WEBHOOK_URL` | optional |
+| `ALLOWED_GOOGLE_DOMAIN` | the company's Google Workspace domain. Required: the deploy stops without it, because a blank domain admits any Google account |
+| `MIOS_CREDENTIAL_KEY` | `python -c "import secrets;print(secrets.token_urlsafe(48))"` — encrypts the keys entered in the Admin panel; keep it stable |
 
 `GITHUB_TOKEN` is provided automatically — no setup for GHCR.
 

@@ -1,25 +1,20 @@
 """Which model an administrator has chosen for each purpose.
 
-Routing can come from three places, and they are consulted in this order:
+Routing comes from two places, consulted in this order:
 
 1. **This table** — what an administrator picked in the Admin panel.
-2. **`LLM_ROUTING`** — an environment variable, for pinning a deployment.
-3. **The built-in default** — Gemini, which is what every purpose used before
+2. **The built-in default** — Gemini, which is what every purpose used before
    any of this existed.
 
 Only deviations are stored, the same shape `source_settings` uses: a purpose
-with no row sits at whatever the environment or the default says. That is what
-lets the default be revised later without rewriting rows that merely agreed with
-the old one, and it means an administrator "resetting" a purpose is a delete
-rather than a second kind of state.
+with no row sits at the default. That is what lets the default be revised later
+without rewriting rows that merely agreed with the old one, and it means an
+administrator "resetting" a purpose is a delete rather than a second kind of
+state.
 
-The environment variable is deliberately kept as the *middle* layer rather than
-being replaced. A deployment that pins a model — because a provider is having a
-bad week, or because a key was revoked — should not be silently overridden by a
-choice somebody made in the panel three weeks ago... except that it is, and on
-purpose: the panel is the more recent and more deliberate act. What the panel
-must therefore do is *show* that an environment value exists and is being
-overridden, which the API does, so nobody debugs a model choice for an hour.
+There used to be a middle layer, an `LLM_ROUTING` environment variable for
+pinning a deployment. It has been removed along with the other environment
+fallbacks: the panel is the one place a model is chosen.
 """
 from __future__ import annotations
 

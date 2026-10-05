@@ -8,12 +8,11 @@ opposite of what is wanted.
 
 Three decisions worth stating, because each has a plausible-looking alternative:
 
-**Stored keys win over the environment, and the environment is not removed.**
-The same order `llm_settings` uses. A row here is the more recent and more
-deliberate act, so it takes precedence — but `GEMINI_API_KEY` still works
-untouched on a deployment nobody has opened the panel on, and the API reports
-when a stored key is shadowing an environment one so that is visible rather
-than mysterious.
+**A stored key is the only key.** For a while a key could come from either the
+panel or an environment variable, with the panel winning. That gave "which key
+is in play" two answers, and a deployment could carry a key nobody could see
+from the panel. The environment route has been removed: a provider with no row
+here is not configured, and says so.
 
 **The key is encrypted with a value that is not in the database.**
 `MIOS_CREDENTIAL_KEY` stays in the environment. Without it a database dump, a
@@ -23,9 +22,9 @@ that is a materially different loss from the rest of the rows in there.
 
 **Missing bootstrap key disables entry, but not reading.**
 If `MIOS_CREDENTIAL_KEY` is unset, `set_key` refuses and the panel says why.
-It does not quietly store plaintext, and it does not stop the app: the
-environment keys still resolve, so a deployment without the variable behaves
-exactly as it did before this module existed.
+It does not quietly store plaintext, and it does not stop the app: with no
+keys the model features report themselves as not configured and everything
+else carries on.
 
 Note on what is *not* used for the encryption: `settings.session_secret` looks
 like the obvious candidate and is a trap. It falls back to
@@ -203,16 +202,16 @@ def stored_key(provider: str, target: str | Path | None = None,
         return None
 
 
-def key_for(provider: str, env_value: str = "",
-            target: str | Path | None = None,
+def key_for(provider: str, target: str | Path | None = None,
             rows: dict[str, dict[str, Any]] | None = None) -> str:
-    """The key this provider should use: the stored one, else the environment.
+    """The key this provider should use: the one stored from the Admin panel.
 
-    The single place that order is decided. Providers call this instead of
-    reading `settings` directly, so "which key is actually in play" has one
-    answer rather than one per provider.
+    There is no environment fallback. A key used to come from either place,
+    which meant "which key is actually in play" had two answers and rotating
+    one in the panel could be silently undone by a deployment. Empty when
+    nothing is stored; every caller treats that as "not configured".
     """
-    return stored_key(provider, target, rows) or env_value
+    return stored_key(provider, target, rows) or ""
 
 
 # --------------------------------------------------------------------------
@@ -268,15 +267,13 @@ def clear_key(provider: str, target: str | Path | None = None) -> bool:
 # --------------------------------------------------------------------------
 
 
-def describe(provider: str, env_value: str = "",
+def describe(provider: str,
              rows: dict[str, dict[str, Any]] | None = None,
              target: str | Path | None = None) -> dict[str, Any]:
-    """Where this provider's key comes from, without disclosing it.
+    """Whether this provider has a stored key, without disclosing it.
 
-    `source` is the point of this. An administrator looking at a failing
-    provider needs to know whether the key in play is the one they just typed,
-    one pinned in the deployment, or none — which is three different next
-    actions and, without this, an hour of guessing.
+    `source` is "panel" or "none". It used to have a third answer,
+    "environment", from when a key could also be set on the server.
     """
     rows = stored_rows(target) if rows is None else rows
     row = rows.get(provider)
@@ -294,9 +291,6 @@ def describe(provider: str, env_value: str = "",
     if stored:
         source = "panel"
         hint = row.get("hint") if row else None
-    elif env_value:
-        source = "environment"
-        hint = env_value[-HINT_CHARS:]
     else:
         source = "none"
         hint = None
@@ -305,10 +299,6 @@ def describe(provider: str, env_value: str = "",
         "provider": provider,
         "source": source,
         "hint": hint,
-        #: True when a stored key exists and the environment also has one, so
-        #: the panel can say which is winning rather than leaving somebody to
-        #: wonder why their environment variable appears to do nothing.
-        "shadowsEnvironment": bool(stored and env_value),
         #: A stored row that will not decrypt: almost always MIOS_CREDENTIAL_KEY
         #: changed. Worth naming, because the symptom otherwise looks identical
         #: to no key at all and the fix is completely different.

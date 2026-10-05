@@ -40,7 +40,6 @@ def db(tmp_path, monkeypatch):
     monkeypatch.setattr("loader.db.settings",
                         dataclasses.replace(real_settings, db_path=path, database_url=None))
     # Whatever the developer's .env holds must not decide these tests.
-    monkeypatch.delenv(hs.KEY_ENV, raising=False)
     monkeypatch.delenv(credentials.KEY_ENV, raising=False)
     credentials._fernet_for.cache_clear()
     return path
@@ -134,8 +133,7 @@ def test_a_stored_key_is_never_returned(admin, monkeypatch):
     assert saved.status_code == 200 and status.status_code == 200
     for body in (saved.text, status.text):
         assert KEY not in body and KEY[:16] not in body
-    assert status.json()["key"] == {"source": "panel", "hint": KEY[-4:],
-                                    "shadowsEnvironment": False, "unreadable": False}
+    assert status.json()["key"] == {"source": "panel", "hint": KEY[-4:], "unreadable": False}
 
 
 def test_an_empty_key_is_refused(admin):
@@ -145,6 +143,13 @@ def test_an_empty_key_is_refused(admin):
 # ---------- fields, mapping, sync ----------
 
 
+def _store_key(admin, monkeypatch) -> None:
+    """Give the deployment a HubSpot key the only way there is: through the panel."""
+    monkeypatch.setenv(credentials.KEY_ENV, "a-stable-bootstrap-secret")
+    credentials._fernet_for.cache_clear()
+    assert admin.put("/api/admin/hubspot/key", json={"key": KEY}).status_code == 200
+
+
 def test_without_a_key_loading_fields_says_so(admin):
     response = admin.get("/api/admin/hubspot/properties")
     assert response.status_code == 400
@@ -152,7 +157,7 @@ def test_without_a_key_loading_fields_says_so(admin):
 
 
 def test_fields_offer_only_those_with_options_as_tier_candidates(admin, monkeypatch):
-    monkeypatch.setenv(hs.KEY_ENV, KEY)
+    _store_key(admin, monkeypatch)
     monkeypatch.setattr(hs, "HubSpotClient", FakeHubSpot)
 
     body = admin.get("/api/admin/hubspot/properties").json()
@@ -162,7 +167,7 @@ def test_fields_offer_only_those_with_options_as_tier_candidates(admin, monkeypa
 
 
 def test_hubspot_refusing_the_key_is_a_message_not_a_crash(admin, monkeypatch):
-    monkeypatch.setenv(hs.KEY_ENV, KEY)
+    _store_key(admin, monkeypatch)
     monkeypatch.setattr(hs, "HubSpotClient", RefusingHubSpot)
 
     response = admin.get("/api/admin/hubspot/properties")
@@ -189,7 +194,7 @@ def test_a_saved_mapping_comes_back(admin):
 
 
 def test_a_preview_returns_the_plan_and_changes_nothing(admin, monkeypatch):
-    monkeypatch.setenv(hs.KEY_ENV, KEY)
+    _store_key(admin, monkeypatch)
     monkeypatch.setattr(hs, "HubSpotClient", FakeHubSpot)
 
     body = admin.post("/api/admin/hubspot/sync", json={"dryRun": True}).json()
@@ -201,7 +206,7 @@ def test_a_preview_returns_the_plan_and_changes_nothing(admin, monkeypatch):
 
 
 def test_applying_a_sync_records_it(admin, monkeypatch):
-    monkeypatch.setenv(hs.KEY_ENV, KEY)
+    _store_key(admin, monkeypatch)
     monkeypatch.setattr(hs, "HubSpotClient", FakeHubSpot)
 
     body = admin.post("/api/admin/hubspot/sync", json={"dryRun": False}).json()

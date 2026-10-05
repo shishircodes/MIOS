@@ -20,7 +20,7 @@ from typing import Any
 from config.settings import settings
 from delivery.digest import infer_geography, interleave, interleave_regions, rank_signal
 from delivery.pulse import load_pulse
-from scraper.publications import publication_for
+from scraper.publications import label_for as source_label, publication_for
 from loader.db import connect, is_postgres, resolve_target
 
 log = logging.getLogger(__name__)
@@ -378,6 +378,10 @@ def shape_signal(r: dict[str, Any], index: int) -> dict[str, Any]:
         "action": (r.get("analysis_notes") or "").strip() or None,
         "sector": SECTOR_PRETTY.get(sector_key, sector_key.title()),
         "source": r.get("source_name") or "pngworkforce",
+        #: The source's display name from the catalogue — "Mining People
+        #: International" rather than "miningpeople". `source` stays the stored
+        #: key, which is what the feed filters on.
+        "sourceLabel": source_label(r.get("source_name") or "pngworkforce", r.get("source_url")),
         #: The publication behind the collector — "Australian Mining" rather than
         #: "newsfeed". Null where the collector name already says it.
         "publication": publication_for(r.get("source_name"), r.get("source_url")),
@@ -842,6 +846,9 @@ def build_feed_payload(
         #: Unaffected by the filters above — it describes what is reachable, not
         #: what this page holds, so pressing one button cannot remove the rest.
         "sources": [str(r["source_name"]) for r in source_rows],
+        #: What to call each of them on the filter.
+        "sourceLabels": {str(r["source_name"]): source_label(str(r["source_name"]))
+                         for r in source_rows},
         "limit": limit,
         "offset": offset,
     }

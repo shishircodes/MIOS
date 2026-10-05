@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Any
 
 from loader.db import read_parallel
+from scraper.publications import label_for as source_label, source_id_for
 
 log = logging.getLogger(__name__)
 
@@ -104,6 +105,35 @@ TOP_COMPANIES = 8
 
 def _label_for(key: str, table: dict[str, str]) -> str:
     return table.get(key, key.replace("_", " ").capitalize())
+
+
+def _sources(source_rows: list, legacy_news_urls: list) -> list[dict[str, Any]]:
+    """Which sources produced the collection, by the name a reader knows.
+
+    Counted per catalogue source. Rows stored under the old shared name
+    "newsfeed" are split out by article address, so an older collection reads
+    "Australian Mining 12, Mining.com.au 9" rather than "newsfeed 21" — the same
+    names a newer collection reports under.
+    """
+    counts: dict[str, int] = {}
+    kinds: dict[str, str] = {}
+    for s in source_rows:
+        name = str(s["source_name"] or "unknown")
+        kinds[name] = str(s["source_type"] or "")
+        if name == "newsfeed" and legacy_news_urls:
+            continue  # counted below, one article at a time
+        counts[name] = counts.get(name, 0) + int(s["n"] or 0)
+    for r in legacy_news_urls:
+        name = source_id_for("newsfeed", r["source_url"])
+        counts[name] = counts.get(name, 0) + 1
+        kinds.setdefault(name, kinds.get("newsfeed", "news"))
+
+    total = sum(counts.values())
+    return [
+        {"name": name, "label": source_label(name), "kind": kinds.get(name, ""),
+         "count": n, "share": _share(n, total)}
+        for name, n in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+    ]
 
 
 def _share(count: int, total: int) -> float:
@@ -233,6 +263,7 @@ def build_dashboard_payload(
         sector_rows: list = []
         category_rows: list = []
         source_rows: list = []
+        legacy_news_urls: list = []
         company_rows: list = []
         new_names = 0
         seen_watchlist = 0
@@ -244,7 +275,7 @@ def build_dashboard_payload(
             # different columns, and a single query would either repeat the
             # scan anyway or return a cross product to unpick in Python.
             (sector_rows, category_rows, source_rows, company_rows,
-             new_names, seen_watchlist, not_relevant) = read_parallel(target, [
+             new_names, seen_watchlist, not_relevant, legacy_news_urls) = read_parallel(target, [
                 fetch(
                     "SELECT sector, count(*) AS n FROM signals "
                     "WHERE classified_at IS NOT NULL AND substr(captured_at, 1, 10) = ?"
@@ -287,6 +318,12 @@ def build_dashboard_payload(
                 count(
                     "SELECT count(*) AS n FROM signals WHERE classified_at IS NOT NULL "
                     "AND COALESCE(sector, '') = 'other' "
+                    "AND substr(captured_at, 1, 10) = ?" + where_region, day),
+                # Articles stored under the old shared name "newsfeed", so they
+                # can be counted towards the publication they came from. Empty
+                # for any collection made since the publications were split.
+                fetch(
+                    "SELECT source_url FROM signals WHERE source_name = 'newsfeed' "
                     "AND substr(captured_at, 1, 10) = ?" + where_region, day),
             ])
     except Exception as exc:  # noqa: BLE001 - an empty dashboard beats a broken one
@@ -369,13 +406,7 @@ def build_dashboard_payload(
         #: Which collectors produced this week's signals. A source missing from
         #: this list contributed nothing, which is the fastest way to see a
         #: scraper that has quietly stopped working.
-        "sources": [
-            {"name": str(s["source_name"] or "unknown"),
-             "kind": str(s["source_type"] or ""),
-             "count": int(s["n"] or 0),
-             "share": _share(int(s["n"] or 0), sum(int(x["n"] or 0) for x in source_rows))}
-            for s in source_rows
-        ],
+        "sources": _sources(source_rows, legacy_news_urls),
         "companies": [
             {"name": str(c["company_name"]),
              "count": int(c["n"] or 0),

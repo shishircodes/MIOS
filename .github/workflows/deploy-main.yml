@@ -164,6 +164,19 @@ jobs:
         with:
           ref: ${{ needs.gate.outputs.sha }}
 
+      # The sign-in domain is a secret, and with it blank the API admits any
+      # Google account at all. So a missing secret stops the deploy here,
+      # before the server is touched, and the previous release keeps running.
+      - name: Check the sign-in domain is set
+        if: vars.PROD_AUTH_DISABLED != 'true'
+        env:
+          DOMAIN: ${{ secrets.ALLOWED_GOOGLE_DOMAIN }}
+        run: |
+          if [ -z "$DOMAIN" ]; then
+            echo "::error::The ALLOWED_GOOGLE_DOMAIN secret is not set. Add it under Settings > Secrets and variables > Actions > Secrets, then run the deploy again."
+            exit 1
+          fi
+
       - name: Copy compose file
         uses: appleboy/scp-action@v0.1.7
         with:
@@ -191,16 +204,14 @@ jobs:
             API_IMAGE=${{ needs.gate.outputs.image_base }}/api:${{ needs.gate.outputs.sha }}
             WEB_IMAGE=${{ needs.gate.outputs.image_base }}/web:${{ needs.gate.outputs.sha }}
             DATABASE_URL=${{ secrets.PROD_DATABASE_URL }}
-            GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}
-            GEMINI_MODEL=${{ vars.GEMINI_MODEL || 'gemini-2.5-flash' }}
-            ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}
-            # Encrypts the provider API keys entered in the Admin panel. Must
-            # stay stable: change it and every stored key becomes undecryptable
-            # (the panel says so rather than reporting them as absent). Without
-            # it the app runs normally on the keys above, and panel entry is
-            # disabled.
+            # Encrypts every key entered in the Admin panel — model providers,
+            # Slack, HubSpot, Google Docs, Apify. Those keys are set in the
+            # panel and nowhere else, so this is what makes them storable at
+            # all. Must stay stable: change it and every stored key becomes
+            # undecryptable (the panel says so rather than reporting them as
+            # absent). Without it the app still runs, with every one of those
+            # features reporting itself as not configured.
             MIOS_CREDENTIAL_KEY=${{ secrets.MIOS_CREDENTIAL_KEY }}
-            SLACK_WEBHOOK_URL=${{ secrets.SLACK_WEBHOOK_URL }}
             ADZUNA_APP_ID=${{ secrets.ADZUNA_APP_ID }}
             ADZUNA_APP_KEY=${{ secrets.ADZUNA_APP_KEY }}
             ADZUNA_COUNTRY=${{ vars.ADZUNA_COUNTRY || 'au' }}
@@ -211,7 +222,7 @@ jobs:
             GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }}
             GOOGLE_CLIENT_SECRET=${{ secrets.GOOGLE_CLIENT_SECRET }}
             SESSION_SECRET=${{ secrets.SESSION_SECRET }}
-            ALLOWED_GOOGLE_DOMAIN=${{ vars.ALLOWED_GOOGLE_DOMAIN }}
+            ALLOWED_GOOGLE_DOMAIN=${{ secrets.ALLOWED_GOOGLE_DOMAIN }}
             ALLOWED_EMAILS=${{ vars.ALLOWED_EMAILS }}
             # Set PROD_AUTH_DISABLED=true only while there is no domain/TLS:
             # Google refuses redirect URIs on a raw IP over http, so sign-in

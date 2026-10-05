@@ -1,7 +1,7 @@
 """The Slack digest, configured from Admin › Integrations.
 
-Pinned: the webhook is stored encrypted and never returned, the environment
-variable still works, switching the post off skips it without forgetting the
+Pinned: the webhook is stored encrypted and never returned, the panel is the
+only place it comes from, switching the post off skips it without forgetting the
 webhook, every delivery's outcome is recorded with Slack's own answer, and only
 administrators can change any of it. Slack itself is replaced by a fake.
 """
@@ -30,8 +30,7 @@ def db(tmp_path, monkeypatch):
     wl.write_text(json.dumps([]))
     path = tmp_path / "slack.db"
     init_db(path, watchlist_path=wl)
-    patched = dataclasses.replace(real_settings, db_path=path, database_url=None,
-                                  slack_webhook_url="")
+    patched = dataclasses.replace(real_settings, db_path=path, database_url=None)
     monkeypatch.setattr("loader.db.settings", patched)
     monkeypatch.setattr("config.settings.settings", patched)
     monkeypatch.setenv(credentials.KEY_ENV, "test-only-bootstrap-passphrase")
@@ -49,8 +48,7 @@ def test_a_stored_webhook_is_encrypted_and_never_returned(db):
     assert slack_config.webhook() == HOOK
     st = slack_config.status()
     assert HOOK not in json.dumps(st) and "test-only-secret" not in json.dumps(st)
-    assert st["webhook"] == {"source": "panel", "hint": "abcd", "shadowsEnvironment": False,
-                             "unreadable": False}
+    assert st["webhook"] == {"source": "panel", "hint": "abcd", "unreadable": False}
     with connect(db, readonly=True) as conn:
         rows = json.dumps([dict(r) for r in conn.execute("SELECT * FROM llm_credentials")])
     assert "test-only-secret" not in rows
@@ -62,16 +60,24 @@ def test_only_incoming_webhooks_are_accepted(db):
             slack_config.set_webhook(bad, changed_by="a")
 
 
-def test_the_environment_still_works_and_the_panel_wins(db):
-    assert slack_config.webhook(env_value=ENV_HOOK) == ENV_HOOK
+def test_the_panel_is_the_only_place_the_webhook_comes_from(db, monkeypatch):
+    """SLACK_WEBHOOK_URL used to be a fallback. A deployment that still sets it
+    posts nowhere until a webhook is added in the panel."""
+    monkeypatch.setenv("SLACK_WEBHOOK_URL", ENV_HOOK)
+    assert slack_config.webhook() == ""
+    assert slack_config.status()["webhook"]["source"] == "none"
+
     slack_config.set_webhook(HOOK, changed_by="a")
-    assert slack_config.webhook(env_value=ENV_HOOK) == HOOK
+    assert slack_config.webhook() == HOOK
+
     slack_config.clear_webhook()
-    assert slack_config.webhook(env_value=ENV_HOOK) == ENV_HOOK
+    assert slack_config.webhook() == ""
 
 
-def test_the_env_example_placeholder_counts_as_unset(db):
-    assert slack_config.webhook(env_value="https://hooks.slack.com/services/...") == ""
+def test_with_no_webhook_a_run_posts_nothing_and_carries_on(db):
+    with _slack() as post:
+        assert slack_config.deliver_digest("*digest*") is False
+    post.assert_not_called()
 
 
 def test_a_run_posts_the_digest_and_records_it(db):
@@ -108,12 +114,12 @@ def test_no_webhook_means_no_post(db):
 
 
 def test_the_pipeline_posts_through_the_panel_webhook(db, monkeypatch):
-    """The run reads the webhook set in the panel, not only SLACK_WEBHOOK_URL."""
+    """The run reads the webhook set in the panel."""
     from pipeline import live
 
     slack_config.set_webhook(HOOK, changed_by="a")
     monkeypatch.setattr("pipeline.live.settings",
-                        type("S", (), {"db_path": db, "slack_webhook_url": ""})())
+                        type("S", (), {"db_path": db})())
     with _slack() as post:
         summary = live.run_live_cycle(db_path=db, do_scrape=False, do_pulse=False,
                                       do_slack=True, gemini_caller=lambda *a, **k: [])

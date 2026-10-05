@@ -70,9 +70,14 @@ function SignalFeed() {
   // Built from the payload rather than a list kept here. A hardcoded copy
   // drifts the moment a scraper is added or renamed, and the failure is silent
   // — an option matching nothing, or a source with no way to reach it.
+  // Each option keeps the stored key as its value — that is what the server
+  // filters on — and shows the source's name from the catalogue. Sorted by
+  // that name, since it is the thing being read.
   const sourceOptions = useMemo(
-    () => ['ALL', ...(data?.sources ?? []).map((s) => s.toUpperCase())],
-    [data?.sources],
+    () => (data?.sources ?? [])
+      .map((s) => ({ value: s.toUpperCase(), label: data?.sourceLabels?.[s] ?? s }))
+      .sort((a, b) => a.label.localeCompare(b.label)),
+    [data?.sources, data?.sourceLabels],
   )
 
   const signals = data?.signals ?? []
@@ -118,8 +123,23 @@ function SignalFeed() {
           <FilterGroup label="Cycle" value={cycle} options={[...CYCLES]} onChange={setCycle} />
           {/* Hidden until the first payload arrives; rendering a lone "All"
               button would offer a filter that cannot filter. */}
-          {sourceOptions.length > 1 && (
-            <FilterGroup label="Source" value={source} options={sourceOptions} onChange={setSource} />
+          {/* A list rather than a row of buttons: there is one entry per
+              source, and a row of twenty does not fit any screen. */}
+          {sourceOptions.length > 0 && (
+            <label style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+              <span className="muted" style={{ fontSize: 11 }}>Source:</span>
+              <select
+                className="select"
+                style={{ fontSize: 12, padding: '3px 8px', maxWidth: 240 }}
+                value={source}
+                onChange={(e) => setSource(e.target.value)}
+              >
+                <option value="ALL">All sources</option>
+                {sourceOptions.map((o) => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </select>
+            </label>
           )}
 
           <div className="feed-search">
@@ -196,8 +216,8 @@ function SignalFeed() {
               </div>
               <div className="meta-col">
                 <div>conf {s.conf}</div>
-                <div style={{ color: 'var(--ink-3)' }}>{s.source}</div>
-                {s.publication && s.publication.toLowerCase() !== s.source.toLowerCase() && (
+                <div style={{ color: 'var(--ink-3)' }}>{s.sourceLabel ?? s.source}</div>
+                {s.publication && s.publication.toLowerCase() !== (s.sourceLabel ?? s.source).toLowerCase() && (
                   <div className="publication">{s.publication}</div>
                 )}
               </div>

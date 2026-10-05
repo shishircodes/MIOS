@@ -1,10 +1,11 @@
 import { Link, createFileRoute } from '@tanstack/react-router'
 import { prefetch } from '~/lib/query-client'
-import { pipelineSettingsQueryOptions } from '~/lib/api'
+import { pipelineSettingsQueryOptions, sourceConfigQueryOptions } from '~/lib/api'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { AdminOnly } from '~/components/AdminOnly'
 import { RunLimitsPanel } from '~/components/RunLimitsPanel'
+import { SourceOptionsPanel } from '~/components/SourceOptionsPanel'
 import { Section, PageSkeleton } from '~/components/ui'
 import { setSourceEnabled, sourceHealthQueryOptions } from '~/lib/api'
 import { useFigure, useReveal } from '~/lib/motion'
@@ -12,7 +13,7 @@ import type { SourceHealth, SourceStatus } from '~/lib/types'
 
 export const Route = createFileRoute('/sources')({
   head: () => ({ meta: [{ title: 'Data sources · MIOS' }] }),
-  loader: prefetch(sourceHealthQueryOptions, pipelineSettingsQueryOptions),
+  loader: prefetch(sourceHealthQueryOptions, pipelineSettingsQueryOptions, sourceConfigQueryOptions),
   component: () => (
     <AdminOnly>
       <SourcesScreen />
@@ -26,7 +27,7 @@ const STATUS: Record<SourceStatus, { label: string; cls: string; help: string }>
   ok: { label: 'Collecting', cls: 'ok', help: 'Ran recently and returned records.' },
   stale: { label: 'Stale', cls: 'warn', help: 'Has not collected anything lately.' },
   never_run: { label: 'No data yet', cls: 'warn', help: 'Configured, but has never returned a record.' },
-  not_configured: { label: 'Not configured', cls: 'off', help: 'Missing credentials, so it is skipped.' },
+  not_configured: { label: 'Not configured', cls: 'off', help: 'Missing a key or setting, so it is skipped.' },
   off: {
     label: 'Switched off',
     cls: 'off',
@@ -34,7 +35,22 @@ const STATUS: Record<SourceStatus, { label: string; cls: string; help: string }>
       + 'collected while it was on.',
   },
   retired: { label: 'Retired', cls: 'off', help: 'No longer collected; past records are kept.' },
+  // A source the guide lists that MIOS does not collect from. The row says why.
+  subscription: { label: 'Subscription', cls: 'off', help: 'A paid service; nothing can be read without a licence.' },
+  needs_key: { label: 'Needs a key', cls: 'off', help: 'Needs an account or API key that has not been supplied.' },
+  blocked: { label: 'Blocked', cls: 'off', help: 'The site forbids or refuses automated readers.' },
+  unreachable: { label: 'Unreachable', cls: 'warn', help: 'Did not answer when it was checked.' },
+  manual: { label: 'Documents only', cls: 'off', help: 'Published as reports or downloads, not as a feed.' },
+  connected: { label: 'Connected', cls: 'ok', help: 'Set up under Integrations.' },
+  planned: { label: 'Planned', cls: 'off', help: 'In the guide for a later phase.' },
 }
+
+const VIEWS = [
+  { key: 'all', label: 'All' },
+  { key: 'collected', label: 'Collected' },
+  { key: 'other', label: 'Not collected' },
+] as const
+type View = (typeof VIEWS)[number]['key']
 
 function ago(iso: string | null): string {
   if (!iso) return 'never'
@@ -44,6 +60,29 @@ function ago(iso: string | null): string {
   return `${days} days ago`
 }
 
+/** Name, and beneath it the sectors the guide gives for the source. */
+function NameCell({ s, cls }: { s: SourceHealth; cls: string }) {
+  return (
+    <div className="name">
+      <span className={`dot-${cls}`} aria-hidden="true" />
+      <span className="src-name">
+        {s.label}
+        <span className="src-sub">{s.sectors}</span>
+      </span>
+    </div>
+  )
+}
+
+function TypeCell({ s }: { s: SourceHealth }) {
+  return (
+    <div className="muted" title={s.provides}>
+      {s.kind} · {s.market}
+      {s.cost !== 'Free' && <div className="src-note">{s.cost}</div>}
+    </div>
+  )
+}
+
+/** A source MIOS collects from: its health, and its switch. */
 function SourceRow({
   s,
   limit,
@@ -65,11 +104,8 @@ function SourceRow({
 
   return (
     <div className="src-row">
-      <div className="name">
-        <span className={`dot-${st.cls}`} aria-hidden="true" />
-        <span style={{ marginLeft: 8 }}>{s.label}</span>
-      </div>
-      <div className="muted">
+      <NameCell s={s} cls={st.cls} />
+      <div className="muted" title={s.provides}>
         {s.kind} · {s.market}
         {s.note && <div className="src-note">{s.note}</div>}
       </div>
@@ -85,36 +121,50 @@ function SourceRow({
       <div className="muted mono" style={{ fontSize: 11 }}>{ago(s.lastSeen)}</div>
 
       <div className="src-toggle">
-        {s.status === 'retired' ? (
-          <span className="muted" style={{ fontSize: 11 }}>—</span>
-        ) : (
-          <label className="switch" title={
-            s.enabled
-              ? `Included in the next scrape${s.status === 'not_configured'
-                  ? ' — but it has no credentials, so it will collect nothing' : ''}`
-              : `Skipped${s.changedBy ? ` — switched off by ${s.changedBy}` : ''}`
-          }>
-            <input
-              type="checkbox"
-              checked={s.enabled}
-              disabled={busy}
-              onChange={(e) => onToggle(s.name, e.target.checked)}
-            />
-            <span className="switch-track" aria-hidden="true" />
-            {/* The word carries the state as well as the position, so it does
-                not depend on reading a small visual difference. */}
-            <span className="switch-label">{s.enabled ? 'On' : 'Off'}</span>
-          </label>
-        )}
+        <label className="switch" title={
+          s.enabled
+            ? `Included in the next scrape${s.status === 'not_configured'
+                ? ' — but it is not configured, so it will collect nothing' : ''}`
+            : `Skipped${s.changedBy ? ` — switched off by ${s.changedBy}` : ''}`
+        }>
+          <input
+            type="checkbox"
+            checked={s.enabled}
+            disabled={busy}
+            onChange={(e) => onToggle(s.name, e.target.checked)}
+          />
+          <span className="switch-track" aria-hidden="true" />
+          {/* The word carries the state as well as the position, so it does
+              not depend on reading a small visual difference. */}
+          <span className="switch-label">{s.enabled ? 'On' : 'Off'}</span>
+        </label>
       </div>
 
       {/* Spans the whole row rather than sitting in the toggle column, which is
           80px wide and rendered this one letter per line. The reason itself is
           in the page guide, and repeated as a warning if the switch is turned
           on — which is the moment it has to be read. */}
-      {shipsOff && !s.enabled && (
+      {/* Not for a source that is simply waiting on a key: its row already says
+          what it needs, and a second line would say it again. */}
+      {shipsOff && !s.enabled && s.status !== 'not_configured' && (
         <p className="src-why">Off by default for a known reason — the page guide explains it.</p>
       )}
+    </div>
+  )
+}
+
+/** A source in the guide that MIOS does not collect from: what stands in the
+ *  way, in place of figures it will never have. */
+function InfoRow({ s }: { s: SourceHealth }) {
+  const st = STATUS[s.status] ?? STATUS.planned
+  return (
+    <div className="src-row src-info">
+      <NameCell s={s} cls={st.cls} />
+      <TypeCell s={s} />
+      <div>
+        <span className={`status-chip ${st.cls}`} title={st.help}>{st.label}</span>
+      </div>
+      <div className="src-reason">{s.note}</div>
     </div>
   )
 }
@@ -124,6 +174,7 @@ function SourcesScreen() {
   const { data, isPending, error } = useQuery(sourceHealthQueryOptions)
   const [problem, setProblem] = useState<string | null>(null)
   const [caution, setCaution] = useState<string | null>(null)
+  const [view, setView] = useState<View>('all')
 
   const toggle = useMutation({
     mutationFn: (v: { name: string; enabled: boolean }) => setSourceEnabled(v.name, v.enabled),
@@ -144,16 +195,40 @@ function SourcesScreen() {
   const scope = useRef<HTMLDivElement>(null)
   const healthyRef = useFigure(data?.sources.filter((s) => s.status === 'ok').length ?? 0)
   const totalRef = useFigure(data?.totalRecords ?? 0, { delay: 0.1 })
-  useReveal(scope, '.src-row', { key: data?.sources.length ?? 0, delay: 0.12, max: 10 })
+  useReveal(scope, '.src-row', { key: `${data?.sources.length ?? 0}-${view}`, delay: 0.12, max: 10 })
+
+  // The guide's sections, each holding its sources under the guide's own
+  // sub-headings, in the order the server lists them.
+  const sections = useMemo(() => {
+    if (!data) return []
+    return data.categories.map((c) => {
+      const all = data.sources.filter((s) => s.category === c.key)
+      const shown = all.filter((s) =>
+        view === 'all' ? true : view === 'collected' ? s.collectable : !s.collectable)
+      const groups: { name: string; rows: SourceHealth[] }[] = []
+      for (const s of shown) {
+        const g = groups.find((x) => x.name === s.group)
+        if (g) g.rows.push(s)
+        else groups.push({ name: s.group, rows: [s] })
+      }
+      return {
+        ...c,
+        groups,
+        shown: shown.length,
+        total: all.length,
+        on: all.filter((s) => s.collectable && s.enabled).length,
+        anyCollected: shown.some((s) => s.collectable),
+      }
+    }).filter((c) => c.shown > 0)
+  }, [data, view])
 
   if (isPending) return <PageSkeleton kind="list" />
   if (error) return <div className="page"><div className="notice err">Could not load source health. {error.message}</div></div>
 
   const healthy = data.sources.filter((s) => s.status === 'ok').length
-  // "N of M collecting" now excludes switched-off sources, because they are
-  // not. It counted them whenever their last run was recent enough.
-  const live = data.sources.filter((s) => s.status !== 'retired')
-
+  const listed = data.sources.filter((s) => s.status !== 'retired').length
+  // The sources whose limits are worth showing: the ones the next run will use.
+  const active = data.sources.filter((s) => s.collectable && s.enabled).map((s) => s.name)
 
   return (
     <div className="page" ref={scope}>
@@ -164,7 +239,8 @@ function SourcesScreen() {
         </div>
         <div className="meta">
           <div>
-            <strong ref={healthyRef}>{healthy}</strong> of {live.length} collecting
+            <strong ref={healthyRef}>{healthy}</strong> of {data.collectableCount} collecting
+            {' · '}{listed} in the guide
           </div>
           <div style={{ marginTop: 4 }}>
             <span ref={totalRef}>{data.totalRecords.toLocaleString()}</span> records all time
@@ -195,38 +271,79 @@ function SourcesScreen() {
         </div>
       )}
 
-
-      <Section
-        title="Collectors"
-        tools={<span>{data.enabledCount} OF {live.length} ON FOR NEXT SCRAPE</span>}
-      >
-        {/* Eight columns do not fit a tablet or phone; they scroll sideways
-            inside the card rather than the card clipping the last ones. */}
-        <div className="src-scroll">
-        <div className="src-row src-head">
-          <div>Source</div>
-          <div>Type / market</div>
-          <div>Status</div>
-          <div className="num">Last run</div>
-          <div className="num">7 days</div>
-          <div className="num">All time</div>
-          <div>Last seen</div>
-          <div>Next scrape</div>
+      <div className="src-filter" role="group" aria-label="Which sources to show">
+        <span className="mono muted">Show</span>
+        <div className="seg">
+          {VIEWS.map((v) => (
+            <button
+              key={v.key}
+              className={`seg-btn${view === v.key ? ' on' : ''}`}
+              aria-pressed={view === v.key}
+              onClick={() => setView(v.key)}
+            >
+              {v.label}
+            </button>
+          ))}
         </div>
-        {data.sources.map((s) => (
-          <SourceRow
-            key={s.name}
-            s={s}
-            limit={s.limit ?? data.perSourceLimit}
-            busy={toggle.isPending}
-            onToggle={(name, enabled) => toggle.mutate({ name, enabled })}
-          />
-        ))}
-        </div>
-      </Section>
+        <span className="muted">
+          {data.enabledCount} of {data.collectableCount} on for the next scrape
+        </span>
+      </div>
 
-      <RunLimitsPanel labels={Object.fromEntries(data.sources.map((s) => [s.name, s.label]))} />
+      {sections.map((c) => (
+        <Section
+          key={c.key}
+          title={c.label}
+          tools={<span>{c.on > 0 ? `${c.on} ON · ` : ''}{c.total} LISTED</span>}
+        >
+          {/* Eight columns do not fit a tablet or phone; they scroll sideways
+              inside the card rather than the card clipping the last ones. */}
+          <div className={`src-scroll${c.anyCollected ? '' : ' src-plain'}`}>
+            {c.anyCollected ? (
+              <div className="src-row src-head">
+                <div>Source</div>
+                <div>Access / market</div>
+                <div>Status</div>
+                <div className="num">Last run</div>
+                <div className="num">7 days</div>
+                <div className="num">All time</div>
+                <div>Last seen</div>
+                <div>Next scrape</div>
+              </div>
+            ) : (
+              <div className="src-row src-info src-head">
+                <div>Source</div>
+                <div>Access / market</div>
+                <div>Status</div>
+                <div className="src-reason" style={{ font: 'inherit', color: 'inherit' }}>What stands in the way</div>
+              </div>
+            )}
+            {c.groups.map((g) => (
+              <div key={g.name}>
+                {/* The guide's own sub-heading. Left out when it would only
+                    repeat the section's name. */}
+                {(c.groups.length > 1 || g.name !== c.label) && (
+                  <div className="src-group">{g.name}</div>
+                )}
+                {g.rows.map((s) => s.collectable ? (
+                  <SourceRow
+                    key={s.name}
+                    s={s}
+                    limit={s.limit ?? data.perSourceLimit}
+                    busy={toggle.isPending}
+                    onToggle={(name, enabled) => toggle.mutate({ name, enabled })}
+                  />
+                ) : (
+                  <InfoRow key={s.name} s={s} />
+                ))}
+              </div>
+            ))}
+          </div>
+        </Section>
+      ))}
+
+      <SourceOptionsPanel />
+      <RunLimitsPanel active={active} />
     </div>
   )
 }
-

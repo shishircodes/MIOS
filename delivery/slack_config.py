@@ -1,17 +1,16 @@
 """Where the weekly digest goes in Slack, set from Admin › Integrations.
 
-The webhook used to live only in SLACK_WEBHOOK_URL, so pointing the digest at a
-new channel — or stopping it while a channel is reorganised — meant editing a
-deployment secret and redeploying. Now an administrator can do either from the
-panel, check it with a test message, and see how the last delivery went.
+An administrator points the digest at a channel — or stops it while a channel
+is reorganised — from the panel, checks it with a test message, and sees how
+the last delivery went. None of that needs a deployment.
 
 Same rules as every other key in the panel:
 
 * **The webhook is a secret.** Anyone holding the URL can post into the
   channel, so it is stored encrypted with MIOS_CREDENTIAL_KEY (see
   `loader.credentials`) and never returned — only its last four characters.
-* **The environment still works.** A URL entered in the panel wins; without
-  one, SLACK_WEBHOOK_URL is used exactly as before.
+* **The panel is the only place it is set.** There is no environment
+  fallback: with no webhook stored, nothing is posted and the run carries on.
 * **Switching it off does not forget the webhook.** The digest is still built
   and archived every run; only the post is skipped, and the history says so.
 """
@@ -28,7 +27,6 @@ from loader.db import connect
 log = logging.getLogger(__name__)
 
 KEY_NAME = "slack_webhook"
-KEY_ENV = "SLACK_WEBHOOK_URL"
 SETTINGS_KEY = "slack:digest"
 LAST_KEY = "slack:last_delivery"
 
@@ -75,24 +73,11 @@ def _kv_set(key: str, value: Any, target) -> None:
         )
 
 
-def env_webhook() -> str:
-    """SLACK_WEBHOOK_URL, with the .env.example placeholder read as unset."""
-    from config.settings import settings
-
-    return _usable(settings.slack_webhook_url)
-
-
-def _usable(url: str | None) -> str:
-    url = (url or "").strip()
-    return "" if not url or url.endswith("...") else url
-
-
-def webhook(target=None, env_value: str | None = None) -> str:
-    """The webhook in play: one entered in the panel, else the environment."""
+def webhook(target=None) -> str:
+    """The webhook entered in the panel, or "" when there is none."""
     from loader.credentials import key_for
 
-    env = _usable(env_value) if env_value is not None else env_webhook()
-    return key_for(KEY_NAME, env, target)
+    return key_for(KEY_NAME, target)
 
 
 def enabled(target=None) -> bool:
@@ -147,19 +132,15 @@ def set_enabled(on: bool, *, changed_by: str, target=None) -> None:
 # --------------------------------------------------------------------------
 
 
-def deliver_digest(text: str, *, target=None, env_value: str | None = None) -> bool:
-    """Post a run's digest, if Slack is set up and switched on. Returns delivered.
-
-    `env_value` lets the pipeline pass the webhook from its own settings, so a
-    caller that configures its environment explicitly is honoured.
-    """
+def deliver_digest(text: str, *, target=None) -> bool:
+    """Post a run's digest, if Slack is set up and switched on. Returns delivered."""
     from delivery.slack import post_message
 
     if not enabled(target):
         log.info("live: Slack digest switched off in Admin — not posted")
         _record("digest", False, "switched off in Admin — not posted", None, target)
         return False
-    url = webhook(target, env_value)
+    url = webhook(target)
     if not url:
         log.warning("live: no Slack webhook configured — skipping Slack delivery")
         return False
@@ -183,12 +164,11 @@ def status(target=None) -> dict[str, Any]:
     """What the panel shows. Never the webhook itself."""
     from loader.credentials import available, describe
 
-    key = describe(KEY_NAME, env_webhook(), target=target)
+    key = describe(KEY_NAME, target=target)
     stored = _kv_get(SETTINGS_KEY, target) or {}
     return {
-        "webhook": {k: key.get(k) for k in ("source", "hint", "shadowsEnvironment", "unreadable")},
+        "webhook": {k: key.get(k) for k in ("source", "hint", "unreadable")},
         "canStoreKey": available(),
-        "keyEnv": KEY_ENV,
         "enabled": enabled(target),
         "changedBy": stored.get("changedBy"),
         "changedAt": stored.get("changedAt"),

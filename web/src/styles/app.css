@@ -2255,6 +2255,50 @@ html:has(dialog.guide[open]) { overflow: hidden; }
 
 .key-result { margin: 12px 0 0; }
 
+/* Numbered setup steps inside a panel: the number is the order to do them in. */
+.step-no {
+  display: inline-grid; place-items: center; width: 20px; height: 20px; margin-right: 8px;
+  border-radius: 50%; background: var(--ink); color: var(--surface);
+  font-family: var(--mono); font-size: 11px; font-weight: 600; vertical-align: 1px;
+}
+
+/* Apify: one line per board, with its form opening underneath. */
+.apify-boards { margin-top: 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); }
+.apify-board { padding: 10px 12px; border-bottom: 1px solid var(--line); }
+.apify-board:last-child { border-bottom: 0; }
+.apify-board-head { display: grid; grid-template-columns: 1fr auto auto; gap: 12px; align-items: center; }
+.apify-board-name { font-weight: 600; font-size: 13.5px; }
+.apify-board .llm-meta { margin-top: 2px; }
+/* JSON and lists of codes: several lines, and no ellipsis. */
+textarea.apify-json { resize: vertical; min-height: 64px; line-height: 1.5; text-overflow: clip; width: 100%; }
+.apify-form-actions { grid-column: 2; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.gd-form .apify-form-actions .btn { grid-column: auto; }
+
+/* Source options: the ASX codes followed, and the custom feeds. */
+.ticker-list { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 10px; }
+.ticker {
+  font-family: var(--mono); font-size: 11.5px; padding: 1px 7px; color: var(--ink-2);
+  background: var(--surface-2); border: 1px solid var(--line-2); border-radius: var(--radius-sm);
+}
+.opt-form { flex-direction: column; align-items: stretch; }
+.opt-form .btn { align-self: flex-start; }
+.opt-select { flex: 0 0 auto; min-width: 0; width: max-content; font-family: var(--sans); }
+.feed-list { list-style: none; margin: 10px 0 0; padding: 0; border: 1px solid var(--line); border-radius: var(--radius-sm); }
+.feed-list li {
+  display: grid; grid-template-columns: minmax(140px, 220px) minmax(0, 1fr) auto; gap: 12px;
+  align-items: center; padding: 6px 12px; border-bottom: 1px solid var(--line);
+}
+.feed-list li:last-child { border-bottom: 0; }
+.feed-name { font-weight: 600; font-size: 13.5px; }
+.feed-url { font-size: 12px; color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 640px) {
+  .apify-board-head { grid-template-columns: 1fr auto; }
+  .apify-board-head .btn { grid-column: 1 / -1; justify-self: start; }
+  .apify-form-actions { grid-column: 1; }
+  .feed-list li { grid-template-columns: 1fr auto; }
+  .feed-url { grid-column: 1 / -1; grid-row: 2; }
+}
+
 /* Two fields (client ID and secret): label beside input, one pair per row. */
 .gd-form { display: grid; grid-template-columns: max-content 1fr; align-items: center; }
 .gd-form .btn { grid-column: 2; justify-self: start; }
@@ -2522,9 +2566,33 @@ html:has(dialog.guide[open]) { overflow: hidden; }
 /* The collectors grid has eight fixed columns — about 820px. Narrower than
    that it scrolls inside its card (see sources.tsx). */
 .src-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
-@media (max-width: 1150px) {
-  .src-scroll > .src-row { min-width: 820px; }
+@media (max-width: 1250px) {
+  .src-scroll .src-row { min-width: 920px; }
 }
+
+/* ---------- The source catalogue ----------
+   Every source in the data-sources guide, grouped under the guide's sections.
+   A collected source shows its figures and its switch; one that is not
+   collected shows what stands in the way, across the same columns. */
+/* Names are longer than the six the table was first drawn for ("Australian
+   Government Infrastructure Pipeline"), and each carries its sectors beneath. */
+.src-row { grid-template-columns: 216px 1fr 132px 76px 62px 72px 88px 74px; }
+.src-row .name { display: flex; align-items: flex-start; gap: 8px; }
+.src-row .name > [class^="dot-"] { margin-top: 6px; flex-shrink: 0; }
+.src-name { display: flex; flex-direction: column; min-width: 0; line-height: 1.3; }
+.src-sub { font-size: 11.5px; font-weight: 400; color: var(--muted); }
+/* The reason takes the columns the figures and the switch would have used. */
+.src-reason { grid-column: 4 / -1; font-size: 12.5px; color: var(--ink-3); line-height: 1.4; }
+/* A section with nothing collected has no figures to line up with, so the
+   reason gets the room instead. */
+.src-plain .src-row { grid-template-columns: 216px 190px 132px 1fr; }
+.src-group {
+  padding: 7px 16px; font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--ink-3); background: var(--surface-2);
+  border-bottom: 1px solid var(--line);
+}
+.src-filter { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 0 0 16px; font-size: 12.5px; }
+.src-filter .mono { font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; }
 
 /* Large monitors: the page may use more of the width. Prose inside it keeps
    its own measure (see .doc-body), so only the grids and tables widen. */

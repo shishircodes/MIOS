@@ -187,10 +187,8 @@ def rewrite(
 
     if gemini_caller is None:
         # No Gemini-specific key check: this purpose may be routed to another
-        # provider entirely, and asking about GEMINI_API_KEY would refuse a
-        # perfectly configured Claude — or, now that keys can be entered in the
-        # Admin panel, refuse a perfectly configured Gemini whose key simply is
-        # not in the environment. `caller_for` raises naming whatever is
+        # provider entirely, and asking for a Gemini key would refuse a
+        # perfectly configured Claude. `caller_for` raises naming whatever is
         # actually missing. Same fix as `delivery.pulse`.
         remaining = _remaining_quota(target)
         if remaining <= 0:

@@ -76,7 +76,7 @@ def _run(db, monkeypatch, *, pulse_ok=True):
     monkeypatch.setattr("pipeline.live.scrape_all", lambda **_kw: records)
     monkeypatch.setattr(
         "pipeline.live.settings",
-        type("S", (), {"db_path": db, "slack_webhook_url": ""})())
+        type("S", (), {"db_path": db})())
 
     outcome = (PulseOutcome(BULLETS, STATUS_GENERATED, None, 2) if pulse_ok
                else PulseOutcome([], "failed", "quota exhausted", 2))

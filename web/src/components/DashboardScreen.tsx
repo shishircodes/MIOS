@@ -841,7 +841,7 @@ export function DashboardScreen() {
             <div className="rail-body">
               <Composition
                 items={sources.map((s) => ({
-                  key: s.name, label: s.name, count: s.count, share: s.share,
+                  key: s.name, label: s.label ?? s.name, count: s.count, share: s.share,
                 }))}
                 total={sources.reduce((n, s) => n + s.count, 0)}
               />

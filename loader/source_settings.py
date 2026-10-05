@@ -33,40 +33,58 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from config.settings import settings
 from loader.db import connect
-from scraper import SOURCE_NAMES
+from scraper import SOURCE_NAMES, catalog
 
 log = logging.getLogger(__name__)
 
 
-#: Sources that start switched off. Absent means "on", which is every source
-#: that actually works from the deployed host.
+#: Sources that start switched off, and why. Both come from the catalogue, so a
+#: source and the explanation for its default are written in one place.
+#:
+#: The reason is shown beside the toggle and returned when somebody switches the
+#: source on: a default nobody can explain is one the next person quietly
+#: reverts, discovers nothing collected, and re-diagnoses from scratch.
 DEFAULT_ENABLED: dict[str, bool] = {
-    "seek": False,
+    src.id: False for src in catalog.COLLECTED if not src.default_enabled
 }
-
-#: Why a source ships switched off. Shown beside its toggle and returned when
-#: somebody switches it on: a default nobody can explain is one the next person
-#: quietly reverts, discovers nothing collected, and re-diagnoses from scratch.
 OFF_BY_DEFAULT_REASON: dict[str, str] = {
-    "seek": (
-        "SEEK returns HTTP 403 to this server's IP address, at their edge, "
-        "before the request reaches the site. Every request fails within "
-        "milliseconds however it is disguised - plain requests, browser "
-        "headers, and both Chrome and Firefox impersonation were all refused "
-        "identically - so this is a block on where MIOS is hosted, not on how "
-        "it asks. It is not a robots.txt matter: the category pages this "
-        "scraper reads are permitted, and the paths robots.txt disallows are "
-        "already refused by the scraper itself. Adzuna covers the same "
-        "Australian market through a licensed API and is unaffected. Turning "
-        "SEEK on only helps if MIOS has moved to a network SEEK does not "
-        "block; otherwise it collects nothing and only makes each run slower."
-    ),
+    src.id: src.off_reason for src in catalog.COLLECTED
+    if not src.default_enabled and src.off_reason
 }
 
 
-def default_enabled(source_name: str) -> bool:
-    """Whether a source collects when nobody has expressed a preference."""
+def configured(source_name: str, target: str | Path | None = None) -> tuple[bool, str | None]:
+    """Whether a source has what it needs to collect, and what is missing if not.
+
+    Here rather than in the admin API because the default below depends on it:
+    a source that needs a key is off until the key exists, and on once it does.
+    """
+    from loader import source_config
+
+    src = catalog.get(source_name)
+    if source_name == "adzuna" and not settings.adzuna_configured:
+        return False, "ADZUNA_APP_ID / ADZUNA_APP_KEY are not set, so this source is skipped."
+    if source_name == "newsfeed" and not source_config.custom_feeds(target):
+        return False, "No custom feeds yet. Add them under Source options below."
+    if src is not None and src.collector == catalog.APIFY:
+        from scraper import apify
+
+        return apify.configured(source_name, target)
+    return True, None
+
+
+def default_enabled(source_name: str, target: str | Path | None = None) -> bool:
+    """Whether a source collects when nobody has expressed a preference.
+
+    A source that waits on configuration — an Apify board, the custom feeds —
+    is off while that is missing and on once it is supplied: adding the actor
+    or the feed is the administrator saying they want it read.
+    """
+    src = catalog.get(source_name)
+    if src is not None and (src.collector == catalog.APIFY or source_name == "newsfeed"):
+        return configured(source_name, target)[0]
     return DEFAULT_ENABLED.get(source_name, True)
 
 
@@ -114,7 +132,7 @@ def enabled_sources(target: str | Path | None = None) -> list[str]:
     out: list[str] = []
     for name in SOURCE_NAMES:
         row = chosen.get(name)
-        on = bool(row["enabled"]) if row is not None else default_enabled(name)
+        on = bool(row["enabled"]) if row is not None else default_enabled(name, target)
         if on:
             out.append(name)
     return out
@@ -131,15 +149,17 @@ def list_settings(target: str | Path | None = None) -> dict[str, dict[str, Any]]
     for name in SOURCE_NAMES:
         row = chosen.get(name)
         out[name] = {
-            "enabled": bool(row["enabled"]) if row is not None else default_enabled(name),
+            "enabled": bool(row["enabled"]) if row is not None else default_enabled(name, target),
             "changedBy": (row or {}).get("changed_by"),
             "changedAt": (row or {}).get("changed_at"),
             "note": (row or {}).get("note"),
             #: What it would be had nobody touched it, and why — so the panel can
             #: explain a source that ships off instead of merely showing it off
             #: and inviting the next person to flip it back.
-            "defaultEnabled": default_enabled(name),
-            "offReason": OFF_BY_DEFAULT_REASON.get(name),
+            "defaultEnabled": default_enabled(name, target),
+            # Only while it ships off. An Apify board that has been given its
+            # key is on by default, and has nothing left to explain.
+            "offReason": None if default_enabled(name, target) else OFF_BY_DEFAULT_REASON.get(name),
         }
     return out
 
@@ -160,7 +180,7 @@ def set_enabled(
         )
 
     with connect(target) as conn:
-        if enabled == default_enabled(source_name):
+        if enabled == default_enabled(source_name, target):
             # Back at the default, so the deviation is deleted rather than
             # stored. That keeps the table a record of what somebody changed,
             # which is what lets a default be revised later without having to
