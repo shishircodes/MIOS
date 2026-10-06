@@ -376,7 +376,70 @@ def test_the_doc_html_carries_styles_docs_will_keep(db):
     assert 'page-break-before:always' in html
     assert "<table style=" in html and "<td style=" in html and "<th style=" in html
     assert "<style>" not in html, "Docs drops most of a stylesheet"
-    assert "<h2>1. Mining</h2>" in html
+    assert ">1. Mining</span></h2>" in html
+
+
+def _doc_text_and_fonts(html: str):
+    """Every piece of text in the Doc's markup, with the font and size of the
+    nearest element that sets one."""
+    import re
+    from html.parser import HTMLParser
+
+    found = []
+
+    class Walk(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.stack = []
+
+        def handle_starttag(self, tag, attrs):
+            if tag in ("meta", "br"):
+                return
+            self.stack.append((tag, dict(attrs).get("style") or ""))
+
+        def handle_endtag(self, tag):
+            while self.stack and self.stack.pop()[0] != tag:
+                pass
+
+        def handle_data(self, data):
+            if not data.strip() or any(t == "title" for t, _ in self.stack):
+                return
+            style = next((st for _, st in reversed(self.stack) if "font-family" in st), "")
+            family = re.search(r"font-family:([^;]+)", style)
+            size = re.search(r"font-size:([^;]+)", style)
+            found.append((data.strip(), self.stack[-1][0],
+                          family.group(1) if family else None, size.group(1) if size else None))
+
+    Walk().feed(html)
+    return found
+
+
+def test_every_piece_of_text_in_the_doc_names_one_font_and_a_size(db):
+    """The Doc used to set a font once, on the page, and leave the rest to
+    inheritance, which Docs does not reliably apply to headings, lists and
+    tables: it came out in two typefaces at sizes nobody chose."""
+    from api.publish_api import _to_docs_html
+
+    report = _report(status="approved")
+    report.update(approvedBy="boss@easyskill.com", approvedAt="2026-10-01T00:00:00+00:00")
+    report["sections"].append({"heading": "Outlook", "body":
+                               "### Next quarter\n\n- Hiring steady\n- Two tenders due\n\nA closing line."})
+    html = _to_docs_html(report)
+
+    texts = _doc_text_and_fonts(html)
+    assert len(texts) > 12
+    for text, tag, family, size in texts:
+        assert tag == "span", f"{text!r} sits directly in <{tag}>, where Docs may restyle it"
+        assert family == "Arial", f"{text!r} is in {family}"
+        assert size and size.endswith("pt"), f"{text!r} has no size in points"
+    assert "Georgia" not in html and "serif" not in html
+    assert "font-family:Arial," not in html, "one family, no fallback list for Docs to misread"
+
+    sizes = {text: size for text, _, _, size in texts}
+    assert sizes["Quarterly Market Report 2026-Q3"] == "24pt"
+    assert sizes["2. Outlook"] == "16pt" and sizes["Next quarter"] == "12pt"
+    assert sizes["Intro."] == sizes["Hiring steady"] == sizes["A closing line."] == "11pt"
+    assert sizes["x"] == sizes["A"] == "9.5pt", "table text a little smaller than the prose"
 
 
 def test_sending_a_report_before_connecting_is_a_clear_400(db, monkeypatch):

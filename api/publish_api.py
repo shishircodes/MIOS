@@ -333,10 +333,60 @@ monitored; none are estimated.</footer>
 #: Google Docs keeps inline styles on import and drops most of a <style> block,
 #: so the Doc gets its own markup: the same content, styled where Docs will
 #: honour it.
+#:
+#: **Every run of text names its own font.** The first version set Georgia once,
+#: on <body>, and left the rest to inheritance. Docs does not reliably carry a
+#: page-level font down into headings, list items and table cells, each of
+#: which has a default of its own (Arial), so a report came out in two typefaces
+#: at sizes nobody chose. Georgia also draws old-style numerals, which sit
+#: unevenly on the line, in a document that is mostly figures. So: one family,
+#: one that Docs always has, written on the paragraph and again on a span
+#: around its text, with every size given in points.
+_DOC_FONT = "Arial"
+_INK, _MUTED, _TEAL = "#1A2837", "#656E7C", "#0B7B7A"
+
+
+def _doc_run(size: float, *, color: str = _INK, bold: bool = False) -> str:
+    """The inline style for a run of text in the Doc."""
+    weight = "font-weight:bold;" if bold else ""
+    return f"font-family:{_DOC_FONT};font-size:{size:g}pt;color:{color};{weight}"
+
+
+_DOC_P = f'style="{_doc_run(11)}line-height:1.4;margin:0 0 8pt 0"'
+_DOC_LI = f'style="{_doc_run(11)}line-height:1.4"'
+_DOC_H3 = f'style="{_doc_run(12, bold=True)}margin:14pt 0 4pt 0"'
 _DOC_TABLE = 'style="border-collapse:collapse;width:100%"'
-_DOC_TH = 'style="background:#EEF3F2;border:1px solid #C9D3D1;padding:4px 6px;text-align:left"'
-_DOC_TD = 'style="border:1px solid #DDE3E2;padding:4px 6px"'
+_DOC_TH = (f'style="{_doc_run(9.5, bold=True)}background:#EEF3F2;border:1px solid #C9D3D1;'
+           'padding:4px 6px;text-align:left"')
+_DOC_TD = f'style="{_doc_run(9.5)}border:1px solid #DDE3E2;padding:4px 6px"'
 _PAGE_BREAK = '<p style="page-break-before:always"></p>'
+
+
+def _doc_el(tag: str, inner: str, size: float, *, color: str = _INK, bold: bool = False,
+            extra: str = "") -> str:
+    """One element of the Doc, its font on the element and on its text."""
+    run = _doc_run(size, color=color, bold=bold)
+    return f'<{tag} style="{run}{extra}"><span style="{run}">{inner}</span></{tag}>'
+
+
+def _doc_body(html: str) -> str:
+    """Style a section body from `_blocks_to_html` for Docs.
+
+    That function writes bare tags and escapes everything inside them, so a tag
+    here is always markup and never part of the text.
+    """
+    import re
+
+    def styled(tag: str, attrs: str, size: float, bold: bool = False):
+        run = _doc_run(size, bold=bold)
+        return lambda m: f'<{tag} {attrs}><span style="{run}">{m.group(1)}</span></{tag}>'
+
+    html = html.replace("<table>", f"<table {_DOC_TABLE}>")
+    for tag, attrs, size, bold in (("p", _DOC_P, 11, False), ("li", _DOC_LI, 11, False),
+                                   ("h3", _DOC_H3, 12, True), ("th", _DOC_TH, 9.5, True),
+                                   ("td", _DOC_TD, 9.5, False)):
+        html = re.sub(rf"<{tag}>(.*?)</{tag}>", styled(tag, attrs, size, bold), html, flags=re.S)
+    return html
 
 
 def _to_docs_html(report: dict[str, Any]) -> str:
@@ -346,31 +396,30 @@ def _to_docs_html(report: dict[str, Any]) -> str:
     draft = report["status"] != "approved"
     out = []
     if draft:
-        out.append('<p style="background:#FDF3D3;color:#6B4F00;font-weight:bold;padding:6px">'
-                   "DRAFT — NOT APPROVED FOR DISTRIBUTION</p>")
-    out.append('<p style="color:#0B7B7A;letter-spacing:2px;font-size:9pt">'
-               "EASY SKILL AUSTRALIA · MARKET INTELLIGENCE</p>")
-    out.append(f'<h1>{escape(report["title"])}</h1>')
-    out.append(f'<p style="color:#656E7C">Australia · Papua New Guinea · {escape(report["quarter"])} · '
-               f'{report["signalsAnalysed"]} signals analysed</p>')
+        out.append(_doc_el("p", "DRAFT — NOT APPROVED FOR DISTRIBUTION", 11, color="#6B4F00",
+                           bold=True, extra="background:#FDF3D3;padding:6px"))
+    out.append(_doc_el("p", "EASY SKILL AUSTRALIA · MARKET INTELLIGENCE", 9, color=_TEAL, bold=True))
+    out.append(_doc_el("h1", escape(report["title"]), 24, bold=True, extra="margin:6pt 0 6pt 0"))
+    out.append(_doc_el("p", f'Australia · Papua New Guinea · {escape(report["quarter"])} · '
+                            f'{report["signalsAnalysed"]} signals analysed', 10, color=_MUTED))
     if not draft and report.get("approvedBy"):
-        out.append(f'<p style="color:#656E7C">Approved by {escape(report["approvedBy"])} '
-                   f'on {escape((report.get("approvedAt") or "")[:10])}</p>')
-    out.append(_PAGE_BREAK + "<h2>Contents</h2><ol>" + "".join(
-        f"<li>{escape(s['heading'])}</li>" for s in report["sections"]) + "</ol>")
+        out.append(_doc_el("p", f'Approved by {escape(report["approvedBy"])} '
+                                f'on {escape((report.get("approvedAt") or "")[:10])}', 10, color=_MUTED))
+    out.append(_PAGE_BREAK + _doc_el("h2", "Contents", 16, bold=True) + "<ol>" + "".join(
+        _doc_el("li", escape(s["heading"]), 11, extra="line-height:1.6")
+        for s in report["sections"]) + "</ol>")
     for i, s in enumerate(report["sections"], start=1):
         if s["heading"] not in _SAME_PAGE:
             out.append(_PAGE_BREAK)
-        body = _blocks_to_html(s["body"].strip() or "This section has not been written.")
-        body = (body.replace("<table>", f"<table {_DOC_TABLE}>")
-                    .replace("<th>", f"<th {_DOC_TH}>")
-                    .replace("<td>", f"<td {_DOC_TD}>"))
-        out.append(f'<h2>{i}. {escape(s["heading"])}</h2>{body}')
-    out.append('<p style="color:#656E7C;font-size:9pt;margin-top:24px">Generated by MIOS. Figures '
-               "are counts of activity detected in the sources monitored; none are estimated.</p>")
+        body = _doc_body(_blocks_to_html(s["body"].strip() or "This section has not been written."))
+        out.append(_doc_el("h2", f'{i}. {escape(s["heading"])}', 16, bold=True,
+                           extra="margin:18pt 0 6pt 0") + body)
+    out.append(_doc_el("p", "Generated by MIOS. Figures are counts of activity detected in the "
+                            "sources monitored; none are estimated.", 9, color=_MUTED,
+                       extra="margin-top:24px"))
     return ('<!doctype html><html><head><meta charset="utf-8">'
             f'<title>{escape(report["title"])}</title></head>'
-            '<body style="font-family:Georgia,serif;color:#1A2837">' + "".join(out) + "</body></html>")
+            f'<body style="{_doc_run(11)}">' + "".join(out) + "</body></html>")
 
 
 @router.get("/reports/{report_id}/google-docs")
