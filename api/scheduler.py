@@ -73,6 +73,13 @@ DUE_MARGIN_SECONDS = 5
 #: one.
 HEARTBEAT_SECONDS = 60
 
+#: Waits before trying a run again after its database connection dropped. A
+#: dropped connection is almost always the database's side of a wake-up or a
+#: network blip, and a fresh one a minute later works. Collecting again is safe:
+#: records already stored are recognised by their address and skipped, and
+#: classification only reads what is still waiting.
+CONNECTION_RETRY_WAITS: tuple[float, ...] = (30.0, 120.0)
+
 
 async def _beat(run_id: str) -> None:
     """Refresh the lease until cancelled."""
@@ -82,6 +89,29 @@ async def _beat(run_id: str) -> None:
             await asyncio.to_thread(run_log.heartbeat, run_id)
     except asyncio.CancelledError:
         pass
+
+
+async def _with_connection_retry(run_id: str, cycle) -> dict[str, Any]:
+    """Run the cycle, trying again if the database connection dropped.
+
+    Only a lost connection is retried. Any other failure is a real one and is
+    reported at once, as before.
+    """
+    from loader.db import is_connection_lost
+
+    attempt = 0
+    while True:
+        try:
+            return await asyncio.to_thread(cycle)
+        except Exception as exc:  # noqa: BLE001 - classified, then retried or re-raised
+            if not is_connection_lost(exc) or attempt >= len(CONNECTION_RETRY_WAITS):
+                raise
+            wait = CONNECTION_RETRY_WAITS[attempt]
+            attempt += 1
+            log.warning("scheduler: run %s lost its database connection (%s); trying again "
+                        "in %.0fs (attempt %d of %d)", run_id, exc, wait, attempt + 1,
+                        len(CONNECTION_RETRY_WAITS) + 1)
+            await asyncio.sleep(wait)
 
 
 async def execute_run(run_id: str) -> dict[str, Any]:
@@ -101,7 +131,7 @@ async def execute_run(run_id: str) -> dict[str, Any]:
         # The run id goes down with it: the cycle stamps every signal with it
         # and stores the digest under it. Without this the cycle would try to
         # open a second run and be refused by the lease this one holds.
-        summary = await asyncio.to_thread(lambda: run_live_cycle(run_id=run_id))
+        summary = await _with_connection_retry(run_id, lambda: run_live_cycle(run_id=run_id))
     except Exception as exc:  # noqa: BLE001 - recorded, then re-raised
         await asyncio.to_thread(
             run_log.finish, run_id, status=run_log.STATUS_FAILED, note=repr(exc)
