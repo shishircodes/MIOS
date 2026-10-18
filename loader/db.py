@@ -391,6 +391,32 @@ def close_pool() -> None:
 atexit.register(close_pool)
 
 
+#: What PostgreSQL drivers say when the connection itself went away, as
+#: opposed to a query being wrong. Compared in lower case.
+_CONNECTION_LOST = (
+    "ssl connection has been closed", "server closed the connection",
+    "consuming input failed", "connection is closed", "terminating connection",
+    "could not receive data", "connection reset", "connection timed out",
+    "the connection is lost", "connection refused",
+)
+
+
+def is_connection_lost(exc: BaseException) -> bool:
+    """Whether a failure was the database connection dropping, which a fresh
+    connection usually fixes, and not something wrong with the query itself.
+
+    On 19 Oct 2026 the scheduled run failed fifteen seconds in with
+    "consuming input failed: SSL connection has been closed unexpectedly": a
+    connection to Neon dropped as the week's first queries woke the database.
+    Nothing was wrong with the run, and trying again would have worked.
+    """
+    name = type(exc).__name__
+    if name not in ("OperationalError", "InterfaceError", "ConnectionError", "PoolTimeout"):
+        return False
+    message = str(exc).lower()
+    return any(m in message for m in _CONNECTION_LOST)
+
+
 @contextmanager
 def connect(target: str | Path | None = None, *, readonly: bool = False) -> Iterator[Connection]:
     """Open a connection to Postgres or SQLite and commit on clean exit.
